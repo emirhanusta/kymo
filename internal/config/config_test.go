@@ -86,3 +86,14 @@ func TestNoSourcesIsValid(t *testing.T) {
 		t.Fatalf("empty sources: %+v %v", cfg, err)
 	}
 }
+
+func TestCrashLogsNormalized(t *testing.T) {
+	got := CrashLogsConfig{Enabled: true, TailLines: 99999, MaxBytes: 0}.normalized()
+	if got.TailLines != MaxCrashLogTailLines || got.MaxBytes != DefaultCrashLogMaxBytes {
+		t.Fatalf("normalized = %+v", got)
+	}
+	got = CrashLogsConfig{TailLines: 10, MaxBytes: 1 << 30}.normalized()
+	if got.TailLines != 10 || got.MaxBytes != MaxCrashLogMaxBytes {
+		t.Fatalf("normalized = %+v", got)
+	}
+}

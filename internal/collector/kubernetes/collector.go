@@ -32,6 +32,16 @@ const (
 	// statsTimeout caps a single metrics-server request.
 	statsTimeout = 10 * time.Second
 
+	// crashLogTimeout caps one crash-log fetch (including the Previous fallback).
+	crashLogTimeout = 10 * time.Second
+
+	// maxTrackedCrashLogs bounds the crash-log de-duplication set; it is
+	// cleared entirely when exceeded.
+	maxTrackedCrashLogs = 5000
+
+	// maxConcurrentCrashLogFetches limits simultaneous log requests.
+	maxConcurrentCrashLogFetches = 4
+
 	// maxConcurrentStatsFetches limits simultaneous metrics-server calls.
 	maxConcurrentStatsFetches = 8
 )
@@ -80,6 +90,7 @@ type Collector struct {
 	kubeconfigData []byte
 	kubeContext    string
 	pollInterval   time.Duration
+	crashLogs      CrashLogOptions
 
 	clientset        kubernetes.Interface
 	metricsAvailable bool // true when metrics-server is reachable
@@ -100,6 +111,14 @@ type Collector struct {
 	// (internally synchronised).
 	owners *ownerResolver
 
+	// logged de-duplicates crash-log fetches by container + termination time.
+	// Guarded by logMu, which also guards stopped (set by Stop before it waits
+	// on wg, so no goroutine is added once the wait has begun).
+	logMu   sync.Mutex
+	logged  map[string]struct{}
+	stopped bool
+	logSem  chan struct{}
+
 	events chan collector.CollectorEvent
 	// eventsMu guards closed: emit holds it for reading while sending, Stop takes
 	// it for writing before closing events, so no send can hit a closed channel
@@ -116,11 +135,15 @@ type Collector struct {
 //   - kubeconfigData: raw kubeconfig content (takes precedence over kubeconfigPath when non-empty).
 //   - kubeContext: named context in the kubeconfig to use, or "" for the current-context.
 //   - pollInterval: how often to query the metrics-server. Pass 0 for the default (30 s).
-func New(log *zap.Logger, sourceName, kubeconfigPath string, kubeconfigData []byte, kubeContext string, pollInterval time.Duration) *Collector {
+//   - opts: optional behaviour such as crash-log capture (zero value = defaults, capture off).
+func New(log *zap.Logger, sourceName, kubeconfigPath string, kubeconfigData []byte, kubeContext string, pollInterval time.Duration, opts Options) *Collector {
 	if pollInterval <= 0 {
 		pollInterval = defaultPollInterval
 	}
 	return &Collector{
+		crashLogs:      opts.CrashLogs.normalized(),
+		logged:         make(map[string]struct{}),
+		logSem:         make(chan struct{}, maxConcurrentCrashLogFetches),
 		log:            log,
 		sourceName:     sourceName,
 		kubeconfigPath: kubeconfigPath,
@@ -233,6 +256,9 @@ func (c *Collector) Stop() error {
 	if c.cancel != nil {
 		c.cancel()
 	}
+	c.logMu.Lock()
+	c.stopped = true
+	c.logMu.Unlock()
 	c.wg.Wait()
 	// Wait for informer goroutines (and their event handlers) to exit. Without
 	// this, handlers delivering the initial pod list can still be running when
@@ -694,7 +720,8 @@ func (c *Collector) handleTermination(
 	// eviction, node drain) exits non-zero after SIGTERM/SIGKILL, but that is a
 	// planned stop, not a crash. Counting it would add fake crashes to every
 	// deploy. OOM kills are still reported above.
-	terminating := pod.DeletionTimestamp != nil && t.Reason != "OOMKilled"
+	podDeleting := pod.DeletionTimestamp != nil
+	terminating := podDeleting && t.Reason != "OOMKilled"
 	switch {
 	case terminating:
 		evtType = model.EventTypeStop
@@ -720,6 +747,12 @@ func (c *Collector) handleTermination(
 	}
 
 	c.emitLifecycle(ctx, ct, evtType, exitCode, pod.Spec.NodeName, meta, finishedAt)
+
+	// Snapshot the container's logs for crashes and OOM kills (never for
+	// clean exits or when the pod is being deleted).
+	if !podDeleting && (evtType == model.EventTypeCrash || t.Reason == "OOMKilled") {
+		c.captureCrashLog(ctx, pod, cs, t, finishedAt)
+	}
 
 	// Emit a CronJob execution record when the container is owned by a CronJob.
 	if wl.Kind == model.WorkloadCronJob && wl.CronJobName != "" {
@@ -1006,7 +1039,29 @@ func buildContainerModel(sourceName string, pod *corev1.Pod, containerName, imag
 		WorkloadKind:  wl.Kind,
 		WorkloadName:  wl.Name,
 		IsSystem:      wl.IsSystem,
+		Revision:      podRevision(pod, wl),
 	}
+}
+
+// podRevision returns the rollout revision of a pod: pod-template-hash
+// (Deployment/ReplicaSet), controller-revision-hash (StatefulSet/DaemonSet) or
+// the Job name for Job/CronJob pods. Empty when unknown.
+func podRevision(pod *corev1.Pod, wl WorkloadInfo) string {
+	if v := pod.Labels["pod-template-hash"]; v != "" {
+		return v
+	}
+	if v := pod.Labels["controller-revision-hash"]; v != "" {
+		return v
+	}
+	if wl.Kind == model.WorkloadJob || wl.Kind == model.WorkloadCronJob {
+		if wl.JobName != "" {
+			return wl.JobName
+		}
+		if wl.Kind == model.WorkloadJob {
+			return wl.Name
+		}
+	}
+	return ""
 }
 
 // containerStateToStatus maps a Kubernetes ContainerState to our ContainerStatus.

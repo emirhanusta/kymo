@@ -117,6 +117,19 @@ type RecorderService interface {
 	// GetWorkloadResources returns usage summed over all instances, bucketed.
 	GetWorkloadResources(ctx context.Context, id string, from, to time.Time) ([]*model.ResourceSample, error)
 
+	// --- Crash logs and revisions ---
+
+	// GetWorkloadCrashLogs returns the newest crash-log snapshots across a
+	// workload's instances. limit is clamped to [1, 50] (default 10).
+	GetWorkloadCrashLogs(ctx context.Context, workloadID string, limit int) ([]*model.CrashLog, error)
+	// GetContainerCrashLogs returns a container's newest snapshots (default 20, max 50).
+	GetContainerCrashLogs(ctx context.Context, containerID string, limit int) ([]*model.CrashLog, error)
+	// GetContainerCrashLogAt returns the snapshot for the termination at the
+	// given time (within crashLogTolerance), or (nil, nil).
+	GetContainerCrashLogAt(ctx context.Context, containerID string, at time.Time) (*model.CrashLog, error)
+	// GetWorkloadRevisions returns the workload's revisions, newest first.
+	GetWorkloadRevisions(ctx context.Context, workloadID string) ([]model.Revision, error)
+
 	// --- Source registry ---
 
 	// AttachSource registers a source and its collector. c may be nil when the
@@ -201,6 +214,7 @@ type recorderService struct {
 	scores     repository.ScoreRepository
 	cronJobs   repository.CronJobRepository
 	workloads  repository.WorkloadRepository
+	crashLogs  repository.CrashLogRepository
 	scorer     stability.StabilityScorer
 	scoring    ScoringConfig
 	log        *zap.Logger
@@ -259,6 +273,7 @@ func NewRecorderService(
 	scores repository.ScoreRepository,
 	cronJobs repository.CronJobRepository,
 	workloads repository.WorkloadRepository,
+	crashLogs repository.CrashLogRepository,
 	scoring ScoringConfig,
 	log *zap.Logger,
 ) RecorderService {
@@ -275,6 +290,7 @@ func NewRecorderService(
 		scores:     scores,
 		cronJobs:   cronJobs,
 		workloads:  workloads,
+		crashLogs:  crashLogs,
 		scorer:     stability.NewScorer(events, resources, scores, log),
 		scoring:    scoring,
 		log:        log,
@@ -535,6 +551,8 @@ func (s *recorderService) dispatch(ctx context.Context, event collector.Collecto
 		s.handleResource(ctx, event)
 	case collector.CollectorEventState:
 		s.handleState(ctx, event)
+	case collector.CollectorEventCrashLog:
+		s.handleCrashLog(ctx, event)
 	}
 }
 
@@ -660,6 +678,35 @@ func (s *recorderService) handleResource(ctx context.Context, event collector.Co
 		zap.Float64("cpu_percent", event.Sample.CPUPercent),
 		zap.Int64("mem_bytes", event.Sample.MemBytes),
 	)
+}
+
+// handleCrashLog stores a crash-log snapshot. The container row must already
+// exist (the crash/OOM lifecycle event normally created it); otherwise the
+// snapshot is dropped. Duplicates for the same termination are ignored by the
+// repository.
+func (s *recorderService) handleCrashLog(ctx context.Context, event collector.CollectorEvent) {
+	cl := event.CrashLog
+	if cl == nil || s.crashLogs == nil {
+		return
+	}
+	if cl.ContainerID == "" {
+		cl.ContainerID = event.Container.ID
+	}
+	if cl.SourceName == "" {
+		cl.SourceName = event.SourceName
+	}
+	ct, err := s.containers.FindByID(ctx, cl.ContainerID)
+	if err != nil {
+		s.log.Error("failed to look up container for crash log", zap.String("container_id", cl.ContainerID), zap.Error(err))
+		return
+	}
+	if ct == nil {
+		s.log.Debug("dropping crash log for unknown container", zap.String("container_id", cl.ContainerID))
+		return
+	}
+	if err := s.crashLogs.Save(ctx, cl); err != nil {
+		s.log.Error("failed to save crash log", zap.String("container_id", cl.ContainerID), zap.Error(err))
+	}
 }
 
 func (s *recorderService) handleCronJob(ctx context.Context, event collector.CollectorEvent) {
@@ -945,4 +992,35 @@ func (s *recorderService) GetRecentEvents(ctx context.Context, q repository.Even
 		q.Limit = 20
 	}
 	return s.events.FindRecent(ctx, q)
+}
+
+// crashLogTolerance is how far a requested occurred_at may differ from the
+// stored termination time (clients round-trip timestamps through JSON).
+const crashLogTolerance = 2 * time.Second
+
+func clampLimit(n, def, max int) int {
+	if n <= 0 {
+		return def
+	}
+	return min(n, max)
+}
+
+func (s *recorderService) GetWorkloadCrashLogs(ctx context.Context, workloadID string, limit int) ([]*model.CrashLog, error) {
+	return s.crashLogs.FindByWorkload(ctx, workloadID, clampLimit(limit, 10, 50))
+}
+
+func (s *recorderService) GetContainerCrashLogs(ctx context.Context, containerID string, limit int) ([]*model.CrashLog, error) {
+	return s.crashLogs.FindByContainer(ctx, containerID, clampLimit(limit, 20, 50))
+}
+
+func (s *recorderService) GetContainerCrashLogAt(ctx context.Context, containerID string, at time.Time) (*model.CrashLog, error) {
+	return s.crashLogs.FindByContainerAt(ctx, containerID, at, crashLogTolerance)
+}
+
+func (s *recorderService) GetWorkloadRevisions(ctx context.Context, workloadID string) ([]model.Revision, error) {
+	members, err := s.containers.FindAll(ctx, repository.ContainerFilter{WorkloadID: workloadID})
+	if err != nil {
+		return nil, err
+	}
+	return model.BuildRevisions(members), nil
 }

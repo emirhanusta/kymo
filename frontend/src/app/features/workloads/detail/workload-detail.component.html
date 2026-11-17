@@ -53,6 +53,9 @@
       }
       <div class="flex gap-2" [title]="w.first_seen_at"><dt class="k-label">first seen</dt><dd class="text-kymo-ink">{{ w.first_seen_at | timeago }}</dd></div>
       <div class="flex gap-2" [title]="w.last_seen_at"><dt class="k-label">last seen</dt><dd class="text-kymo-ink">{{ w.last_seen_at | timeago }}</dd></div>
+      @if (score(); as s) {
+        <div class="flex gap-2"><dt class="k-label">score</dt><dd class="font-semibold tabular-nums" [class]="s.score | scoreClass">{{ s.score | number:'1.0-0' }}</dd></div>
+      }
     </dl>
 
     <!-- Kind-specific: Deployment -->
@@ -102,96 +105,74 @@
       </section>
     }
 
-    <!-- Stability + Events -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <section class="k-panel k-paper p-5" aria-labelledby="wl-score-title">
-        <h2 id="wl-score-title" class="k-label mb-5">Stability score</h2>
-        @if (score(); as s) {
-          <div class="flex flex-col items-center gap-5">
-            <app-stability-gauge [score]="s.score" [size]="140" />
-            <div class="w-full grid grid-cols-3 border border-kymo-rule divide-x divide-kymo-rule bg-kymo-panel text-center" aria-label="Counts in the scoring window (24h)">
-              <div class="py-2"><p class="k-label">Restarts 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.restarts ? 'text-kymo-ink' : 'text-kymo-faint'">{{ s.restarts }}</p></div>
-              <div class="py-2"><p class="k-label">Crashes 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.crashes ? 'text-kymo-danger' : 'text-kymo-faint'">{{ s.crashes }}</p></div>
-              <div class="py-2"><p class="k-label">OOMs 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.ooms ? 'text-kymo-amber' : 'text-kymo-faint'">{{ s.ooms }}</p></div>
-            </div>
-            <div class="w-full space-y-2.5 bg-kymo-panel border border-kymo-rule p-3">
-              @for (p of penalties(); track p.name) {
-                <div class="flex items-center justify-between">
-                  <span class="k-label">{{ p.name }} penalty</span>
-                  <span class="text-xs tabular-nums" [class]="p.value > 0 ? 'text-kymo-ink' : 'text-kymo-faint'">{{ p.value > 0 ? '−' : '' }}{{ p.value | number:'1.2-2' }}</span>
-                </div>
-              }
-              <div class="border-t border-kymo-rule pt-2.5 flex items-baseline justify-between">
-                <span class="k-label !text-kymo-ink">Final score</span>
-                <span class="text-2xl font-semibold tabular-nums" [class]="s.score | scoreClass">{{ s.score | number:'1.1-1' }}</span>
-              </div>
-            </div>
-            @if (spark(); as sp) {
-              <div class="w-full">
-                <div class="flex items-baseline justify-between mb-1">
-                  <span class="k-label">History</span>
-                  <span class="text-[11px] text-kymo-faint tabular-nums">{{ sp.count }} pt{{ sp.count === 1 ? '' : 's' }} · {{ sp.min | number:'1.0-0' }}–{{ sp.max | number:'1.0-0' }}</span>
-                </div>
-                <svg viewBox="0 0 200 44" class="w-full h-11 bg-kymo-panel border border-kymo-rule" preserveAspectRatio="none" role="img"
-                     [attr.aria-label]="'Score history, oldest to newest, ' + sp.count + ' points, latest ' + (s.score | number:'1.0-0')">
-                  <line x1="0" y1="22" x2="200" y2="22" stroke="var(--color-kymo-grid)" stroke-width="1" vector-effect="non-scaling-stroke" />
-                  @if (!sp.single) {
-                    <polyline [attr.points]="sp.points" fill="none" [attr.stroke]="sp.color" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
-                  }
-                  <circle [attr.cx]="sp.lastX" [attr.cy]="sp.lastY" r="2" [attr.fill]="sp.color" />
-                </svg>
-              </div>
-            }
-          </div>
-        } @else {
-          <app-empty-state icon="chart" message="No score yet" hint="Workload stability scores are computed periodically from lifecycle history." />
-        }
-      </section>
+    <!-- Last crash -->
+    <app-last-crash-card [crashEvents]="ctx().crashEvents" [logs]="ctx().logs" [revisions]="ctx().revisions" />
 
-      <section class="k-panel p-5 flex flex-col" aria-labelledby="wl-events-title">
-        <div class="flex items-center justify-between mb-3">
-          <h2 id="wl-events-title" class="k-label">Lifecycle events</h2>
-          @if (events().length) {
-            <span class="text-[11px] text-kymo-faint">{{ events().length }}{{ hasMoreEvents() ? '+' : '' }} · newest first</span>
-          }
-        </div>
-        @if (events().length === 0) {
-          <app-empty-state icon="events" message="No events recorded" hint="Start, stop and crash events of every pod and container will appear here." />
-        } @else {
-          <ol class="max-h-[34rem] overflow-y-auto scrollbar-thin pr-2">
-            @for (ev of events(); track ev.id) {
-              <li class="border-b border-kymo-rule last:border-0">
-                <a [routerLink]="containerRoute(ev.container_id, ev.runtime)" class="flex items-start gap-3 py-2 hover:bg-kymo-raised/60 transition-colors group">
-                  <span class="k-led mt-1.5" [class]="eventDot(ev)"></span>
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 flex-wrap">
-                      <span class="text-xs font-medium uppercase tracking-wide" [class]="eventText(ev)">{{ eventLabel(ev) }}</span>
-                      @if (showsExit(ev)) {
-                        <span class="text-[11px] text-kymo-danger border border-kymo-danger/40 px-1.5 tabular-nums">exit {{ ev.exit_code }}</span>
-                      }
-                      <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="ev.occurred_at">{{ ev.occurred_at | timeago }}</span>
-                    </div>
-                    <p class="text-[11px] text-kymo-muted truncate group-hover:text-kymo-ink">
-                      @if (podOf(ev.container_id); as pod) { {{ pod }} · }{{ ev.container_name || ev.container_id }}
-                    </p>
-                    @if (eventReason(ev); as reason) {
-                      <p class="text-xs text-kymo-muted mt-0.5 break-words">{{ reason }}</p>
-                    }
-                  </div>
-                </a>
-              </li>
-            }
-          </ol>
-          @if (hasMoreEvents()) {
-            <button type="button" class="k-btn k-btn-sm mt-3 self-center" [disabled]="loadingMore()" (click)="loadMoreEvents()">
-              {{ loadingMore() ? 'Loading…' : 'Load older' }}
-            </button>
-          }
-        }
-      </section>
+    <!-- Tabs -->
+    <div class="flex border-b border-kymo-rule overflow-x-auto scrollbar-none" role="tablist" aria-label="Workload sections" (keydown)="onTabKey($event)">
+      @for (t of tabs(); track t.key) {
+        <button type="button" role="tab" [id]="'wl-tab-' + t.key" [attr.aria-selected]="tab() === t.key" [attr.aria-controls]="'wl-panel-' + t.key"
+          [attr.tabindex]="tab() === t.key ? 0 : -1"
+          class="px-4 h-9 text-xs font-medium whitespace-nowrap border-b-2 -mb-px transition-colors"
+          [class]="tab() === t.key ? 'border-kymo-amber text-kymo-amber' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
+          (click)="setTab(t.key)">{{ t.label }}</button>
+      }
     </div>
 
-    <!-- Resources -->
+    <div role="tabpanel" [id]="'wl-panel-' + tab()" [attr.aria-labelledby]="'wl-tab-' + tab()" tabindex="0" class="outline-none">
+      @switch (tab()) {
+        @case ('timeline') {
+          <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem] gap-6 items-start">
+            <app-workload-timeline [workloadId]="id()" [revisions]="ctx().revisions" />
+            <section class="k-panel k-paper p-4" aria-labelledby="wl-score-title">
+              <h2 id="wl-score-title" class="k-label mb-5">Stability score</h2>
+              @if (score(); as s) {
+                <div class="flex flex-col items-center gap-5">
+                  <app-stability-gauge [score]="s.score" [size]="140" />
+                  <div class="w-full grid grid-cols-3 border border-kymo-rule divide-x divide-kymo-rule bg-kymo-panel text-center" aria-label="Counts in the scoring window (24h)">
+                    <div class="py-2"><p class="k-label">Restarts 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.restarts ? 'text-kymo-ink' : 'text-kymo-faint'">{{ s.restarts }}</p></div>
+                    <div class="py-2"><p class="k-label">Crashes 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.crashes ? 'text-kymo-danger' : 'text-kymo-faint'">{{ s.crashes }}</p></div>
+                    <div class="py-2"><p class="k-label">OOMs 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.ooms ? 'text-kymo-amber' : 'text-kymo-faint'">{{ s.ooms }}</p></div>
+                  </div>
+                  <div class="w-full space-y-2.5 bg-kymo-panel border border-kymo-rule p-3">
+                    @for (p of penalties(); track p.name) {
+                      <div class="flex items-center justify-between">
+                        <span class="k-label">{{ p.name }} penalty</span>
+                        <span class="text-xs tabular-nums" [class]="p.value > 0 ? 'text-kymo-ink' : 'text-kymo-faint'">{{ p.value > 0 ? '−' : '' }}{{ p.value | number:'1.2-2' }}</span>
+                      </div>
+                    }
+                    <div class="border-t border-kymo-rule pt-2.5 flex items-baseline justify-between">
+                      <span class="k-label !text-kymo-ink">Final score</span>
+                      <span class="text-2xl font-semibold tabular-nums" [class]="s.score | scoreClass">{{ s.score | number:'1.1-1' }}</span>
+                    </div>
+                  </div>
+                  @if (spark(); as sp) {
+                    <div class="w-full">
+                      <div class="flex items-baseline justify-between mb-1">
+                        <span class="k-label">History</span>
+                        <span class="text-[11px] text-kymo-faint tabular-nums">{{ sp.count }} pt{{ sp.count === 1 ? '' : 's' }} · {{ sp.min | number:'1.0-0' }}–{{ sp.max | number:'1.0-0' }}</span>
+                      </div>
+                      <svg viewBox="0 0 200 44" class="w-full h-11 bg-kymo-panel border border-kymo-rule" preserveAspectRatio="none" role="img"
+                           [attr.aria-label]="'Score history, oldest to newest, ' + sp.count + ' points, latest ' + (s.score | number:'1.0-0')">
+                        <line x1="0" y1="22" x2="200" y2="22" stroke="var(--color-kymo-grid)" stroke-width="1" vector-effect="non-scaling-stroke" />
+                        @if (!sp.single) {
+                          <polyline [attr.points]="sp.points" fill="none" [attr.stroke]="sp.color" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+                        }
+                        <circle [attr.cx]="sp.lastX" [attr.cy]="sp.lastY" r="2" [attr.fill]="sp.color" />
+                      </svg>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <app-empty-state icon="chart" message="No score yet" hint="Workload stability scores are computed periodically from lifecycle history." />
+              }
+            </section>
+          </div>
+        }
+        @case ('pods') {
+          <app-workload-pods [workloadId]="id()" [instances]="detail()!.instances" [revisions]="ctx().revisions" [label]="instanceLabel()" />
+        }
+        @case ('resources') {
     <section class="space-y-3" aria-labelledby="wl-res-title">
       <div class="flex items-center justify-between gap-3 flex-wrap">
         <h2 id="wl-res-title" class="k-label flex items-center gap-2">
@@ -220,9 +201,9 @@
         <div class="h-64 bg-kymo-panel border border-kymo-rule animate-pulse"></div>
       }
     </section>
-
-    <!-- CronJob: Runs -->
-    @if (isCronJob()) {
+        }
+        @case ('runs') {
+          @if (isCronJob()) {
       <section class="space-y-3" aria-labelledby="wl-runs-title">
         <div class="flex items-baseline justify-between gap-3 flex-wrap">
           <h2 id="wl-runs-title" class="k-label">Runs <span class="text-kymo-faint normal-case tracking-normal">· latest {{ executions().length }}</span></h2>
@@ -269,78 +250,11 @@
           }
         </div>
       </section>
-    } @else {
-    <!-- Instances -->
-    <section class="space-y-3" aria-labelledby="wl-inst-title">
-      <h2 id="wl-inst-title" class="k-label">{{ instanceLabel() }}s <span class="text-kymo-faint normal-case tracking-normal">· {{ currentGroups().length }} current, {{ previousGroups().length }} previous</span></h2>
-
-      <ng-template #instTable let-rows>
-        <div class="overflow-x-auto">
-          <table class="k-table">
-            <thead>
-              <tr>
-                <th>{{ instanceLabel() }}</th>
-                <th class="hidden lg:table-cell">Node</th>
-                <th>Status</th>
-                <th>Containers</th>
-                <th class="text-right hidden sm:table-cell">Restarts</th>
-                <th class="text-right hidden sm:table-cell">Crashes</th>
-                <th class="text-right hidden md:table-cell">First seen</th>
-                <th class="text-right">Last seen</th>
-              </tr>
-            </thead>
-            <tbody>
-              @for (g of rows; track g.key) {
-                <tr class="hover:bg-kymo-raised/60 transition-colors">
-                  <td class="px-4 py-2.5 max-w-[16rem]"><div class="truncate text-kymo-ink" [title]="g.name">{{ g.name }}</div></td>
-                  <td class="px-4 py-2.5 text-xs text-kymo-muted hidden lg:table-cell"><div class="truncate max-w-[12rem]" [title]="g.node">{{ g.node || '—' }}</div></td>
-                  <td class="px-4 py-2.5"><app-status-badge [status]="g.status" /></td>
-                  <td class="px-4 py-2.5">
-                    <div class="flex flex-wrap gap-1.5">
-                      @for (c of g.containers; track c.id) {
-                        <a [routerLink]="containerRoute(c.id, c.runtime)"
-                           class="inline-flex items-center gap-1.5 h-5 px-1.5 text-[11px] border border-kymo-rule text-kymo-ink hover:border-kymo-amber hover:text-kymo-amber transition-colors"
-                           [title]="c.name + ' · ' + c.current_status">
-                          <span class="k-led" [class]="dotClass(c.current_status)"></span>{{ c.name }}
-                        </a>
-                      }
-                    </div>
-                  </td>
-                  <td class="px-4 py-2.5 text-right text-xs tabular-nums text-kymo-muted hidden sm:table-cell">{{ g.restarts }}</td>
-                  <td class="px-4 py-2.5 text-right text-xs tabular-nums hidden sm:table-cell" [class]="g.crashes > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ g.crashes }}</td>
-                  <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell" [title]="g.firstSeen">{{ g.firstSeen | timeago }}</td>
-                  <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap" [title]="g.lastSeen">{{ g.lastSeen | timeago }}</td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
-      </ng-template>
-
-      <div class="k-panel overflow-hidden">
-        @if (currentGroups().length > 0) {
-          <ng-container *ngTemplateOutlet="instTable; context: { $implicit: currentGroups() }" />
-        } @else {
-          <app-empty-state icon="box" [compact]="true" [message]="'No current ' + instanceLabel().toLowerCase() + 's'" [hint]="'Every recorded ' + instanceLabel().toLowerCase() + ' has stopped.'" />
-        }
-      </div>
-
-      @if (previousGroups().length > 0) {
-        <div class="k-panel overflow-hidden">
-          <button type="button"
-            class="w-full flex items-center gap-2 px-4 py-2.5 text-left text-xs hover:bg-kymo-raised transition-colors"
-            [attr.aria-expanded]="showPrevious()" aria-controls="wl-previous" (click)="showPrevious.set(!showPrevious())">
-            <span class="text-kymo-amber w-3" aria-hidden="true">{{ showPrevious() ? '▾' : '▸' }}</span>
-            <span class="k-label !text-kymo-ink">Previous {{ instanceLabel().toLowerCase() }}s ({{ previousGroups().length }})</span>
-          </button>
-          @if (showPrevious()) {
-            <div id="wl-previous" class="border-t border-kymo-rule">
-              <ng-container *ngTemplateOutlet="instTable; context: { $implicit: previousGroups() }" />
-            </div>
+          } @else {
+            <app-workload-pods [workloadId]="id()" [instances]="detail()!.instances" [revisions]="[]" [flat]="true" label="Run" />
           }
-        </div>
+        }
       }
-    </section>
-    }
+    </div>
   }
 </div>

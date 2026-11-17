@@ -1,4 +1,4 @@
-<div class="space-y-4">
+<div class="space-y-4" [class.lg:pr-[27rem]]="peek.id()">
   <app-page-header title="Jobs">
     <ng-container subtitle>
       @if (state.loaded()) {
@@ -81,7 +81,10 @@
           </thead>
           <tbody>
             @for (r of rows(); track r.w.id) {
-              <tr class="hover:bg-kymo-raised transition-colors group">
+              <tr class="hover:bg-kymo-raised transition-colors group cursor-pointer outline-none focus-visible:bg-kymo-raised"
+                [attr.data-peek-id]="r.w.id" tabindex="0" [attr.aria-current]="peek.id() === r.w.id ? 'true' : null"
+                      [class.bg-kymo-raised]="peek.id() === r.w.id" [class.shadow-[inset_2px_0_0_var(--color-kymo-amber)]]="peek.id() === r.w.id"
+                      (click)="peek.rowClick($event, r.w.id)" (keydown.enter)="peek.rowKey($event, r.w.id)" (keydown.space)="peek.rowKey($event, r.w.id)">
                 <td class="px-4 py-2.5 max-w-[20rem]">
                   <div class="flex items-center gap-2.5 min-w-0">
                     <span class="k-led flex-none" [class]="healthDot[r.health]" [title]="healthLabel(r)" role="img" [attr.aria-label]="healthLabel(r)"></span>
@@ -138,5 +141,9 @@
     @if (hiddenSystem() > 0) {
       <p class="text-xs text-kymo-faint">{{ hiddenSystem() }} system job{{ hiddenSystem() === 1 ? '' : 's' }} hidden</p>
     }
+  }
+
+  @if (peek.id(); as pid) {
+    <app-workload-peek [id]="pid" (closed)="peek.close()" />
   }
 </div>

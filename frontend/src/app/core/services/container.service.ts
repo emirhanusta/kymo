@@ -1,8 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
-import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery, WorkloadSummary, WorkloadDetail, WorkloadQuery, WorkloadEventsQuery, WorkloadScore } from '../models/container.model';
+import { Observable, of, forkJoin } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
+import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery, WorkloadSummary, WorkloadDetail, WorkloadQuery, WorkloadEventsQuery, WorkloadScore, CrashLog, Revision } from '../models/container.model';
 
 export const API_BASE = '/api/v1';
 
@@ -236,4 +236,53 @@ export class ContainerService {
       catchError(() => of([]))
     );
   }
+
+  // --- Crash logs & revisions ---
+
+  /** Newest first. Empty when the backend has none (or predates the endpoint). */
+  getWorkloadCrashLogs(id: string, limit = 10): Observable<CrashLog[]> {
+    const params = new HttpParams().set('limit', String(limit));
+    return this.http.get<CrashLog[]>(`${this.base}/workloads/${encodeURIComponent(id)}/crash-logs`, { params }).pipe(
+      map(l => l ?? []), catchError(() => of([]))
+    );
+  }
+
+  /** The snapshot of one termination; errors with 404 when there is none. */
+  getContainerCrashLog(containerId: string, occurredAt: string): Observable<CrashLog> {
+    const params = new HttpParams().set('occurred_at', occurredAt);
+    return this.http.get<CrashLog>(`${this.base}/containers/${encodeURIComponent(containerId)}/crash-logs`, { params });
+  }
+
+  /** Newest first. */
+  getWorkloadRevisions(id: string): Observable<Revision[]> {
+    return this.http.get<Revision[]>(`${this.base}/workloads/${encodeURIComponent(id)}/revisions`).pipe(
+      map(l => l ?? []), catchError(() => of([]))
+    );
+  }
+
+  /**
+   * Everything the "Last crash" card needs: the newest crash and OOM events, recent crash-log snapshots and the
+   * revisions. Each part degrades to empty on failure.
+   */
+  getCrashContext(id: string): Observable<CrashContext> {
+    const newest = (type: 'crash' | 'oom') =>
+      this.getWorkloadEvents(id, { limit: 1, type }).pipe(catchError(() => of([] as LifecycleEvent[])));
+    return forkJoin({
+      crash: newest('crash'),
+      oom: newest('oom'),
+      logs: this.getWorkloadCrashLogs(id, 10),
+      revisions: this.getWorkloadRevisions(id),
+    }).pipe(map(x => ({
+      crashEvents: [...(x.crash ?? []), ...(x.oom ?? [])],
+      logs: x.logs,
+      revisions: x.revisions,
+    })));
+  }
+}
+
+export interface CrashContext {
+  /** Newest crash event and newest OOM event (either may be missing). */
+  crashEvents: LifecycleEvent[];
+  logs: CrashLog[];
+  revisions: Revision[];
 }

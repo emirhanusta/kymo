@@ -23,6 +23,7 @@ import { StatusBadgeComponent } from '../../../shared/components/status-badge/st
 import { WorkloadBadgeComponent } from '../../../shared/components/workload-badge/workload-badge.component';
 import { StabilityGaugeComponent } from '../../../shared/components/stability-gauge/stability-gauge.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
+import { CrashLogInlineComponent } from '../../../shared/components/crash-log-inline/crash-log-inline.component';
 import { LogViewerComponent } from '../../../shared/components/log-viewer/log-viewer.component';
 import { DeleteModalComponent } from '../../../shared/components/delete-modal/delete-modal.component';
 import { ResourceChartsComponent } from '../../../shared/components/resource-charts/resource-charts.component';
@@ -32,7 +33,7 @@ import { ScoreClassPipe } from '../../../shared/pipes/score-class.pipe';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { formatBytes } from '../../../shared/utils/format';
 import { readStorage, writeStorage } from '../../../shared/utils/storage';
-import { eventDotClass, eventLabel, eventReason, eventTextClass, showsExitCode } from '../../../shared/utils/events';
+import { eventDotClass, eventLabel, eventReason, eventTextClass, hasCrashLogs, showsExitCode } from '../../../shared/utils/events';
 
 const HOUR = 3_600_000;
 const DETAIL_REFRESH_MS = 15_000;
@@ -52,7 +53,7 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   imports: [
     RouterLink, DecimalPipe,
     MetricCardComponent, StatusBadgeComponent, WorkloadBadgeComponent, StabilityGaugeComponent,
-    TimeagoPipe, LogViewerComponent, DeleteModalComponent,
+    TimeagoPipe, LogViewerComponent, CrashLogInlineComponent, DeleteModalComponent,
     ResourceChartsComponent, EmptyStateComponent, ErrorStateComponent, PageHeaderComponent, ScoreClassPipe,
     ReadOnlyTagComponent,
   ],
@@ -75,6 +76,7 @@ export class ContainerDetailComponent {
   readonly eventDot    = eventDotClass;
   readonly eventText   = eventTextClass;
   readonly showsExit   = showsExitCode;
+  readonly crashLogs   = hasCrashLogs;
 
   id        = signal('');
   loading   = signal(true);
@@ -152,6 +154,9 @@ export class ContainerDetailComponent {
     if (!detail || !self) return [];
     return detail.containers.filter(c => c.id !== self.id);
   });
+
+  /** Containers of this pod for the log viewer's switcher. */
+  podContainers = computed(() => (this.podDetail()?.containers ?? []).map(c => ({ id: c.id, name: c.name })));
 
   /** CronJob / Job pods: only Logs makes sense. */
   isCronJobOrJob = computed(() =>

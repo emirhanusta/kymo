@@ -1,25 +1,27 @@
 import {
   Component, ChangeDetectionStrategy, signal, computed, inject, DestroyRef,
 } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
-import { DecimalPipe, DatePipe, NgTemplateOutlet } from '@angular/common';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { DecimalPipe, DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Subscription, forkJoin } from 'rxjs';
 import { distinctUntilChanged, map } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { ContainerService } from '../../../core/services/container.service';
+import { ContainerService, CrashContext } from '../../../core/services/container.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { RefreshService } from '../../../core/services/refresh.service';
 import { PageContextService } from '../../../core/services/page-context.service';
 import { IssuesService } from '../../../core/services/issues.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import {
-  Container, CronJobExecution, DeploymentDetail, LifecycleEvent, ResourceSample,
-  WorkloadDetail, WorkloadScore,
+  CronJobExecution, DeploymentDetail, ResourceSample, WorkloadDetail, WorkloadScore,
 } from '../../../core/models/container.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { LastCrashCardComponent } from '../../../shared/components/last-crash-card/last-crash-card.component';
+import { WorkloadTimelineComponent } from './workload-timeline.component';
+import { WorkloadPodsComponent } from './workload-pods.component';
 import { WorkloadBadgeComponent } from '../../../shared/components/workload-badge/workload-badge.component';
 import { StabilityGaugeComponent } from '../../../shared/components/stability-gauge/stability-gauge.component';
 import { ResourceChartsComponent } from '../../../shared/components/resource-charts/resource-charts.component';
@@ -29,15 +31,10 @@ import { ErrorStateComponent } from '../../../shared/components/error-state/erro
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { ScoreClassPipe } from '../../../shared/pipes/score-class.pipe';
 import { readStorage, writeStorage } from '../../../shared/utils/storage';
-import { containerRoute } from '../../../shared/utils/format';
-import { podNameFromId } from '../../../shared/utils/source';
 import { scoreHex } from '../../../shared/utils/score';
-import { STATUS_DOT_CLASS, StatusKey, normalizeStatus, worstStatus } from '../../../shared/utils/status';
-import { eventDotClass, eventLabel, eventReason, eventTextClass, showsExitCode } from '../../../shared/utils/events';
 
 const HOUR = 3_600_000;
 const RANGE_KEY = 'kymo.resourceRange';
-const EVENTS_PAGE = 30;
 
 type RangeKey = '1h' | '6h' | '24h' | '7d';
 const RANGES: { key: RangeKey; ms: number }[] = [
@@ -47,35 +44,23 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   { key: '7d',  ms: 7 * 24 * HOUR },
 ];
 
-/** All containers of one pod. */
-interface InstanceGroup {
-  key: string;
-  name: string;
-  node: string;
-  containers: Container[];
-  status: StatusKey;
-  current: boolean;
-  restarts: number;
-  crashes: number;
-  firstSeen: string;
-  lastSeen: string;
-}
-
-const time = (s: string) => new Date(s).getTime();
+type TabKey = 'timeline' | 'pods' | 'resources' | 'runs';
 
 @Component({
   selector: 'app-workload-detail',
   standalone: true,
   imports: [
-    RouterLink, DecimalPipe, DatePipe, NgTemplateOutlet, PageHeaderComponent, StatusBadgeComponent, WorkloadBadgeComponent,
+    RouterLink, DecimalPipe, DatePipe, PageHeaderComponent, StatusBadgeComponent, WorkloadBadgeComponent,
     StabilityGaugeComponent, ResourceChartsComponent, ReadOnlyTagComponent, EmptyStateComponent,
-    ErrorStateComponent, TimeagoPipe, ScoreClassPipe,
+    ErrorStateComponent, TimeagoPipe, ScoreClassPipe, LastCrashCardComponent, WorkloadTimelineComponent,
+    WorkloadPodsComponent,
   ],
   templateUrl: './workload-detail.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class WorkloadDetailComponent {
   private route      = inject(ActivatedRoute);
+  private router     = inject(Router);
   private svc        = inject(ContainerService);
   private toast      = inject(ToastService);
   private refreshSvc = inject(RefreshService);
@@ -84,14 +69,6 @@ export class WorkloadDetailComponent {
   protected issues   = inject(IssuesService);
 
   readonly ranges = RANGES;
-  readonly eventLabel  = eventLabel;
-  readonly eventReason = eventReason;
-  readonly eventDot    = eventDotClass;
-  readonly eventText   = eventTextClass;
-  readonly showsExit   = showsExitCode;
-  readonly dotClass    = (s: string) => STATUS_DOT_CLASS[normalizeStatus(s)];
-  readonly containerRoute = containerRoute;
-  readonly podOf = (id: string) => podNameFromId(id);
 
   /** `namespace/pod/container` id of a CronJob run's container, or null when the pod is unknown. */
   runRoute(ex: CronJobExecution): string[] | null {
@@ -113,16 +90,19 @@ export class WorkloadDetailComponent {
   detail    = signal<WorkloadDetail | null>(null);
   history   = signal<WorkloadScore[]>([]);
 
-  events        = signal<LifecycleEvent[]>([]);
-  hasMoreEvents = signal(false);
-  loadingMore   = signal(false);
+  /** Newest crash/OOM events, crash-log snapshots and revisions (Last crash card, timeline markers, pods). */
+  ctx = signal<CrashContext>({ crashEvents: [], logs: [], revisions: [] });
+  private requestedTab = signal<string | null>(null);
+  /** The `?tab=` value if that tab exists for this workload, else Timeline. */
+  tab = computed<TabKey>(() => {
+    const want = this.requestedTab();
+    return this.tabs().find(t => t.key === want)?.key ?? 'timeline';
+  });
 
   resources        = signal<ResourceSample[]>([]);
   resourcesLoading = signal(false);
   range  = signal<RangeKey>(readStorage<RangeKey>(RANGE_KEY, '24h'));
   window = signal<{ from: number; to: number } | null>(null);
-
-  showPrevious = signal(false);
 
   // Deployment panel
   deployment     = signal<DeploymentDetail | null>(null);
@@ -134,7 +114,6 @@ export class WorkloadDetailComponent {
   private mainSub?: Subscription;
   private resSub?: Subscription;
   private kindSub?: Subscription;
-  private moreSub?: Subscription;
 
   // ── derived ───────────────────────────────────────────────────────────────
 
@@ -188,35 +167,17 @@ export class WorkloadDetailComponent {
     };
   });
 
-  groups = computed<InstanceGroup[]>(() => {
-    const w = this.workload();
-    const map = new Map<string, Container[]>();
-    for (const c of this.detail()?.instances ?? []) {
-      const key = podNameFromId(c.id) || c.id;
-      (map.get(key) ?? map.set(key, []).get(key)!).push(c);
-    }
-    const out: InstanceGroup[] = [];
-    for (const [key, cs] of map) {
-      const statuses = cs.map(c => c.current_status);
-      out.push({
-        key,
-        name: key,
-        node: cs.find(c => c.node_name)?.node_name ?? '',
-        containers: cs,
-        status: worstStatus(statuses),
-        current: statuses.some(s => normalizeStatus(s) !== 'stopped'),
-        restarts: cs.reduce((n, c) => n + Math.max(0, c.start_count - 1), 0),
-        crashes: cs.reduce((n, c) => n + c.crash_count, 0),
-        firstSeen: cs.reduce((a, c) => (time(c.first_seen_at) < time(a) ? c.first_seen_at : a), cs[0].first_seen_at),
-        lastSeen: cs.reduce((a, c) => (time(c.last_seen_at) > time(a) ? c.last_seen_at : a), cs[0].last_seen_at),
-      });
-    }
-    return out.sort((a, b) => time(b.lastSeen) - time(a.lastSeen));
-  });
-  currentGroups  = computed(() => this.groups().filter(g => g.current));
-  previousGroups = computed(() => this.groups().filter(g => !g.current));
   /** Section vocabulary: a Job's pods are its run attempts. */
   instanceLabel  = computed(() => (this.isJob() ? 'Run' : 'Pod'));
+
+  /** Cron/Job runs live in the Runs tab; a Job's pods are its runs, so it has no separate Pods tab. */
+  tabs = computed<{ key: TabKey; label: string }[]>(() => {
+    const t: { key: TabKey; label: string }[] = [{ key: 'timeline', label: 'Timeline' }];
+    if (!this.isJob()) t.push({ key: 'pods', label: 'Pods' });
+    t.push({ key: 'resources', label: 'Resources' });
+    if (this.isJobKind()) t.push({ key: 'runs', label: 'Runs' });
+    return t;
+  });
 
   /** Aggregated network counters are not available: hide the chart when everything is zero. */
   noNetwork = computed(() =>
@@ -243,6 +204,9 @@ export class WorkloadDetailComponent {
       this.loadAll(false);
     });
 
+    this.route.queryParamMap.pipe(map(p => p.get('tab')), distinctUntilChanged(), takeUntilDestroyed())
+      .subscribe(t => this.requestedTab.set(t));
+
     // Shared refresh bus (manual + auto): silent reloads that keep what is on screen.
     this.refreshSvc.refresh$.pipe(takeUntilDestroyed()).subscribe(() => this.loadAll(true));
 
@@ -250,7 +214,6 @@ export class WorkloadDetailComponent {
       this.mainSub?.unsubscribe();
       this.resSub?.unsubscribe();
       this.kindSub?.unsubscribe();
-      this.moreSub?.unsubscribe();
       this.pageCtx.detailLabel.set(null);
     });
   }
@@ -259,19 +222,15 @@ export class WorkloadDetailComponent {
     this.mainSub?.unsubscribe();
     this.resSub?.unsubscribe();
     this.kindSub?.unsubscribe();
-    this.moreSub?.unsubscribe();
     this.loading.set(true);
     this.loadError.set(null);
     this.detail.set(null);
     this.history.set([]);
-    this.events.set([]);
-    this.hasMoreEvents.set(false);
-    this.loadingMore.set(false);
+    this.ctx.set({ crashEvents: [], logs: [], revisions: [] });
     this.resources.set([]);
     this.deployment.set(null);
     this.scaleValue.set(null);
     this.executions.set([]);
-    this.showPrevious.set(false);
     this.pageCtx.detailLabel.set(null);
   }
 
@@ -287,13 +246,13 @@ export class WorkloadDetailComponent {
     this.mainSub = forkJoin({
       detail:  this.svc.getWorkload(id),
       history: this.svc.getWorkloadScoreHistory(id, 60),
-      events:  this.svc.getWorkloadEvents(id, { limit: EVENTS_PAGE }),
+      ctx:     this.svc.getCrashContext(id),
     }).subscribe({
-      next: ({ detail, history, events }) => {
+      next: ({ detail, history, ctx }) => {
         const w = detail.workload;
         this.detail.set({ ...detail, instances: detail.instances ?? [], workload: { ...w, images: w.images ?? [], containers: w.containers ?? [] } });
         this.history.set(history ?? []);
-        this.mergeEvents(events ?? [], silent);
+        this.ctx.set(ctx);
         this.loadError.set(null);
         this.loading.set(false);
         this.pageCtx.detailLabel.set(w.name);
@@ -309,36 +268,28 @@ export class WorkloadDetailComponent {
     this.loadResources(silent);
   }
 
-  /** First load replaces; silent refreshes merge so already-loaded older pages stay. */
-  private mergeEvents(fresh: LifecycleEvent[], silent: boolean): void {
-    if (!silent || !this.events().length) {
-      this.events.set(fresh);
-      this.hasMoreEvents.set(fresh.length >= EVENTS_PAGE);
-      return;
-    }
-    const byId = new Map(this.events().map(e => [e.id, e]));
-    for (const e of fresh) byId.set(e.id, e);
-    this.events.set([...byId.values()].sort((a, b) => time(b.occurred_at) - time(a.occurred_at)));
+  // ── tabs ──────────────────────────────────────────────────────────────────
+
+  setTab(t: TabKey): void {
+    this.router.navigate([], {
+      relativeTo: this.route, queryParams: { tab: t === 'timeline' ? null : t },
+      queryParamsHandling: 'merge', replaceUrl: true,
+    });
   }
 
-  loadMoreEvents(): void {
-    const list = this.events();
-    const last = list[list.length - 1];
-    if (!last || this.loadingMore()) return;
-    this.loadingMore.set(true);
-    this.moreSub?.unsubscribe();
-    this.moreSub = this.svc.getWorkloadEvents(this.id(), { limit: EVENTS_PAGE, before: last.occurred_at }).subscribe({
-      next: older => {
-        const have = new Set(this.events().map(e => e.id));
-        this.events.update(l => [...l, ...(older ?? []).filter(e => !have.has(e.id))]);
-        this.hasMoreEvents.set((older ?? []).length >= EVENTS_PAGE);
-        this.loadingMore.set(false);
-      },
-      error: err => {
-        this.loadingMore.set(false);
-        this.toast.apiError(err, 'Failed to load older events');
-      },
-    });
+  /** Arrow keys / Home / End move between tabs (automatic activation). */
+  onTabKey(ev: KeyboardEvent): void {
+    const keys = this.tabs().map(t => t.key);
+    const i = keys.indexOf(this.tab());
+    let n = i;
+    if (ev.key === 'ArrowRight') n = (i + 1) % keys.length;
+    else if (ev.key === 'ArrowLeft') n = (i - 1 + keys.length) % keys.length;
+    else if (ev.key === 'Home') n = 0;
+    else if (ev.key === 'End') n = keys.length - 1;
+    else return;
+    ev.preventDefault();
+    this.setTab(keys[n]);
+    setTimeout(() => document.getElementById('wl-tab-' + keys[n])?.focus(), 0);
   }
 
   private loadResources(silent: boolean): void {

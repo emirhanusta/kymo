@@ -31,3 +31,21 @@ export function formatDuration(seconds: number | null | undefined): string {
   if (m < 60) return `${m}m ${Math.round(seconds % 60)}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
 }
+
+/** Millisecond span → "45s", "4 min", "3 h", "2 d". */
+export function formatSpan(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h} h`;
+  return `${Math.round(h / 24)} d`;
+}
+
+/** Drops the registry host from an image reference: "reg.io:5000/team/api:1.2" → "team/api:1.2". */
+export function shortImage(image: string): string {
+  const i = image.indexOf('/');
+  if (i > 0 && /[.:]|^localhost$/.test(image.slice(0, i))) return image.slice(i + 1);
+  return image;
+}

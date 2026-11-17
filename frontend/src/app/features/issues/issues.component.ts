@@ -3,6 +3,8 @@ import { RouterLink } from '@angular/router';
 
 import { WorkloadStateService } from '../../core/services/workload-state.service';
 import { IssuesService } from '../../core/services/issues.service';
+import { PeekController } from '../../shared/utils/peek-controller';
+import { WorkloadPeekComponent } from '../../shared/components/workload-peek/workload-peek.component';
 import { WorkloadBadgeComponent } from '../../shared/components/workload-badge/workload-badge.component';
 import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
@@ -17,7 +19,7 @@ import { Issue, IssueSeverity } from '../../shared/utils/issues';
   standalone: true,
   imports: [
     RouterLink, PageHeaderComponent, WorkloadBadgeComponent, EmptyStateComponent, ErrorStateComponent,
-    SkeletonComponent, TimeagoPipe,
+    SkeletonComponent, TimeagoPipe, WorkloadPeekComponent,
   ],
   templateUrl: './issues.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -39,6 +41,8 @@ export class IssuesComponent {
       { severity: 'warning' as IssueSeverity, label: 'Warning', items: all.filter(i => i.severity === 'warning') },
     ]).filter(g => g.items.length > 0);
   });
+
+  readonly peek = new PeekController(() => this.groups().flatMap(g => g.items.map(i => i.workloadId)));
 
   ledClass(i: Issue): string {
     return i.severity === 'critical' ? 'bg-kymo-danger' : 'bg-kymo-amber';

@@ -84,7 +84,7 @@ type containerRepo struct{ db *DB }
 // alias the containers table as "c".
 const containerCols = `c.id, c.runtime, c.source_name, c.name, c.image, c.namespace, c.node_name,
   c.first_seen_at, c.last_seen_at, c.start_count, c.crash_count, c.oom_count, c.current_status,
-  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, c.workload_id, ls.score`
+  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, c.workload_id, c.revision, ls.score`
 
 // latestScoreJoin attaches the most recent stability score to each container row.
 const latestScoreJoin = `LEFT JOIN LATERAL (
@@ -104,9 +104,9 @@ const activeWhere = `c.deleted_at IS NULL AND c.ignored = false`
 const upsertContainerSQL = `
 INSERT INTO containers AS c (id, runtime, source_name, name, image, namespace, node_name,
   first_seen_at, last_seen_at, start_count, crash_count, oom_count, current_status,
-  workload_kind, workload_name, is_system, workload_id)
+  workload_kind, workload_name, is_system, workload_id, revision)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,0,0,$10,
-  COALESCE(NULLIF($11,''),'unknown'),$12,$13,$15)
+  COALESCE(NULLIF($11,''),'unknown'),$12,$13,$15,$16)
 ON CONFLICT (id) DO UPDATE SET
   name           = COALESCE(NULLIF(EXCLUDED.name,''), c.name),
   image          = COALESCE(NULLIF(EXCLUDED.image,''), c.image),
@@ -119,10 +119,11 @@ ON CONFLICT (id) DO UPDATE SET
   workload_name  = COALESCE(NULLIF(EXCLUDED.workload_name,''), c.workload_name),
   is_system      = EXCLUDED.is_system OR c.is_system,
   workload_id    = COALESCE(NULLIF(EXCLUDED.workload_id,''), c.workload_id),
+  revision       = COALESCE(NULLIF(EXCLUDED.revision,''), c.revision),
   deleted_at     = CASE WHEN $14 THEN NULL ELSE c.deleted_at END
 RETURNING c.id, c.runtime, c.source_name, c.name, c.image, c.namespace, c.node_name,
   c.first_seen_at, c.last_seen_at, c.start_count, c.crash_count, c.oom_count, c.current_status,
-  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, c.workload_id, NULL::double precision`
+  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, c.workload_id, c.revision, NULL::double precision`
 
 // Upsert inserts or updates a Container row. See upsertContainerSQL for the
 // field-level merge rules.
@@ -144,6 +145,7 @@ func (r *containerRepo) Upsert(ctx context.Context, c *model.Container, restore 
 		firstSeen, lastSeen, status,
 		c.WorkloadKind, c.WorkloadName, c.IsSystem, restore,
 		model.WorkloadID(c.SourceName, c.Namespace, c.WorkloadKind, c.WorkloadName),
+		c.Revision,
 	)
 	out, err := scanContainer(row)
 	if err != nil {
@@ -511,7 +513,7 @@ func scanContainer(row interface {
 		&c.ID, &c.Runtime, &c.SourceName, &c.Name, &c.Image, &c.Namespace, &c.NodeName,
 		&c.FirstSeenAt, &c.LastSeenAt, &c.StartCount, &c.CrashCount, &c.OOMCount, &c.CurrentStatus,
 		&c.DeletedAt, &c.Ignored,
-		&c.WorkloadKind, &c.WorkloadName, &c.IsSystem, &c.WorkloadID, &c.Score,
+		&c.WorkloadKind, &c.WorkloadName, &c.IsSystem, &c.WorkloadID, &c.Revision, &c.Score,
 	)
 }
 
@@ -541,7 +543,8 @@ func (r *eventRepo) Save(ctx context.Context, e *model.LifecycleEvent) (*model.L
 	return e, nil
 }
 
-const eventCols = `e.id, e.container_id, e.event_type, e.exit_code, e.node_name, e.metadata, e.occurred_at, e.source_name`
+const eventCols = `e.id, e.container_id, e.event_type, e.exit_code, e.node_name, e.metadata, e.occurred_at, e.source_name,
+  EXISTS (SELECT 1 FROM crash_logs cl WHERE cl.container_id = e.container_id AND cl.occurred_at = e.occurred_at) AS has_logs`
 
 // FindByContainerID returns the most recent limit events for the container in
 // ascending time order. limit <= 0 returns every event.
@@ -628,7 +631,7 @@ func scanEvents(rows pgx.Rows, withContainer bool) ([]*model.LifecycleEvent, err
 		)
 		dest := []any{
 			&e.ID, &e.ContainerID, &e.EventType, &e.ExitCode,
-			&e.NodeName, &metaBytes, &e.OccurredAt, &e.SourceName,
+			&e.NodeName, &metaBytes, &e.OccurredAt, &e.SourceName, &e.HasLogs,
 		}
 		if withContainer {
 			dest = append(dest, &e.ContainerName, &e.Runtime)

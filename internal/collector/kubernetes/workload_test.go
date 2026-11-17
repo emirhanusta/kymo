@@ -151,7 +151,7 @@ func TestOwnerResolverCache(t *testing.T) {
 }
 
 func newTestCollector(cs *fake.Clientset) *Collector {
-	c := New(zap.NewNop(), "src", "", nil, "", 0)
+	c := New(zap.NewNop(), "src", "", nil, "", 0, Options{})
 	c.clientset = cs
 	return c
 }
@@ -222,7 +222,7 @@ func TestOnPodAddStatefulSetEmitsState(t *testing.T) {
 }
 
 func TestTerminationDuringPodDeletionIsAStop(t *testing.T) {
-	c := New(zap.NewNop(), "src", "", nil, "", time.Minute)
+	c := New(zap.NewNop(), "src", "", nil, "", time.Minute, Options{})
 	c.clientset = fake.NewSimpleClientset()
 
 	now := metav1.Now()
@@ -250,7 +250,7 @@ func TestTerminationDuringPodDeletionIsAStop(t *testing.T) {
 // A handler that runs after Stop (e.g. an informer still delivering the initial
 // list while the source is restarted) must not panic with "send on closed channel".
 func TestEmitAfterStopDoesNotPanic(t *testing.T) {
-	c := New(zap.NewNop(), "src", "", nil, "", time.Minute)
+	c := New(zap.NewNop(), "src", "", nil, "", time.Minute, Options{})
 	c.clientset = fake.NewSimpleClientset()
 	if err := c.Stop(); err != nil {
 		t.Fatal(err)

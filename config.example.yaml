@@ -31,6 +31,14 @@ collector:
   stats_poll_interval: "15s"   # default resource sampling interval
   scoring_interval: "60s"      # how often stability scores are recomputed
   scoring_window: "24h"        # look-back window for scoring
+  # Crash-time log snapshots: when a container crashes or is OOM-killed, KYMO
+  # stores the tail of its logs so the UI can show what it printed before it
+  # died. NOTE: logs can contain sensitive data (tokens, PII); set
+  # enabled: false if that is a concern. Snapshots are kept for 30 days.
+  crash_logs:
+    enabled: true
+    tail_lines: 200            # max 2000
+    max_bytes: 65536           # max 1048576 (1 MiB)
   # Sources declared here are locked in the UI and reloaded live when this file
   # changes (added, changed and removed sources are applied without a restart).
   # Sources can also be added, edited and removed at runtime from the Sources

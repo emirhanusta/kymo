@@ -80,3 +80,24 @@ export function eventIcon(ev: LifecycleEvent): string {
     default:     return '■';
   }
 }
+
+/** Crash and OOM terminations: the events that can carry a log snapshot. */
+export function isProblemEvent(ev: LifecycleEvent): boolean {
+  return ['crash', 'crashed', 'oom', 'oomkilled'].includes(ev.event_type.toLowerCase());
+}
+
+/** A crash/OOM event with a captured log snapshot. */
+export const hasCrashLogs = (ev: LifecycleEvent): boolean => !!ev.has_logs && isProblemEvent(ev);
+
+/** Stop caused by the pod being deleted/replaced (rollout, scale-down, eviction), not by the app failing. */
+export function isPodReplaced(ev: LifecycleEvent): boolean {
+  const v = ev.metadata?.['pod_terminating'];
+  return v === true || v === 'true' || v === 1;
+}
+
+/** Container name from a Kubernetes id `namespace/pod/container` (falls back to the event's own name). */
+export function eventContainerName(ev: LifecycleEvent): string {
+  if (ev.container_name) return ev.container_name;
+  const parts = ev.container_id.split('/');
+  return parts.length >= 3 ? parts.slice(2).join('/') : ev.container_id;
+}

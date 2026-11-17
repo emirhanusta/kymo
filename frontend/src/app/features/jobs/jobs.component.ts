@@ -6,6 +6,8 @@ import { Subject } from 'rxjs';
 import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 
 import { WorkloadStateService } from '../../core/services/workload-state.service';
+import { PeekController } from '../../shared/utils/peek-controller';
+import { WorkloadPeekComponent } from '../../shared/components/workload-peek/workload-peek.component';
 import { WorkloadBadgeComponent } from '../../shared/components/workload-badge/workload-badge.component';
 import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
@@ -33,7 +35,7 @@ const KIND_CHIPS = [
   standalone: true,
   imports: [
     RouterLink, DatePipe, PageHeaderComponent, WorkloadBadgeComponent, EmptyStateComponent, ErrorStateComponent,
-    SkeletonComponent, SearchHotkeyDirective, TimeagoPipe,
+    SkeletonComponent, SearchHotkeyDirective, TimeagoPipe, WorkloadPeekComponent,
   ],
   templateUrl: './jobs.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -78,6 +80,8 @@ export class JobsComponent {
         (b.last?.time ?? 0) - (a.last?.time ?? 0) ||
         a.w.name.localeCompare(b.w.name));
   });
+
+  readonly peek = new PeekController(() => this.rows().map(r => r.w.id));
 
   failingCount = computed(() => this.rows().filter(r => r.health === 'failing').length);
   hiddenSystem = computed(() => this.system() ? 0 : this.state.scopedJobRows().filter(r => r.w.is_system).length);
