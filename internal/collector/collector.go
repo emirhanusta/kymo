@@ -24,6 +24,9 @@ const (
 	// It updates the container row but records no lifecycle event and does not
 	// touch the start/crash/OOM counters.
 	CollectorEventState CollectorEventKind = "state"
+	// CollectorEventCrashLog carries a CrashLog payload: the tail of a container's
+	// logs captured when it crashed or was OOM-killed.
+	CollectorEventCrashLog CollectorEventKind = "crashlog"
 	// CollectorEventSync carries the full set of container IDs currently known to
 	// the runtime for this source (SyncIDs). Containers stored for the source that
 	// are absent from the set and still marked active are marked stopped.
@@ -54,6 +57,9 @@ type CollectorEvent struct {
 
 	// CronJobExec holds CronJob execution data when Kind == CollectorEventCronJob; nil otherwise.
 	CronJobExec *model.CronJobExecution
+
+	// CrashLog holds the log snapshot when Kind == CollectorEventCrashLog; nil otherwise.
+	CrashLog *model.CrashLog
 
 	// UpdateOnly, for CollectorEventState, means the state should only be applied
 	// to an existing container row; unknown containers are not inserted.

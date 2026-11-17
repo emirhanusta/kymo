@@ -76,6 +76,7 @@ func main() {
 		db.Scores(),
 		db.CronJobs(),
 		db.Workloads(),
+		db.CrashLogs(),
 		service.ScoringConfig{
 			Interval: cfg.Collector.ScoringInterval,
 			Window:   cfg.Collector.ScoringWindow,
@@ -97,7 +98,13 @@ func main() {
 		if interval <= 0 {
 			interval = cfg.Collector.StatsPollInterval
 		}
-		return k8scollector.New(log, spec.Name, spec.KubeconfigPath, spec.Kubeconfig, spec.KubeContext, interval)
+		return k8scollector.New(log, spec.Name, spec.KubeconfigPath, spec.Kubeconfig, spec.KubeContext, interval, k8scollector.Options{
+			CrashLogs: k8scollector.CrashLogOptions{
+				Enabled:   cfg.Collector.CrashLogs.Enabled,
+				TailLines: cfg.Collector.CrashLogs.TailLines,
+				MaxBytes:  cfg.Collector.CrashLogs.MaxBytes,
+			},
+		})
 	}
 	sources := service.NewSourceManager(db.Sources(), box, svc, mgmt, factory, log)
 
@@ -232,8 +239,8 @@ func restartOnlyChanges(old, fresh *config.Config) string {
 		changed = append(changed, "secret_key")
 	}
 	oc, fc := old.Collector, fresh.Collector
-	if oc.StatsPollInterval != fc.StatsPollInterval || oc.ScoringInterval != fc.ScoringInterval || oc.ScoringWindow != fc.ScoringWindow {
-		changed = append(changed, "collector (poll/scoring)")
+	if oc.StatsPollInterval != fc.StatsPollInterval || oc.ScoringInterval != fc.ScoringInterval || oc.ScoringWindow != fc.ScoringWindow || oc.CrashLogs != fc.CrashLogs {
+		changed = append(changed, "collector (poll/scoring/crash_logs)")
 	}
 	return strings.Join(changed, ", ")
 }

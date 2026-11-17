@@ -10,6 +10,8 @@ import { IssuesService } from '../../../core/services/issues.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import { reloadOnSourceAndRefresh } from '../../../core/utils/page-reload';
 import { WorkloadSummary } from '../../../core/models/container.model';
+import { PeekController } from '../../../shared/utils/peek-controller';
+import { WorkloadPeekComponent } from '../../../shared/components/workload-peek/workload-peek.component';
 import { WorkloadBadgeComponent } from '../../../shared/components/workload-badge/workload-badge.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
@@ -54,7 +56,7 @@ interface NamespaceGroup {
   standalone: true,
   imports: [
     RouterLink, PageHeaderComponent, WorkloadBadgeComponent, StatusBadgeComponent, EmptyStateComponent,
-    ErrorStateComponent, SkeletonComponent, SearchHotkeyDirective, TimeagoPipe, ScoreClassPipe,
+    ErrorStateComponent, SkeletonComponent, SearchHotkeyDirective, TimeagoPipe, ScoreClassPipe, WorkloadPeekComponent,
   ],
   templateUrl: './workload-list.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -160,6 +162,10 @@ export class WorkloadListComponent {
     for (const g of out) g.rows.sort(cmp);
     return out.sort((a, b) => a.namespace.localeCompare(b.namespace) || a.source.localeCompare(b.source));
   });
+
+  /** Row order as displayed (collapsed namespaces skipped): j/k walk through it. */
+  private orderedIds = computed(() => this.groups().filter(g => !this.collapsed().has(g.key)).flatMap(g => g.rows.map(w => w.id)));
+  readonly peek = new PeekController(() => this.orderedIds());
 
   allCollapsed = computed(() => this.groups().length > 0 && this.groups().every(g => this.collapsed().has(g.key)));
 

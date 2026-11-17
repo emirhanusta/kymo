@@ -130,6 +130,11 @@ type Container struct {
 	// WorkloadName); empty for containers that belong to no workload.
 	WorkloadID string `json:"workload_id,omitempty" db:"workload_id"`
 
+	// Revision identifies the rollout the container's pod belongs to
+	// (pod-template-hash, controller-revision-hash, or the Job name). Empty
+	// when unknown; once set it is never cleared.
+	Revision string `json:"revision,omitempty" db:"revision"`
+
 	// Score is the most recently computed stability score (0–100), populated by
 	// read queries via a lateral join. Nil when no score has been computed yet.
 	// It is never written through the containers table.
@@ -209,6 +214,29 @@ type LifecycleEvent struct {
 	// read queries (e.g. the recent-events feed). They are not persisted.
 	ContainerName string  `json:"container_name,omitempty" db:"-"`
 	Runtime       Runtime `json:"runtime,omitempty" db:"-"`
+
+	// HasLogs is true when a crash-log snapshot exists for this termination.
+	// Populated by read queries; not persisted on the event row.
+	HasLogs bool `json:"has_logs" db:"-"`
+}
+
+// CrashLog is a snapshot of the tail of a container instance's logs captured
+// when it crashed or was OOM-killed. OccurredAt equals the termination's
+// FinishedAt, i.e. the timestamp of the matching crash/OOM lifecycle events.
+type CrashLog struct {
+	ID          int64     `json:"id"`
+	ContainerID string    `json:"container_id"`
+	SourceName  string    `json:"source_name"`
+	OccurredAt  time.Time `json:"occurred_at"`
+	Reason      string    `json:"reason"`
+	ExitCode    int       `json:"exit_code"`
+	// Previous is true when the logs came from the previous container instance.
+	Previous  bool   `json:"previous"`
+	Lines     string `json:"lines"`
+	LineCount int    `json:"line_count"`
+	// Truncated is true when the byte or line limit cut the snapshot short.
+	Truncated  bool      `json:"truncated"`
+	CapturedAt time.Time `json:"captured_at"`
 }
 
 // ResourceSample is a point-in-time snapshot of a container's resource consumption,

@@ -67,7 +67,7 @@ func waitFor(t *testing.T, cond func() bool) {
 }
 
 func TestRecorderAttachDetachWhileRunning(t *testing.T) {
-	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	r := NewRecorderService(nil, nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 
 	before := newFake(0)
 	r.AttachSource(model.SourceSpec{Name: "a", Type: "kubernetes", Enabled: true}, before, nil)
@@ -116,7 +116,7 @@ func TestRecorderAttachDetachWhileRunning(t *testing.T) {
 }
 
 func TestRecorderRetriesFailingSource(t *testing.T) {
-	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	r := NewRecorderService(nil, nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 	flaky := newFake(1)
 	r.AttachSource(model.SourceSpec{Name: "k", Type: "kubernetes", Enabled: true}, flaky, nil)
 
@@ -199,7 +199,7 @@ func (s *slowStopCollector) Stop() error {
 }
 
 func TestRecorderReplaceKeepsSourceListed(t *testing.T) {
-	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	r := NewRecorderService(nil, nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 	slow := &slowStopCollector{fakeCollector: newFake(0), release: make(chan struct{})}
 	r.AttachSource(model.SourceSpec{Name: "k", Type: "kubernetes", Enabled: true}, slow, nil)
 

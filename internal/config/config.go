@@ -108,6 +108,46 @@ type CollectorConfig struct {
 	// ScoringWindow is the look-back duration used by the scorer when querying events
 	// and resource samples (e.g. "24h" means the last 24 hours of data).
 	ScoringWindow time.Duration `mapstructure:"scoring_window"`
+
+	// CrashLogs controls capturing the tail of a container's logs when it
+	// crashes or is OOM-killed.
+	CrashLogs CrashLogsConfig `mapstructure:"crash_logs"`
+}
+
+// Crash-log capture limits.
+const (
+	DefaultCrashLogTailLines = 200
+	MaxCrashLogTailLines     = 2000
+	DefaultCrashLogMaxBytes  = 64 * 1024
+	MaxCrashLogMaxBytes      = 1024 * 1024
+)
+
+// CrashLogsConfig configures crash-time log snapshots. Logs can contain
+// sensitive data; set Enabled to false to turn the feature off.
+type CrashLogsConfig struct {
+	// Enabled turns snapshot capture on or off (default true).
+	Enabled bool `mapstructure:"enabled"`
+	// TailLines is how many trailing log lines are fetched (default 200, max 2000).
+	TailLines int `mapstructure:"tail_lines"`
+	// MaxBytes caps the snapshot size in bytes (default 65536, max 1 MiB).
+	MaxBytes int `mapstructure:"max_bytes"`
+}
+
+// normalized returns c with out-of-range values replaced by defaults / clamped.
+func (c CrashLogsConfig) normalized() CrashLogsConfig {
+	if c.TailLines <= 0 {
+		c.TailLines = DefaultCrashLogTailLines
+	}
+	if c.TailLines > MaxCrashLogTailLines {
+		c.TailLines = MaxCrashLogTailLines
+	}
+	if c.MaxBytes <= 0 {
+		c.MaxBytes = DefaultCrashLogMaxBytes
+	}
+	if c.MaxBytes > MaxCrashLogMaxBytes {
+		c.MaxBytes = MaxCrashLogMaxBytes
+	}
+	return c
 }
 
 // LogConfig controls the structured logger output format and verbosity.
@@ -177,6 +217,9 @@ func load(path string) (*Config, error) {
 	v.SetDefault("collector.stats_poll_interval", "10s")
 	v.SetDefault("collector.scoring_interval", "60s")
 	v.SetDefault("collector.scoring_window", "24h")
+	v.SetDefault("collector.crash_logs.enabled", true)
+	v.SetDefault("collector.crash_logs.tail_lines", DefaultCrashLogTailLines)
+	v.SetDefault("collector.crash_logs.max_bytes", DefaultCrashLogMaxBytes)
 
 	v.SetDefault("secret_key", "")
 	v.SetDefault("log.level", "info")
@@ -211,6 +254,8 @@ func load(path string) (*Config, error) {
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("config: unmarshal failed: %w", err)
 	}
+
+	cfg.Collector.CrashLogs = cfg.Collector.CrashLogs.normalized()
 
 	if err := cfg.validate(); err != nil {
 		return nil, err

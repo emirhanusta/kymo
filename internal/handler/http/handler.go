@@ -63,6 +63,7 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		v1.GET("/containers/:id/events", h.GetLifecycleEvents)
 		v1.GET("/containers/:id/resources", h.GetResourceSamples)
 		v1.GET("/containers/:id/logs", h.GetContainerLogs)
+		v1.GET("/containers/:id/crash-logs", h.GetContainerCrashLogs)
 
 		// Container management endpoints
 		v1.POST("/containers/:id/restart", h.RestartContainer)
@@ -99,6 +100,8 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		v1.GET("/workloads/:id", h.GetWorkload)
 		v1.GET("/workloads/:id/events", h.GetWorkloadEvents)
 		v1.GET("/workloads/:id/resources", h.GetWorkloadResources)
+		v1.GET("/workloads/:id/crash-logs", h.GetWorkloadCrashLogs)
+		v1.GET("/workloads/:id/revisions", h.GetWorkloadRevisions)
 		v1.GET("/workloads/:id/score/history", h.GetWorkloadScoreHistory)
 
 		// Recent events endpoint (cross-container)

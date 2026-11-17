@@ -1,4 +1,4 @@
-import { Directive, ElementRef, AfterViewInit, inject, output } from '@angular/core';
+import { Directive, ElementRef, AfterViewInit, inject, input, output } from '@angular/core';
 
 /**
  * Lightweight modal behaviour: Escape emits `dismiss`, and the element marked
@@ -10,12 +10,14 @@ import { Directive, ElementRef, AfterViewInit, inject, output } from '@angular/c
   standalone: true,
   host: {
     role: 'dialog',
-    'aria-modal': 'true',
+    '[attr.aria-modal]': 'modal()',
     '(document:keydown.escape)': 'onEscape($event)',
   },
 })
 export class DialogDirective implements AfterViewInit {
   dismiss = output<void>();
+  /** False for non-blocking panels (side drawer next to a live page). */
+  modal = input(true);
 
   private el = inject<ElementRef<HTMLElement>>(ElementRef);
   private previouslyFocused = (typeof document !== 'undefined' ? document.activeElement : null) as HTMLElement | null;

@@ -16,7 +16,7 @@ import (
 
 func newSyncManager(t *testing.T) (*SourceManager, *recorderService, map[string][]*fakeCollector) {
 	t.Helper()
-	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	r := NewRecorderService(nil, nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 	built := map[string][]*fakeCollector{}
 	factory := func(spec model.SourceSpec) collector.Collector {
 		f := newFake(0)

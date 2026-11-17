@@ -66,7 +66,7 @@ func (r *sourceRepo) Get(ctx context.Context, name string) (*model.SourceSpec, e
 func (r *sourceRepo) Create(ctx context.Context, s *model.SourceSpec) error {
 	_, err := r.db.pool.Exec(ctx, `INSERT INTO sources
   (name, type, enabled, read_only, kubeconfig_path, kube_context, kubeconfig_enc, poll_interval_seconds)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
 		s.Name, s.Type, s.Enabled, s.ReadOnly, s.KubeconfigPath, s.KubeContext,
 		s.KubeconfigEnc, int(s.PollInterval/time.Second))
 	var pgErr *pgconn.PgError

@@ -87,6 +87,20 @@ with an environment variable prefixed `KYMO_`, e.g. `KYMO_DATABASE_DSN`,
 Kubernetes sources need a kubeconfig; CPU/memory sampling requires
 metrics-server in the cluster.
 
+**Crash-log snapshots:** when a container crashes or is OOM-killed (not on
+pod deletion or clean exit), KYMO fetches the tail of that container
+instance's logs and stores it for 30 days, so you can see what it printed
+before it died. Configure with `collector.crash_logs.enabled` (default
+`true`), `collector.crash_logs.tail_lines` (default 200, max 2000) and
+`collector.crash_logs.max_bytes` (default 65536, max 1 MiB). Logs can contain
+sensitive data — set `enabled: false` to disable. The source's kubeconfig needs
+`get` on `pods/log`. API: `GET /api/v1/workloads/:id/crash-logs`,
+`GET /api/v1/containers/:id/crash-logs[?occurred_at=...]`.
+
+**Revisions:** each container records its pod's revision
+(`pod-template-hash`, `controller-revision-hash`, or the Job name);
+`GET /api/v1/workloads/:id/revisions` lists rollouts newest first.
+
 > **Security note:** the API has no authentication and exposes management
 > actions (delete pod, scale, rollout restart). Run it on a trusted network or behind an
 > authenticating proxy, and be careful which kubeconfig context a source uses.

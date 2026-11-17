@@ -169,6 +169,9 @@
                   @if (eventReason(ev); as reason) {
                     <p class="text-xs text-kymo-muted mt-0.5 break-words">{{ reason }}</p>
                   }
+                  @if (crashLogs(ev)) {
+                    <app-crash-log-inline class="mt-1" [containerId]="ev.container_id" [occurredAt]="ev.occurred_at" />
+                  }
                 </div>
               </li>
             }
@@ -254,6 +257,8 @@
   <app-log-viewer
     [containerId]="container()!.id"
     [containerName]="container()!.name"
+    [live]="container()!.current_status === 'running'"
+    [containers]="podContainers()"
     (closed)="showLogViewer.set(false)"
   />
 }

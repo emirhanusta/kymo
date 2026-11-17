@@ -44,11 +44,17 @@ function splitMatches(line: string, q: string): LinePart[] {
 export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
   @Input() containerId = '';
   @Input() containerName = '';
+  /** Start in live (follow) mode. */
+  @Input() live = false;
+  /** Other containers of the same pod; with more than one entry the header shows a switcher. */
+  @Input() containers: { id: string; name: string }[] = [];
   @Output() closed = new EventEmitter<void>();
 
   private svc   = inject(ContainerService);
   private toast = inject(ToastService);
 
+  currentId   = signal('');
+  currentName = signal('');
   lines       = signal<string[]>([]);
   loading     = signal(true);
   follow      = signal(false);
@@ -81,7 +87,25 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
   logBody = viewChild<ElementRef<HTMLElement>>('logBody');
 
   ngOnInit(): void {
-    this.fetchLogs();
+    this.currentId.set(this.containerId);
+    this.currentName.set(this.containerName);
+    if (this.live) {
+      this.follow.set(true);
+      this.startStream();
+    } else {
+      this.fetchLogs();
+    }
+  }
+
+  /** Header dropdown: reconnect to another container of the pod, keeping the live/static mode. */
+  switchTo(id: string): void {
+    const c = this.containers.find(x => x.id === id);
+    if (!c || id === this.currentId()) return;
+    this.stopStream();
+    this.currentId.set(c.id);
+    this.currentName.set(c.name);
+    this.lines.set([]);
+    if (this.follow()) this.startStream(); else this.fetchLogs();
   }
 
   toggleFollow(): void {
@@ -96,7 +120,7 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   fetchLogs(): void {
     this.loading.set(true);
-    this.svc.getContainerLogs(this.containerId, TAIL).subscribe({
+    this.svc.getContainerLogs(this.currentId(), TAIL).subscribe({
       next: text => {
         this.lines.set(text.split('\n').filter(l => l.length > 0).slice(-MAX_LINES));
         this.loading.set(false);
@@ -113,7 +137,7 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.stopStream();
     this.lines.set([]);
     this.loading.set(false);
-    this.es = new EventSource(this.svc.logStreamUrl(this.containerId, TAIL));
+    this.es = new EventSource(this.svc.logStreamUrl(this.currentId(), TAIL));
     this.es.onmessage = (ev) => {
       this.lines.update(ls => {
         const next = [...ls, ev.data];
@@ -147,7 +171,7 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `${this.containerName}-logs.txt`;
+    a.download = `${this.currentName()}-logs.txt`;
     a.click();
     URL.revokeObjectURL(url);
   }

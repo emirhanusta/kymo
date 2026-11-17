@@ -29,6 +29,8 @@ export interface Container {
   ignored: boolean;
   /** Latest stability score 0–100; null when not yet computed. */
   score: number | null;
+  /** Pod revision (Deployment pod-template hash etc.); "" / absent = unknown. */
+  revision?: string;
 }
 
 export type ContainerStatusFilter = '' | 'running' | 'stopped' | 'crashing' | 'paused' | 'unknown';
@@ -93,6 +95,36 @@ export interface LifecycleEvent {
   container_name?: string;
   runtime?: 'docker' | 'kubernetes';
   source_name?: string;
+  /** A crash-log snapshot exists for this termination (crash and OOM events of one termination share it). */
+  has_logs?: boolean;
+}
+
+/** Log tail captured when a container terminated abnormally. Static text, never streamed. */
+export interface CrashLog {
+  id: number;
+  container_id: string;
+  source_name: string;
+  occurred_at: string;
+  reason: string;
+  exit_code: number;
+  /** Lines come from the previous (terminated) container instance. */
+  previous: boolean;
+  lines: string;
+  line_count: number;
+  truncated: boolean;
+  captured_at: string;
+}
+
+/** One rollout generation of a workload (e.g. a ReplicaSet), newest first from the API. */
+export interface Revision {
+  /** "" = unknown. */
+  revision: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  images: string[];
+  pods: number;
+  active_pods: number;
+  current: boolean;
 }
 
 export interface DeploymentInfo {
