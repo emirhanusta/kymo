@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 
 import { API_BASE } from './container.service';
 import {
-  ActionResult, KubeContextList, ServerMeta, SourceInput, SourceStatus, SourceTestResult, SyncResult,
+  ActionResult, KubeContextList, PurgeRemovedResult, RemovedSource, ServerMeta, SourceInput, SourceStatus, SourceTestResult, SyncResult,
 } from '../models/container.model';
 
 /** Cluster (API: source) management (CRUD, connection test, kubeconfig context discovery) and server meta. */
@@ -35,6 +35,16 @@ export class SourceService {
 
   update(name: string, input: SourceInput): Observable<SourceStatus> {
     return this.http.put<SourceStatus>(`${this.base}/sources/${encodeURIComponent(name)}`, input);
+  }
+
+  removed(): Observable<RemovedSource[]> {
+    return this.http.get<RemovedSource[]>(`${this.base}/sources/removed`);
+  }
+
+  /** Permanently deletes the recorded history of a cluster that is no longer registered. */
+  purgeRemoved(name: string): Observable<PurgeRemovedResult> {
+    const params = new HttpParams().set('confirm', 'true');
+    return this.http.delete<PurgeRemovedResult>(`${this.base}/sources/removed/${encodeURIComponent(name)}`, { params });
   }
 
   delete(name: string, purge: boolean): Observable<ActionResult> {

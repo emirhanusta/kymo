@@ -7,6 +7,7 @@ import { Subject, forkJoin, of } from 'rxjs';
 import { catchError, debounceTime, map, switchMap } from 'rxjs/operators';
 
 import { ContainerService } from '../../core/services/container.service';
+import { SourceStateService } from '../../core/services/source-state.service';
 import { Container, WorkloadSummary } from '../../core/models/container.model';
 import { DialogDirective } from '../../shared/directives/dialog.directive';
 import { WorkloadBadgeComponent } from '../../shared/components/workload-badge/workload-badge.component';
@@ -39,10 +40,14 @@ export class CommandPaletteComponent {
 
   private svc    = inject(ContainerService);
   private router = inject(Router);
+  private scope  = inject(SourceStateService);
 
   query      = signal('');
-  containers = signal<Container[]>([]);
-  workloads  = signal<WorkloadSummary[]>([]);
+  private foundContainers = signal<Container[]>([]);
+  private foundWorkloads  = signal<WorkloadSummary[]>([]);
+  /** Connected clusters only (or the removed cluster being viewed). */
+  containers = computed(() => this.scope.globalScope(this.foundContainers(), c => c.source_name).slice(0, 8));
+  workloads  = computed(() => this.scope.globalScope(this.foundWorkloads(), w => w.source_name).slice(0, 5));
   searching  = signal(false);
   active     = signal(0);
 
@@ -69,10 +74,10 @@ export class CommandPaletteComponent {
         this.searching.set(true);
         return forkJoin({
           workloads: this.svc.getWorkloads({ q }).pipe(
-            map(list => (list ?? []).slice(0, 5)),
+            map(list => list ?? []),
             catchError(() => of([] as WorkloadSummary[])),
           ),
-          containers: this.svc.getContainersPage({ page: 1, limit: 8, q }).pipe(
+          containers: this.svc.getContainersPage({ page: 1, limit: 16, q }).pipe(
             map(p => p?.data ?? []),
             catchError(() => of([] as Container[])),
           ),
@@ -80,8 +85,8 @@ export class CommandPaletteComponent {
       }),
       takeUntilDestroyed(),
     ).subscribe(({ workloads, containers }) => {
-      this.workloads.set(workloads);
-      this.containers.set(containers);
+      this.foundWorkloads.set(workloads);
+      this.foundContainers.set(containers);
       this.searching.set(false);
       this.clampActive();
     });
@@ -90,7 +95,7 @@ export class CommandPaletteComponent {
   onInput(value: string): void {
     this.query.set(value);
     this.active.set(0);
-    if (!value.trim()) { this.containers.set([]); this.workloads.set([]); }
+    if (!value.trim()) { this.foundContainers.set([]); this.foundWorkloads.set([]); }
     this.query$.next(value);
   }
 

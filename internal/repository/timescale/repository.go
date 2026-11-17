@@ -440,6 +440,66 @@ func (r *containerRepo) DeleteBySource(ctx context.Context, sourceName string) (
 	return tag.RowsAffected(), nil
 }
 
+// PurgeSource deletes everything recorded for a source in one transaction.
+func (r *containerRepo) PurgeSource(ctx context.Context, sourceName string) (int64, error) {
+	tx, err := r.db.pool.Begin(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("timescale: purge source begin: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx, `DELETE FROM containers WHERE source_name = $1`, sourceName)
+	if err != nil {
+		return 0, fmt.Errorf("timescale: purge source containers: %w", err)
+	}
+	n := tag.RowsAffected()
+	if _, err := tx.Exec(ctx, `DELETE FROM workload_scores WHERE source_name = $1 OR workload_id LIKE $1 || ':%'`, sourceName); err != nil {
+		return 0, fmt.Errorf("timescale: purge source workload scores: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM cronjob_executions WHERE source_name = $1`, sourceName); err != nil {
+		return 0, fmt.Errorf("timescale: purge source cronjob executions: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, fmt.Errorf("timescale: purge source commit: %w", err)
+	}
+	return n, nil
+}
+
+const sourceHistorySQL = `
+WITH c AS (
+  SELECT source_name,
+         COUNT(*)                                              AS containers,
+         COUNT(DISTINCT workload_id) FILTER (WHERE workload_id <> '') AS workloads,
+         MIN(first_seen_at) AS first_seen, MAX(last_seen_at) AS last_seen
+  FROM containers WHERE source_name <> '' GROUP BY source_name
+), j AS (
+  SELECT source_name, COUNT(*) AS runs, MIN(sampled_at) AS first_seen, MAX(sampled_at) AS last_seen
+  FROM cronjob_executions WHERE source_name <> '' GROUP BY source_name
+)
+SELECT COALESCE(c.source_name, j.source_name),
+       COALESCE(c.workloads, 0), COALESCE(c.containers, 0), COALESCE(j.runs, 0),
+       COALESCE(c.first_seen, j.first_seen), COALESCE(c.last_seen, j.last_seen)
+FROM c FULL JOIN j ON c.source_name = j.source_name
+ORDER BY 6 DESC, 1`
+
+// SourceHistory aggregates recorded data per source_name.
+func (r *containerRepo) SourceHistory(ctx context.Context) ([]model.SourceHistory, error) {
+	rows, err := r.db.pool.Query(ctx, sourceHistorySQL)
+	if err != nil {
+		return nil, fmt.Errorf("timescale: source history: %w", err)
+	}
+	defer rows.Close()
+	out := []model.SourceHistory{}
+	for rows.Next() {
+		var h model.SourceHistory
+		if err := rows.Scan(&h.Name, &h.Workloads, &h.Containers, &h.CronJobRuns, &h.FirstSeenAt, &h.LastSeenAt); err != nil {
+			return nil, fmt.Errorf("timescale: source history scan: %w", err)
+		}
+		out = append(out, h)
+	}
+	return out, rows.Err()
+}
+
 // HardDeleteIgnored permanently removes all ignored (non-deleted) containers and
 // their related records (via CASCADE). Optionally filtered by sourceName.
 func (r *containerRepo) HardDeleteIgnored(ctx context.Context, sourceName string) (int64, error) {

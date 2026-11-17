@@ -31,7 +31,7 @@
           <span class="text-[11px] px-1.5 py-px border border-kymo-rule text-kymo-muted">SYS</span>
         }
         @if (readOnly()) {
-          <app-read-only-tag />
+          <app-read-only-tag [hint]="readOnlyHint()" />
         }
       </span>
     </app-page-header>
@@ -63,7 +63,7 @@
       <section class="k-panel" aria-labelledby="wl-deploy-title">
         <div class="px-5 py-2.5 border-b border-kymo-rule flex items-center justify-between gap-3">
           <h2 id="wl-deploy-title" class="k-label">Deployment</h2>
-          @if (readOnly()) { <app-read-only-tag /> }
+          @if (readOnly()) { <app-read-only-tag [hint]="readOnlyHint()" /> }
         </div>
         @if (!deployment()?.deployment) {
           <p class="px-5 py-6 text-center text-xs text-kymo-faint">— live deployment state unavailable (not found on the cluster, or the cluster is offline) —</p>

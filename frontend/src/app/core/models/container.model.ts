@@ -168,6 +168,21 @@ export interface SourceStatus {
   settings: SourceSettings;
 }
 
+/** A cluster with recorded history that is not registered any more (GET /sources/removed). */
+export interface RemovedSource {
+  name: string;
+  workloads: number;
+  containers: number;
+  cronjob_runs: number;
+  first_seen_at: string;
+  last_seen_at: string;
+}
+
+/** Result of DELETE /sources/removed/:name. */
+export interface PurgeRemovedResult extends ActionResult {
+  deleted_containers: number;
+}
+
 /** Body for POST /sources, PUT /sources/:name and POST /sources/test. */
 export interface SourceInput {
   name: string;

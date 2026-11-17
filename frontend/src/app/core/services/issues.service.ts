@@ -1,5 +1,6 @@
 import { Injectable, inject, computed } from '@angular/core';
 
+import { SourceStateService } from './source-state.service';
 import { WorkloadStateService } from './workload-state.service';
 import { Issue, WorkloadEventInfo, attributeEvents, deriveIssues, statusReason } from '../../shared/utils/issues';
 import { WorkloadSummary } from '../models/container.model';
@@ -11,13 +12,18 @@ import { WorkloadSummary } from '../models/container.model';
 @Injectable({ providedIn: 'root' })
 export class IssuesService {
   private state = inject(WorkloadStateService);
+  private sources = inject(SourceStateService);
+
+  /** Removed clusters are frozen at their last status, so they never produce issues. */
+  private liveWorkloads = computed(() => this.sources.connectedOnly(this.state.workloads(), w => w.source_name));
+  private liveJobRows = computed(() => this.sources.connectedOnly(this.state.jobRows(), r => r.w.source_name));
 
   readonly eventInfo = computed<ReadonlyMap<string, WorkloadEventInfo>>(() =>
-    attributeEvents(this.state.events(), this.state.workloads(), this.state.containerWorkloads()));
+    attributeEvents(this.state.events(), this.liveWorkloads(), this.state.containerWorkloads()));
 
-  /** Every issue, every cluster, system workloads included. */
+  /** Every issue of the connected clusters, system workloads included. */
   readonly all = computed<Issue[]>(() =>
-    deriveIssues(this.state.workloads(), this.state.jobRows(), this.eventInfo()));
+    deriveIssues(this.liveWorkloads(), this.liveJobRows(), this.eventInfo()));
 
   /** Issues of the top-bar cluster, system workloads hidden. */
   readonly open = computed(() => this.forCluster(this.state.selectedCluster(), false));

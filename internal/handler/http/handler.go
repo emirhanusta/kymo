@@ -49,6 +49,8 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		// Sources
 		v1.GET("/sources", h.ListSources)
 		v1.POST("/sources", h.CreateSource)
+		v1.GET("/sources/removed", h.ListRemovedSources)
+		v1.DELETE("/sources/removed/:name", h.PurgeRemovedSource)
 		v1.POST("/sources/test", h.TestSource)
 		v1.POST("/sources/reload", h.ReloadSources)
 		v1.POST("/sources/contexts", h.SourceContexts)

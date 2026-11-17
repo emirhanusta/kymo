@@ -24,6 +24,7 @@ import { WorkloadBadgeComponent } from '../../../shared/components/workload-badg
 import { StabilityGaugeComponent } from '../../../shared/components/stability-gauge/stability-gauge.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { CrashLogInlineComponent } from '../../../shared/components/crash-log-inline/crash-log-inline.component';
+import { READ_ONLY_HINT, REMOVED_HINT } from '../../../shared/utils/source';
 import { normalizeStatus } from '../../../shared/utils/status';
 import { LogViewerComponent } from '../../../shared/components/log-viewer/log-viewer.component';
 import { DeleteModalComponent } from '../../../shared/components/delete-modal/delete-modal.component';
@@ -148,6 +149,9 @@ export class ContainerDetailComponent {
 
   /** Read-only clusters: hide restart pod; logs and archive/ignore stay available. */
   readOnly = computed(() => this.sources.isReadOnly(this.container()?.source_name));
+  /** Cluster no longer registered: no live logs, crash snapshots only. */
+  removed = computed(() => this.sources.isRemoved(this.container()?.source_name));
+  readOnlyHint = computed(() => this.removed() ? REMOVED_HINT : READ_ONLY_HINT);
 
   podSiblings = computed(() => {
     const detail = this.podDetail();

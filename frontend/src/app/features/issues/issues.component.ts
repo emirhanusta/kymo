@@ -2,6 +2,7 @@ import { Component, ChangeDetectionStrategy, signal, computed, inject } from '@a
 import { RouterLink } from '@angular/router';
 
 import { WorkloadStateService } from '../../core/services/workload-state.service';
+import { SourceStateService } from '../../core/services/source-state.service';
 import { IssuesService } from '../../core/services/issues.service';
 import { PeekController } from '../../shared/utils/peek-controller';
 import { WorkloadPeekComponent } from '../../shared/components/workload-peek/workload-peek.component';
@@ -27,6 +28,7 @@ import { Issue, IssueSeverity } from '../../shared/utils/issues';
 export class IssuesComponent {
   protected state  = inject(WorkloadStateService);
   private issueSvc = inject(IssuesService);
+  protected sources = inject(SourceStateService);
 
   system = signal(false);
 

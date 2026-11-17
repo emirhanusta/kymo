@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, inject, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, signal, computed } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DatePipe } from '@angular/common';
 
@@ -27,7 +27,7 @@ import { containerRoute, shortId } from '../../shared/utils/format';
         <span class="k-led bg-kymo-amber animate-pulse" aria-hidden="true"></span>REC
       </div>
       <ol class="flex items-stretch flex-1 min-w-0 overflow-x-auto overflow-y-hidden scrollbar-none">
-        @for (ev of events(); track ev.id) {
+        @for (ev of events().slice(0, 15); track ev.id) {
           <li class="flex-none border-r border-kymo-rule">
             <a
               [routerLink]="route(ev)"
@@ -58,7 +58,9 @@ export class EventTapeComponent {
   private svc     = inject(ContainerService);
   private sources = inject(SourceStateService);
 
-  events = signal<LifecycleEvent[]>([]);
+  private loadedEvents = signal<LifecycleEvent[]>([]);
+  /** Selected cluster (incl. a removed one) or connected clusters only. */
+  events = computed(() => this.sources.inScope(this.loadedEvents(), e => e.source_name));
   failed = signal(false);
   loaded = signal(false);
 
@@ -75,12 +77,14 @@ export class EventTapeComponent {
   }
 
   private load(): void {
-    this.svc.getRecentEvents(15, this.sources.selectedSource() || undefined).subscribe({
+    // Events of removed clusters are dropped client-side, so ask for a few extra when no cluster is selected.
+    const sel = this.sources.selectedSource();
+    this.svc.getRecentEvents(sel ? 15 : 30, sel || undefined).subscribe({
       next: list => {
         const sorted = [...(list ?? [])].sort(
           (a, b) => new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime(),
         );
-        this.events.set(sorted);
+        this.loadedEvents.set(sorted);
         this.failed.set(false);
         this.loaded.set(true);
       },

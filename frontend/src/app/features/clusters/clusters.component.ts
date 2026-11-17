@@ -6,13 +6,14 @@ import { SourceService, sourceToInput } from '../../core/services/source.service
 import { SourceStateService } from '../../core/services/source-state.service';
 import { ToastService } from '../../core/services/toast.service';
 import { RefreshService } from '../../core/services/refresh.service';
-import { ServerMeta, SourceStatus, SyncResult } from '../../core/models/container.model';
+import { RemovedSource, ServerMeta, SourceStatus, SyncResult } from '../../core/models/container.model';
 import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
 import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
 import { ConfirmDialogComponent } from '../../shared/components/confirm-dialog/confirm-dialog.component';
 import { ReadOnlyTagComponent } from '../../shared/components/read-only-tag/read-only-tag.component';
+import { purgeMessage } from '../../shared/utils/removed';
 import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import {
   CONFIG_ORIGIN_HINT, sourceConnectionSummary, sourceDotClass, sourceStatusLabel,
@@ -46,6 +47,11 @@ export class ClustersComponent {
   /** null = closed; 'new' = create; SourceStatus = edit. */
   wizard       = signal<'new' | SourceStatus | null>(null);
   deleteTarget = signal<SourceStatus | null>(null);
+  /** Name prefilled (and locked) in the wizard when re-adding a removed cluster. */
+  readdName    = signal('');
+  purgeTarget  = signal<RemovedSource | null>(null);
+  purgingName  = signal<string | null>(null);
+  readonly purgeText = purgeMessage;
   purge        = signal(false);
   busyName     = signal<string | null>(null);
   meta         = signal<ServerMeta | null>(null);
@@ -81,11 +87,14 @@ export class ClustersComponent {
       }
     });
 
-    // /clusters?add=1 (command palette, empty states) opens the wizard directly.
+    // /clusters?add=1 (command palette, empty states) opens the wizard directly;
+    // /clusters?readd=<name> (history banner) opens it for a removed cluster.
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(qp => {
-      if (qp.get('add')) {
+      const readd = qp.get('readd');
+      if (qp.get('add') || readd) {
+        this.readdName.set(readd ?? '');
         this.wizard.set('new');
-        this.router.navigate([], { relativeTo: this.route, queryParams: { add: null }, queryParamsHandling: 'merge', replaceUrl: true });
+        this.router.navigate([], { relativeTo: this.route, queryParams: { add: null, readd: null }, queryParamsHandling: 'merge', replaceUrl: true });
       }
     });
   }
@@ -125,14 +134,40 @@ export class ClustersComponent {
     return parts.length ? parts.join(' · ') : 'No changes';
   }
 
-  openAdd(): void { this.wizard.set('new'); }
+  openAdd(): void {
+    this.readdName.set('');
+    this.wizard.set('new');
+  }
+
+  readd(r: RemovedSource): void {
+    this.readdName.set(r.name);
+    this.wizard.set('new');
+  }
+
+  closeWizard(): void {
+    this.wizard.set(null);
+    this.readdName.set('');
+  }
+
+  viewHistory(r: RemovedSource): void {
+    this.state.select(r.name);
+    this.router.navigate(['/workloads']);
+  }
+
+  confirmPurge(): void {
+    const r = this.purgeTarget();
+    if (!r) return;
+    this.purgeTarget.set(null);
+    this.purgingName.set(r.name);
+    this.state.purgeHistory(r.name, () => this.purgingName.set(null));
+  }
 
   openEdit(src: SourceStatus): void {
     if (src.origin === 'config') return;
     this.wizard.set(src);
   }
 
-  onSaved(): void { this.wizard.set(null); }
+  onSaved(): void { this.closeWizard(); }
 
   toggleEnabled(src: SourceStatus): void {
     if (src.origin === 'config' || this.busyName()) return;

@@ -59,7 +59,8 @@ export class DashboardComponent {
   private issueSvc   = inject(IssuesService);
 
   eventsError  = signal(false);
-  recentEvents = signal<LifecycleEvent[]>([]);
+  private loadedEvents = signal<LifecycleEvent[]>([]);
+  recentEvents = computed(() => this.sourceSvc.globalScope(this.loadedEvents(), e => e.source_name));
 
   clusters = this.sourceSvc.sources;
 
@@ -73,11 +74,14 @@ export class DashboardComponent {
   readonly dotClass    = sourceDotClass;
   readonly statusLabel = sourceStatusLabel;
 
-  /** The Overview always spans every cluster; system workloads are left out. */
-  private workloads = computed(() => this.state.workloads().filter(w => !w.is_system && isLongRunning(w)));
+  /** The Overview spans every connected cluster (or the selected removed one); system workloads are left out. */
+  private workloads = computed(() =>
+    this.sourceSvc.globalScope(this.state.workloads(), w => w.source_name).filter(w => !w.is_system && isLongRunning(w)));
 
   /** Open issues across all clusters, system workloads excluded. */
   issues    = computed(() => this.issueSvc.forCluster('', false));
+  /** Issues are derived from live status, which is frozen for removed clusters. */
+  historyMode = this.sourceSvc.historyMode;
   topIssues = computed(() => this.issues().slice(0, TOP_ISSUES));
 
   totalPods   = computed(() => this.workloads().reduce((n, w) => n + w.active_instances, 0));
@@ -95,7 +99,8 @@ export class DashboardComponent {
     for (const i of this.issues()) issueCount.set(i.source, (issueCount.get(i.source) ?? 0) + 1);
 
     // Prefer the backend's cluster list (has connection status); fall back to what workloads report.
-    const known = this.clusters();
+    // A removed cluster in history mode is not in that list: show its own card.
+    const known = this.historyMode() ? [] : this.clusters();
     const entries: { name: string; source: SourceStatus | null }[] = known.length
       ? known.map(s => ({ name: s.name, source: s }))
       : [...groups.keys()].map(name => ({ name, source: null }));
@@ -115,7 +120,7 @@ export class DashboardComponent {
 
   constructor() {
     // Workloads/issues come from the shared state; only the recent-events feed is loaded here.
-    reloadOnSourceAndRefresh({ ignoreSource: true, load: () => this.loadEvents() });
+    reloadOnSourceAndRefresh({ load: () => this.loadEvents() });
   }
 
   /** Two-digit channel number for the cluster card header. */
@@ -142,9 +147,11 @@ export class DashboardComponent {
   }
 
   loadEvents(): void {
-    this.svc.getRecentEvents(20).pipe(catchError(() => of(null))).subscribe(events => {
+    // A removed cluster is requested explicitly; otherwise the newest events are filtered to connected clusters.
+    const removed = this.sourceSvc.selectedRemoved()?.name;
+    this.svc.getRecentEvents(removed ? 20 : 40, removed).pipe(catchError(() => of(null))).subscribe(events => {
       this.eventsError.set(events === null);
-      if (events) this.recentEvents.set(events);
+      if (events) this.loadedEvents.set(events);
       this.refreshSvc.markUpdated();
     });
   }

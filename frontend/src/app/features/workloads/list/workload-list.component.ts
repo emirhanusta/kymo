@@ -9,7 +9,7 @@ import { WorkloadStateService } from '../../../core/services/workload-state.serv
 import { IssuesService } from '../../../core/services/issues.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import { reloadOnSourceAndRefresh } from '../../../core/utils/page-reload';
-import { WorkloadSummary } from '../../../core/models/container.model';
+import { Container, WorkloadSummary } from '../../../core/models/container.model';
 import { PeekController } from '../../../shared/utils/peek-controller';
 import { WorkloadPeekComponent } from '../../../shared/components/workload-peek/workload-peek.component';
 import { WorkloadBadgeComponent } from '../../../shared/components/workload-badge/workload-badge.component';
@@ -74,7 +74,14 @@ export class WorkloadListComponent {
   readonly formatScore   = formatScore;
 
   /** Archived + ignored containers (null until known / when unavailable). */
-  archivedCount = signal<number | null>(null);
+  private archivedAll = signal<Container[] | null>(null);
+  private ignoredAll  = signal<Container[] | null>(null);
+  archivedCount = computed<number | null>(() => {
+    const a = this.archivedAll(), i = this.ignoredAll();
+    if (a === null && i === null) return null;
+    const inScope = (l: Container[] | null) => this.sourceSvc.inScope(l ?? [], c => c.source_name).length;
+    return inScope(a) + inScope(i);
+  });
 
   // URL-backed filters
   kind      = signal('');
@@ -200,7 +207,7 @@ export class WorkloadListComponent {
     forkJoin([
       this.svc.getArchivedContainers(source).pipe(catchError(() => of(null))),
       this.svc.getIgnoredContainers(source).pipe(catchError(() => of(null))),
-    ]).subscribe(([a, i]) => this.archivedCount.set(a === null && i === null ? null : (a?.length ?? 0) + (i?.length ?? 0)));
+    ]).subscribe(([a, i]) => { this.archivedAll.set(a); this.ignoredAll.set(i); });
   }
 
   private matchesKind(w: WorkloadSummary): boolean {
