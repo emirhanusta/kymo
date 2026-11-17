@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
-import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, DeploymentInfo, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail } from '../models/container.model';
+import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, DeploymentInfo, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery } from '../models/container.model';
 
 export const API_BASE = '/api/v1';
 
@@ -21,10 +21,16 @@ export class ContainerService {
     return `${this.base}/containers/${encodeURIComponent(id)}/logs?tail=${tail}&follow=true`;
   }
 
-  getContainers(runtime?: string, sourceName?: string, filters: { q?: string; status?: string } = {}): Observable<Container[]> {
+  getContainers(
+    runtime?: string,
+    sourceName?: string,
+    filters: { q?: string; status?: string; workload_kind?: string; workload?: string } = {},
+  ): Observable<Container[]> {
     let params = new HttpParams();
     if (filters.q?.trim()) params = params.set('q', filters.q.trim());
     if (filters.status) params = params.set('status', filters.status);
+    if (filters.workload_kind) params = params.set('workload_kind', filters.workload_kind);
+    if (filters.workload) params = params.set('workload', filters.workload);
     if (runtime) {
       params = params.set('runtime', runtime);
     }
@@ -44,6 +50,8 @@ export class ContainerService {
     if (query.source) params = params.set('source', query.source);
     if (query.q?.trim()) params = params.set('q', query.q.trim());
     if (query.status) params = params.set('status', query.status);
+    if (query.workload_kind) params = params.set('workload_kind', query.workload_kind);
+    if (query.workload) params = params.set('workload', query.workload);
     return this.http.get<Page<Container>>(`${this.base}/containers`, { params });
   }
 
@@ -196,8 +204,15 @@ export class ContainerService {
   // --- Recent Events ---
 
   getRecentEvents(limit = 20, sourceName?: string): Observable<LifecycleEvent[]> {
-    let params = new HttpParams().set('limit', limit.toString());
-    if (sourceName) params = params.set('source', sourceName);
+    return this.queryRecentEvents({ limit, source: sourceName });
+  }
+
+  /** Newest first; `before` pages backwards (events strictly older than that timestamp). Max limit 200. */
+  queryRecentEvents(q: RecentEventsQuery): Observable<LifecycleEvent[]> {
+    let params = new HttpParams().set('limit', String(Math.min(q.limit ?? 20, 200)));
+    if (q.source) params = params.set('source', q.source);
+    if (q.type) params = params.set('type', q.type);
+    if (q.before) params = params.set('before', q.before);
     return this.http.get<LifecycleEvent[]>(`${this.base}/events/recent`, { params });
   }
 

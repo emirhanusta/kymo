@@ -1,5 +1,10 @@
-import { Routes } from '@angular/router';
+import { inject } from '@angular/core';
+import { Router, Routes } from '@angular/router';
 import { ShellComponent } from './layout/shell/shell.component';
+
+/** Old top-level workload pages now live under /workloads?view=…. */
+const workloadRedirect = (view: string) => () =>
+  inject(Router).createUrlTree(['/workloads'], { queryParams: { view } });
 
 export const routes: Routes = [
   {
@@ -27,30 +32,19 @@ export const routes: Routes = [
           ),
       },
       {
-        path: 'pods',
+        path: 'workloads',
         loadComponent: () =>
-          import('./features/pods/pods.component').then(m => m.PodsComponent),
+          import('./features/workloads/workloads.component').then(m => m.WorkloadsComponent),
       },
       {
-        path: 'pods/:id',
+        path: 'events',
         loadComponent: () =>
-          import('./features/containers/container-detail/container-detail.component').then(
-            m => m.ContainerDetailComponent
-          ),
+          import('./features/events/events.component').then(m => m.EventsComponent),
       },
       {
-        path: 'cronjobs',
+        path: 'sources',
         loadComponent: () =>
-          import('./features/cronjobs/cronjobs.component').then(
-            m => m.CronJobsComponent
-          ),
-      },
-      {
-        path: 'deployments',
-        loadComponent: () =>
-          import('./features/deployments/deployment-manager.component').then(
-            m => m.DeploymentManagerComponent
-          ),
+          import('./features/sources/sources.component').then(m => m.SourcesComponent),
       },
       {
         path: 'archive',
@@ -59,6 +53,20 @@ export const routes: Routes = [
             m => m.ArchiveComponent
           ),
       },
+
+      // ── legacy links ──────────────────────────────────────────────────────
+      {
+        path: 'pods',
+        pathMatch: 'full',
+        redirectTo: () =>
+          inject(Router).createUrlTree(['/containers'], { queryParams: { runtime: 'kubernetes' } }),
+      },
+      {
+        path: 'pods/:id',
+        redirectTo: ({ params }) => inject(Router).createUrlTree(['/containers', params['id']]),
+      },
+      { path: 'deployments', pathMatch: 'full', redirectTo: workloadRedirect('deployments') },
+      { path: 'cronjobs', pathMatch: 'full', redirectTo: workloadRedirect('cronjobs') },
     ],
   },
 ];

@@ -106,11 +106,13 @@ export class CommandPaletteComponent {
   }
 
   open(item: PaletteItem): void {
-    const target = item.kind === 'page'
-      ? [item.path]
-      : containerRoute(item.container.id, item.container.runtime);
     this.closed.emit();
-    this.router.navigate(target);
+    if (item.kind === 'page') {
+      // Page paths may carry a query string (e.g. /workloads?view=cronjobs).
+      this.router.navigateByUrl(item.path);
+    } else {
+      this.router.navigate(containerRoute(item.container.id, item.container.runtime));
+    }
   }
 
   optionId(i: number): string { return `kymo-palette-opt-${i}`; }

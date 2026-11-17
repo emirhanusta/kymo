@@ -1,7 +1,7 @@
 import {
   Component, ChangeDetectionStrategy, signal, computed, inject, untracked,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subject, of } from 'rxjs';
 import { catchError, debounceTime, distinctUntilChanged, map, switchMap } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -25,6 +25,7 @@ import { ErrorStateComponent } from '../../../shared/components/error-state/erro
 import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.component';
 import { SearchHotkeyDirective } from '../../../shared/directives/search-hotkey.directive';
 import { formatScore } from '../../../shared/utils/score';
+import { podNameFromId } from '../../../shared/utils/source';
 
 const PAGE_SIZE = 15;
 
@@ -36,6 +37,17 @@ export const STATUS_OPTIONS: { value: ContainerStatusFilter; label: string }[] =
   { value: 'paused',   label: 'Paused' },
   { value: 'unknown',  label: 'Unknown' },
 ];
+
+export type RuntimeFilter = '' | 'docker' | 'kubernetes';
+
+export const RUNTIME_OPTIONS: { value: RuntimeFilter; label: string }[] = [
+  { value: '',           label: 'All' },
+  { value: 'docker',     label: 'Docker' },
+  { value: 'kubernetes', label: 'Kubernetes' },
+];
+
+const asRuntime = (v: string | null): RuntimeFilter =>
+  v === 'docker' || v === 'kubernetes' ? v : '';
 
 type LoadResult = { ok: true; page: Page<Container> } | { ok: false; err: unknown };
 
@@ -55,9 +67,12 @@ export class ContainerListComponent {
   private sourceSvc  = inject(SourceStateService);
   private refreshSvc = inject(RefreshService);
   private toast      = inject(ToastService);
+  private route      = inject(ActivatedRoute);
+  private router     = inject(Router);
 
   readonly pageSize = PAGE_SIZE;
   readonly statusOptions = STATUS_OPTIONS;
+  readonly runtimeOptions = RUNTIME_OPTIONS;
   readonly formatScore = formatScore;
 
   /** First load (skeleton) vs. subsequent loads (dimmed table). */
@@ -75,13 +90,46 @@ export class ContainerListComponent {
   sortDir        = signal<'asc' | 'desc'>('desc');
   deleteTargetId = signal<string | null>(null);
 
-  hasFilters     = computed(() => !!this.query() || !!this.status());
+  /** URL-backed filters: ?runtime=docker|kubernetes&workload_kind=…&workload=… */
+  runtime        = signal<RuntimeFilter>('');
+  workloadKind   = signal('');
+  workload       = signal('');
+
+  hasFilters     = computed(() => !!this.query() || !!this.status() || !!this.runtime() || !!this.workloadKind() || !!this.workload());
   sourceSelected = computed(() => !!this.sourceSvc.selectedSource());
+  /** Namespace/Pod columns appear whenever Kubernetes rows can be on screen. */
+  showK8sColumns = computed(() =>
+    this.runtime() === 'kubernetes' ||
+    (this.runtime() === '' && this.containers().some(c => c.runtime === 'kubernetes'))
+  );
+  workloadLabel  = computed(() => {
+    const kind = this.workloadKind();
+    const name = this.workload();
+    if (kind && name) return `${kind} ${name}`;
+    return kind || name;
+  });
 
   private search$  = new Subject<string>();
   private request$ = new Subject<void>();
 
   constructor() {
+    // Filters live in the query string so links like /containers?workload_kind=Compose&workload=shop work.
+    let firstParams = true;
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(qp => {
+      const runtime = asRuntime(qp.get('runtime'));
+      const kind    = qp.get('workload_kind') ?? '';
+      const name    = qp.get('workload') ?? '';
+      const changed = runtime !== this.runtime() || kind !== this.workloadKind() || name !== this.workload();
+      this.runtime.set(runtime);
+      this.workloadKind.set(kind);
+      this.workload.set(name);
+      if (firstParams) { firstParams = false; return; } // initial load comes from reloadOnSourceAndRefresh
+      if (changed) {
+        this.page.set(1);
+        this.fetch();
+      }
+    });
+
     this.search$.pipe(
       map(v => v.trim()),
       debounceTime(300),
@@ -100,10 +148,12 @@ export class ContainerListComponent {
         limit:   PAGE_SIZE,
         sort:    this.sortField(),
         order:   this.sortDir(),
-        runtime: 'docker' as const,
+        runtime: this.runtime() || undefined,
         source:  this.sourceSvc.selectedSource() || undefined,
         q:       this.query() || undefined,
         status:  this.status() || undefined,
+        workload_kind: this.workloadKind() || undefined,
+        workload:      this.workload() || undefined,
       }))).pipe(
         map((page): LoadResult => ({ ok: true, page })),
         catchError(err => of<LoadResult>({ ok: false, err })),
@@ -128,7 +178,40 @@ export class ContainerListComponent {
     this.query.set('');
     this.status.set('');
     this.page.set(1);
-    this.fetch();
+    if (this.runtime() || this.workloadKind() || this.workload()) {
+      this.setQueryParams({ runtime: null, workload_kind: null, workload: null }); // triggers fetch
+    } else {
+      this.fetch();
+    }
+  }
+
+  setRuntime(value: RuntimeFilter): void {
+    this.setQueryParams({ runtime: value || null });
+  }
+
+  clearWorkload(): void {
+    this.setQueryParams({ workload_kind: null, workload: null });
+  }
+
+  private setQueryParams(params: Record<string, string | null>): void {
+    this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: params,
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
+  /** Secondary line under the name: source (when all sources) and runtime (when both runtimes are listed). */
+  subLine(c: Container): string {
+    const parts: string[] = [];
+    if (!this.sourceSelected()) parts.push(c.source_name);
+    if (!this.runtime()) parts.push(c.runtime === 'kubernetes' ? 'k8s' : 'docker');
+    return parts.filter(Boolean).join(' · ');
+  }
+
+  podName(c: Container): string {
+    return c.runtime === 'kubernetes' ? podNameFromId(c.id) : '';
   }
 
   setStatus(value: ContainerStatusFilter): void {
@@ -180,7 +263,7 @@ export class ContainerListComponent {
         this.toast.success(res?.message || (action === 'soft' ? 'Container archived' : 'Container ignored'));
         this.fetch();
       },
-      error: err => this.toast.error(err?.error?.message || 'Operation failed'),
+      error: err => this.toast.apiError(err, 'Operation failed'),
     });
   }
 

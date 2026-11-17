@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"sync"
 	"time"
 
 	containertypes "github.com/docker/docker/api/types/container"
@@ -14,74 +15,128 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+
+	"github.com/emirhanusta/kymo/internal/kube"
+	"github.com/emirhanusta/kymo/internal/model"
 )
 
 type managementService struct {
-	dockerClients map[string]*dockerclient.Client // keyed by source name; may be empty
-	dockerOrder   []string                        // source names in config order
-	k8sClients    map[string]kubernetes.Interface // keyed by source name; may be empty
-	k8sOrder      []string                        // source names in config order
+	mu            sync.RWMutex
+	dockerClients map[string]*dockerclient.Client // keyed by source name
+	dockerOrder   []string                        // registration order (fallback choice)
+	k8sClients    map[string]kubernetes.Interface // keyed by source name
+	k8sOrder      []string
 	log           *zap.Logger
 }
 
-// NewManagementService constructs a ManagementService backed by the provided
-// clients, keyed by source name. dockerOrder / k8sOrder list the source names in
-// configuration order and determine the fallback client when a call does not
-// name a source. Attempts to call methods for a missing runtime return an error.
-func NewManagementService(
-	dockerClients map[string]*dockerclient.Client, dockerOrder []string,
-	k8sClients map[string]kubernetes.Interface, k8sOrder []string,
-	log *zap.Logger,
-) ManagementService {
-	if dockerClients == nil {
-		dockerClients = make(map[string]*dockerclient.Client)
-	}
-	if k8sClients == nil {
-		k8sClients = make(map[string]kubernetes.Interface)
-	}
+// NewManagementService constructs an empty ManagementService. Clients are
+// added with RegisterSource as sources are configured or created at runtime.
+func NewManagementService(log *zap.Logger) ManagementService {
 	return &managementService{
-		dockerClients: dockerClients, dockerOrder: dockerOrder,
-		k8sClients: k8sClients, k8sOrder: k8sOrder,
-		log: log,
+		dockerClients: make(map[string]*dockerclient.Client),
+		k8sClients:    make(map[string]kubernetes.Interface),
+		log:           log,
 	}
 }
 
+// NewDockerClient creates a Docker API client for socket ("" = DOCKER_HOST /
+// default socket) with API-version negotiation.
+func NewDockerClient(socket string) (*dockerclient.Client, error) {
+	opts := []dockerclient.Opt{dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation()}
+	if socket != "" {
+		opts = append(opts, dockerclient.WithHost(socket))
+	}
+	return dockerclient.NewClientWithOpts(opts...)
+}
+
+// RegisterSource builds and stores the management client for spec, replacing
+// any previous client with the same name.
+func (s *managementService) RegisterSource(spec model.SourceSpec) error {
+	s.UnregisterSource(spec.Name)
+	switch spec.Type {
+	case model.SourceTypeDocker:
+		cli, err := NewDockerClient(spec.Socket)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.dockerClients[spec.Name] = cli
+		s.dockerOrder = append(s.dockerOrder, spec.Name)
+		s.mu.Unlock()
+	case model.SourceTypeKubernetes:
+		cli, _, err := kube.Clientset(spec.KubeconfigPath, spec.Kubeconfig, spec.KubeContext)
+		if err != nil {
+			return err
+		}
+		s.mu.Lock()
+		s.k8sClients[spec.Name] = cli
+		s.k8sOrder = append(s.k8sOrder, spec.Name)
+		s.mu.Unlock()
+	default:
+		return fmt.Errorf("unknown source type %q", spec.Type)
+	}
+	return nil
+}
+
+// UnregisterSource drops (and closes) the client for a source, if any.
+func (s *managementService) UnregisterSource(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if cli, ok := s.dockerClients[name]; ok {
+		_ = cli.Close()
+		delete(s.dockerClients, name)
+		s.dockerOrder = without(s.dockerOrder, name)
+	}
+	if _, ok := s.k8sClients[name]; ok {
+		delete(s.k8sClients, name)
+		s.k8sOrder = without(s.k8sOrder, name)
+	}
+}
+
+// ResolveK8sSource returns the source a Kubernetes call would target: the
+// given name if it has a client, else the first registered cluster.
+func (s *managementService) ResolveK8sSource(sourceName string) (string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if sourceName != "" {
+		if _, ok := s.k8sClients[sourceName]; ok {
+			return sourceName, nil
+		}
+		return "", fmt.Errorf("no kubernetes client configured for source %q", sourceName)
+	}
+	if len(s.k8sOrder) > 0 {
+		return s.k8sOrder[0], nil
+	}
+	return "", fmt.Errorf("kubernetes client not available")
+}
+
 // getDockerClient returns the Docker client for the given source name, or the
-// first configured one when sourceName is empty.
+// first registered one when sourceName is empty.
 func (s *managementService) getDockerClient(sourceName string) (*dockerclient.Client, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
 	if sourceName != "" {
 		if cli, ok := s.dockerClients[sourceName]; ok {
 			return cli, nil
 		}
 		return nil, fmt.Errorf("no docker client configured for source %q", sourceName)
 	}
-	for _, name := range s.dockerOrder {
-		if cli, ok := s.dockerClients[name]; ok {
-			return cli, nil
-		}
+	if len(s.dockerOrder) > 0 {
+		return s.dockerClients[s.dockerOrder[0]], nil
 	}
 	return nil, fmt.Errorf("docker client not available")
 }
 
-// getK8sClient returns the Kubernetes client for the given source name.
-// If sourceName is empty, the first available client is returned.
+// getK8sClient returns the Kubernetes client for the given source name, or
+// the first registered cluster when sourceName is empty.
 func (s *managementService) getK8sClient(sourceName string) (kubernetes.Interface, error) {
-	if len(s.k8sClients) == 0 {
-		return nil, fmt.Errorf("kubernetes client not available")
+	name, err := s.ResolveK8sSource(sourceName)
+	if err != nil {
+		return nil, err
 	}
-	if sourceName != "" {
-		if cli, ok := s.k8sClients[sourceName]; ok {
-			return cli, nil
-		}
-		return nil, fmt.Errorf("no kubernetes client configured for source %q", sourceName)
-	}
-	// Fall back to the first configured client (deterministic, config order).
-	for _, name := range s.k8sOrder {
-		if cli, ok := s.k8sClients[name]; ok {
-			return cli, nil
-		}
-	}
-	return nil, fmt.Errorf("kubernetes client not available")
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.k8sClients[name], nil
 }
 
 // ---------------------------------------------------------------------------
@@ -194,7 +249,10 @@ func (s *managementService) RestartDeployment(ctx context.Context, sourceName, n
 }
 
 func (s *managementService) ListNamespaces(ctx context.Context, sourceName string) ([]string, error) {
-	if len(s.k8sClients) == 0 {
+	s.mu.RLock()
+	none := len(s.k8sClients) == 0
+	s.mu.RUnlock()
+	if none {
 		return []string{"local"}, nil
 	}
 	k8s, err := s.getK8sClient(sourceName)
@@ -213,7 +271,11 @@ func (s *managementService) ListNamespaces(ctx context.Context, sourceName strin
 }
 
 func (s *managementService) ListDeployments(ctx context.Context, sourceName, namespace string) ([]DeploymentInfo, error) {
-	k8s, err := s.getK8sClient(sourceName)
+	resolved, err := s.ResolveK8sSource(sourceName)
+	if err != nil {
+		return nil, err
+	}
+	k8s, err := s.getK8sClient(resolved)
 	if err != nil {
 		return nil, err
 	}
@@ -238,6 +300,7 @@ func (s *managementService) ListDeployments(ctx context.Context, sourceName, nam
 			ReadyReplicas: d.Status.ReadyReplicas,
 			Image:         image,
 			CreatedAt:     d.CreationTimestamp.UTC().Format(time.RFC3339),
+			SourceName:    resolved,
 		})
 	}
 	return result, nil

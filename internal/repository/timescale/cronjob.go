@@ -81,6 +81,15 @@ func (r *cronJobRepo) FindLatestPerCronJob(ctx context.Context, sourceName, name
 	return scanCronJobRows(rows)
 }
 
+// DeleteBySource removes every execution recorded for the source.
+func (r *cronJobRepo) DeleteBySource(ctx context.Context, sourceName string) (int64, error) {
+	tag, err := r.db.pool.Exec(ctx, `DELETE FROM cronjob_executions WHERE source_name = $1`, sourceName)
+	if err != nil {
+		return 0, fmt.Errorf("timescale: cronjob delete by source: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // scanCronJobRows is a shared helper that scans pgx rows into CronJobExecution slices.
 func scanCronJobRows(rows interface {
 	Next() bool

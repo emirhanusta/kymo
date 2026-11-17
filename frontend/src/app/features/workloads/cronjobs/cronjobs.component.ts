@@ -3,20 +3,19 @@ import {
 } from '@angular/core';
 import { DecimalPipe, DatePipe } from '@angular/common';
 
-import { ContainerService } from '../../core/services/container.service';
-import { RefreshService } from '../../core/services/refresh.service';
-import { SourceStateService } from '../../core/services/source-state.service';
-import { reloadOnSourceAndRefresh } from '../../core/utils/page-reload';
-import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
-import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
-import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
-import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
-import { SearchHotkeyDirective } from '../../shared/directives/search-hotkey.directive';
-import { scoreTextClass } from '../../shared/utils/score';
-import { CronJobExecution, CronJobSummary } from '../../core/models/container.model';
-import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
-import { PaginationComponent } from '../../shared/components/pagination/pagination.component';
-import { NamespaceSelectorComponent } from '../../shared/components/namespace-selector/namespace-selector.component';
+import { ContainerService } from '../../../core/services/container.service';
+import { RefreshService } from '../../../core/services/refresh.service';
+import { SourceStateService } from '../../../core/services/source-state.service';
+import { reloadOnSourceAndRefresh } from '../../../core/utils/page-reload';
+import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
+import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
+import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.component';
+import { SearchHotkeyDirective } from '../../../shared/directives/search-hotkey.directive';
+import { scoreTextClass } from '../../../shared/utils/score';
+import { CronJobExecution, CronJobSummary } from '../../../core/models/container.model';
+import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
+import { PaginationComponent } from '../../../shared/components/pagination/pagination.component';
+import { NamespaceSelectorComponent } from '../../../shared/components/namespace-selector/namespace-selector.component';
 
 type SortField = 'cronjob_name' | 'namespace' | 'last_run' | 'status';
 
@@ -27,7 +26,7 @@ const PAGE_SIZE = 15;
   standalone: true,
   imports: [
     DecimalPipe, DatePipe, TimeagoPipe, PaginationComponent, NamespaceSelectorComponent,
-    PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent, SearchHotkeyDirective,
+    EmptyStateComponent, ErrorStateComponent, SkeletonComponent, SearchHotkeyDirective,
   ],
   templateUrl: './cronjobs.component.html',
   styleUrl: './cronjobs.component.scss',

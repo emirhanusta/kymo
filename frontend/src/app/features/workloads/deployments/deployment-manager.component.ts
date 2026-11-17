@@ -3,30 +3,32 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 
-import { ContainerService } from '../../core/services/container.service';
-import { ToastService } from '../../core/services/toast.service';
-import { RefreshService } from '../../core/services/refresh.service';
-import { SourceStateService } from '../../core/services/source-state.service';
-import { reloadOnSourceAndRefresh } from '../../core/utils/page-reload';
-import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
-import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
-import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
-import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
-import { DeploymentInfo, DeploymentDetail, DeploymentPod } from '../../core/models/container.model';
-import { PaginationComponent } from '../../shared/components/pagination/pagination.component';
-import { NamespaceSelectorComponent } from '../../shared/components/namespace-selector/namespace-selector.component';
+import { ContainerService } from '../../../core/services/container.service';
+import { ToastService } from '../../../core/services/toast.service';
+import { RefreshService } from '../../../core/services/refresh.service';
+import { SourceStateService } from '../../../core/services/source-state.service';
+import { reloadOnSourceAndRefresh } from '../../../core/utils/page-reload';
+import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
+import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
+import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.component';
+import { DeploymentInfo, DeploymentDetail, DeploymentPod } from '../../../core/models/container.model';
+import { PaginationComponent } from '../../../shared/components/pagination/pagination.component';
+import { NamespaceSelectorComponent } from '../../../shared/components/namespace-selector/namespace-selector.component';
 
 type SortField = 'name' | 'namespace' | 'replicas' | 'ready';
 
 const PAGE_SIZE = 15;
 
-import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
-import { StatusKey, worstStatus } from '../../shared/utils/status';
+import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { ReadOnlyTagComponent } from '../../../shared/components/read-only-tag/read-only-tag.component';
+import { StatusKey, worstStatus } from '../../../shared/utils/status';
+import { containerRoute } from '../../../shared/utils/format';
+
 
 @Component({
   selector: 'app-deployment-manager',
   standalone: true,
-  imports: [StatusBadgeComponent, PaginationComponent, NamespaceSelectorComponent, PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent],
+  imports: [StatusBadgeComponent, ReadOnlyTagComponent, PaginationComponent, NamespaceSelectorComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent],
   templateUrl: './deployment-manager.component.html',
   styleUrl: './deployment-manager.component.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -158,7 +160,7 @@ export class DeploymentManagerComponent {
     }
     this.selectedDeployment.set(dep);
     this.detailLoading.set(true);
-    const source = this.sourceSvc.selectedSource() || undefined;
+    const source = this.sourceOf(dep) || undefined;
     this.svc.getDeploymentDetail(dep.namespace, dep.name, source).subscribe({
       next: detail => {
         this.deploymentDetail.set(detail);
@@ -171,7 +173,23 @@ export class DeploymentManagerComponent {
   navigateToPod(pod: DeploymentPod): void {
     const first = pod.containers[0];
     if (!first) return;
-    this.router.navigate(['/pods', first.id]);
+    this.router.navigate(containerRoute(first.id, first.runtime));
+  }
+
+  /**
+   * Source a deployment belongs to: the backend's `source_name` when present, else the selected source,
+   * else the source the backend falls back to without `?source=` (first Kubernetes source).
+   */
+  sourceOf(dep: DeploymentInfo): string {
+    return dep.source_name
+      || this.sourceSvc.selectedSource()
+      || this.sourceSvc.defaultSourceOf('kubernetes')?.name
+      || '';
+  }
+
+  /** Scale / rollout restart are hidden for deployments of read-only sources. */
+  isReadOnly(dep: DeploymentInfo): boolean {
+    return this.sourceSvc.isReadOnly(this.sourceOf(dep));
   }
 
   replicaStatus(dep: DeploymentInfo): 'ok' | 'partial' | 'down' {
@@ -207,7 +225,7 @@ export class DeploymentManagerComponent {
     const replicas = this.scaleValues[key] ?? dep.replicas;
     if (this.busyKey()) return;
     this.busyKey.set(key);
-    const source = this.sourceSvc.selectedSource() || undefined;
+    const source = this.sourceOf(dep) || undefined;
     this.svc.scaleDeployment(dep.namespace, dep.name, replicas, source).subscribe({
       next: (res) => {
         this.busyKey.set(null);
@@ -220,7 +238,7 @@ export class DeploymentManagerComponent {
       },
       error: (err) => {
         this.busyKey.set(null);
-        this.toast.error(err?.error?.message || 'Scale failed');
+        this.toast.apiError(err, 'Scale failed');
       },
     });
   }
@@ -229,7 +247,7 @@ export class DeploymentManagerComponent {
     const key = `${dep.namespace}/${dep.name}`;
     if (this.busyKey()) return;
     this.busyKey.set(key);
-    const source = this.sourceSvc.selectedSource() || undefined;
+    const source = this.sourceOf(dep) || undefined;
     this.svc.restartDeployment(dep.namespace, dep.name, source).subscribe({
       next: (res) => {
         this.busyKey.set(null);
@@ -241,7 +259,7 @@ export class DeploymentManagerComponent {
       },
       error: (err) => {
         this.busyKey.set(null);
-        this.toast.error(err?.error?.message || 'Restart failed');
+        this.toast.apiError(err, 'Restart failed');
       },
     });
   }
@@ -276,7 +294,7 @@ export class DeploymentManagerComponent {
     this.scalingKey.set(null);
     if (this.busyKey()) return;
     this.busyKey.set(key);
-    const source = this.sourceSvc.selectedSource() || undefined;
+    const source = this.sourceOf(dep) || undefined;
     this.svc.scaleDeployment(dep.namespace, dep.name, replicas, source).subscribe({
       next: res => {
         this.busyKey.set(null);
@@ -289,7 +307,7 @@ export class DeploymentManagerComponent {
       },
       error: err => {
         this.busyKey.set(null);
-        this.toast.error(err?.error?.message || 'Scale failed');
+        this.toast.apiError(err, 'Scale failed');
       },
     });
   }
@@ -298,7 +316,7 @@ export class DeploymentManagerComponent {
     const key = this.depKey(dep);
     if (this.restartingKey()) return;
     this.restartingKey.set(key);
-    const source = this.sourceSvc.selectedSource() || undefined;
+    const source = this.sourceOf(dep) || undefined;
     this.svc.restartDeployment(dep.namespace, dep.name, source).subscribe({
       next: res => {
         this.restartingKey.set(null);
@@ -310,7 +328,7 @@ export class DeploymentManagerComponent {
       },
       error: err => {
         this.restartingKey.set(null);
-        this.toast.error(err?.error?.message || 'Restart failed');
+        this.toast.apiError(err, 'Restart failed');
       },
     });
   }

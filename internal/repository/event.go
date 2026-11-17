@@ -7,6 +7,16 @@ import (
 	"github.com/emirhanusta/kymo/internal/model"
 )
 
+// EventQuery filters the global event feed. Zero values mean "no filter".
+type EventQuery struct {
+	Limit  int
+	Source string
+	Type   model.EventType
+	// Before returns only events that occurred strictly before this time
+	// (cursor for "load older").
+	Before time.Time
+}
+
 // EventRepository defines the persistence operations for LifecycleEvent records.
 // Implementations are expected to be safe for concurrent use.
 type EventRepository interface {
@@ -22,8 +32,8 @@ type EventRepository interface {
 	// after since, ordered by OccurredAt ascending.
 	FindByContainerIDSince(ctx context.Context, containerID string, since time.Time) ([]*model.LifecycleEvent, error)
 
-	// FindRecent returns the n most recent lifecycle events across all containers,
-	// ordered by OccurredAt descending, with ContainerName and Runtime populated.
-	// Pass a non-empty sourceName to restrict the feed to one source.
-	FindRecent(ctx context.Context, n int, sourceName string) ([]*model.LifecycleEvent, error)
+	// FindRecent returns the most recent lifecycle events across all containers
+	// matching q, ordered by OccurredAt descending, with ContainerName and
+	// Runtime populated.
+	FindRecent(ctx context.Context, q EventQuery) ([]*model.LifecycleEvent, error)
 }

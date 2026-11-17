@@ -41,6 +41,9 @@ services:
       KYMO_COLLECTOR_SCORING_WINDOW:      "24h"
       KYMO_LOG_LEVEL:                     "info"
       KYMO_LOG_FORMAT:                    "json"
+      # Required to upload kubeconfigs from the Sources page; keep it stable,
+      # stored kubeconfigs cannot be decrypted with a different key.
+      KYMO_SECRET_KEY:                    "${KYMO_SECRET_KEY:-}"
       # With no config file mounted a single "local-docker" source is used.
       # Mount a config.yaml at /etc/kymo/config.yaml to add Kubernetes
       # sources (and the kubeconfig files they reference).

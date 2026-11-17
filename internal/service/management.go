@@ -6,6 +6,8 @@ package service
 import (
 	"context"
 	"io"
+
+	"github.com/emirhanusta/kymo/internal/model"
 )
 
 // ManagementService exposes runtime-level control operations for containers
@@ -13,6 +15,16 @@ import (
 // container ID; all methods that target Kubernetes accept the individual
 // components of a container ID (namespace / pod / container).
 type ManagementService interface {
+	// --- Client registry ---
+
+	// RegisterSource creates (or replaces) the runtime client for a source.
+	RegisterSource(spec model.SourceSpec) error
+	// UnregisterSource removes a source's client.
+	UnregisterSource(name string)
+	// ResolveK8sSource returns the cluster a Kubernetes call targets when given
+	// sourceName ("" = first registered cluster).
+	ResolveK8sSource(sourceName string) (string, error)
+
 	// --- Docker operations ---
 	// sourceName selects which Docker daemon to target; pass "" to use the
 	// first configured daemon.
@@ -52,4 +64,6 @@ type DeploymentInfo struct {
 	ReadyReplicas int32  `json:"ready_replicas"`
 	Image         string `json:"image"`
 	CreatedAt     string `json:"created_at"`
+	// SourceName is the cluster (collector source) the deployment belongs to.
+	SourceName string `json:"source_name"`
 }

@@ -2,8 +2,8 @@
 
   <!-- Left panel: CronJob list -->
   <div class="space-y-4 transition-all duration-300 w-full min-w-0" [class.lg:w-1/3]="selectedCronJob()">
-    <app-page-header title="CronJobs">
-      <ng-container subtitle>
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <p class="text-xs text-kymo-muted" aria-live="polite">
         @if (loading()) {
           Loading…
         } @else if (filteredCronJobs().length > 0) {
@@ -11,23 +11,25 @@
         } @else {
           No CronJobs
         }
-      </ng-container>
-      <app-namespace-selector
-        [sourceName]="sourceSvc.selectedSource()"
-        [selected]="selectedNamespace()"
-        (namespaceChange)="onNamespaceChange($event)"
-      />
-      <input
-        appSearchHotkey
-        type="search"
-        placeholder="Filter (press /)"
-        aria-label="Filter cronjobs"
-        class="k-input w-44"
-        [value]="search()"
-        (input)="onSearch($any($event.target).value)"
-        (keydown.escape)="onSearch('')"
-      />
-    </app-page-header>
+      </p>
+      <div class="flex items-center gap-2 flex-wrap">
+        <app-namespace-selector
+          [sourceName]="sourceSvc.selectedSource()"
+          [selected]="selectedNamespace()"
+          (namespaceChange)="onNamespaceChange($event)"
+        />
+        <input
+          appSearchHotkey
+          type="search"
+          placeholder="Filter (press /)"
+          aria-label="Filter cronjobs"
+          class="k-input w-44"
+          [value]="search()"
+          (input)="onSearch($any($event.target).value)"
+          (keydown.escape)="onSearch('')"
+        />
+      </div>
+    </div>
 
     @if (error()) {
       <app-error-state message="Failed to load CronJobs" (retry)="loadData()" />
