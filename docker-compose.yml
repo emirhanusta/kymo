@@ -1,0 +1,59 @@
+services:
+
+  # ---------------------------------------------------------------------------
+  # timescaledb — primary persistence store
+  # ---------------------------------------------------------------------------
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: kymo-timescaledb
+    environment:
+      POSTGRES_DB:       kymo
+      POSTGRES_USER:     kymo
+      POSTGRES_PASSWORD: kymo
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kymo -d kymo"]
+      interval: 10s
+      timeout:  5s
+      retries:  5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # kymo — the KYMO service (API + web UI on :8080)
+  # Schema migrations are applied automatically on startup.
+  # ---------------------------------------------------------------------------
+  kymo:
+    build:
+      context:    .
+      dockerfile: Dockerfile
+    container_name: kymo
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      KYMO_DATABASE_DSN:                  "postgres://kymo:kymo@timescaledb:5432/kymo?sslmode=disable"
+      KYMO_SERVER_ADDRESS:                ":8080"
+      KYMO_COLLECTOR_STATS_POLL_INTERVAL: "15s"
+      KYMO_COLLECTOR_SCORING_INTERVAL:    "60s"
+      KYMO_COLLECTOR_SCORING_WINDOW:      "24h"
+      KYMO_LOG_LEVEL:                     "info"
+      KYMO_LOG_FORMAT:                    "json"
+      # With no config file mounted a single "local-docker" source is used.
+      # Mount a config.yaml at /etc/kymo/config.yaml to add Kubernetes
+      # sources (and the kubeconfig files they reference).
+    # The service runs as a non-root user; give it the Docker socket's group.
+    # Find yours with: stat -c '%g' /var/run/docker.sock
+    group_add:
+      - "${DOCKER_GID:-999}"
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount the Docker socket so the Docker collector can reach the daemon.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
+volumes:
+  timescaledb_data:

@@ -1,0 +1,35 @@
+<div class="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
+  <div class="k-paper border border-kymo-rule p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <h3 class="k-label">CPU</h3>
+      <span class="text-lg font-medium text-kymo-amber tabular-nums leading-none" title="Latest sample">{{ latest().cpu }}</span>
+    </div>
+    <div class="relative h-48"><canvas #cpuCanvas></canvas></div>
+  </div>
+  <div class="k-paper border border-kymo-rule p-4">
+    <div class="flex items-baseline justify-between mb-3">
+      <h3 class="k-label">Memory</h3>
+      <span class="text-lg font-medium text-kymo-running tabular-nums leading-none" title="Latest sample">{{ latest().mem }}</span>
+    </div>
+    <div class="relative h-48"><canvas #memCanvas></canvas></div>
+  </div>
+  <div class="k-paper border border-kymo-rule p-4 lg:col-span-2 2xl:col-span-1">
+    <div class="flex items-baseline justify-between mb-3 gap-3">
+      <h3 class="k-label">Network</h3>
+      @if (hasNet()) {
+        <span class="text-xs tabular-nums">
+          <span class="text-kymo-paused">↓ {{ latest().rx }}</span>
+          <span class="text-kymo-running ml-2">↑ {{ latest().tx }}</span>
+        </span>
+      }
+    </div>
+    <div class="relative h-48">
+      <canvas #netCanvas [class.invisible]="!hasNet()"></canvas>
+      @if (!hasNet()) {
+        <div class="absolute inset-0 flex items-center justify-center text-xs text-kymo-faint bg-kymo-panel/60">
+          no network counters in range
+        </div>
+      }
+    </div>
+  </div>
+</div>

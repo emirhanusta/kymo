@@ -1,0 +1,58 @@
+@if (total > 0) {
+  <div class="flex items-center justify-between gap-4 mt-4 px-1">
+    <!-- Item count -->
+    <span class="text-xs text-kymo-muted tabular-nums">
+      {{ from }}–{{ to }} of {{ total }}
+    </span>
+
+    <!-- Page controls (only render buttons when multiple pages exist) -->
+    @if (totalPages > 1) {
+      <div class="flex items-center gap-1">
+        <!-- Prev -->
+        <button
+          type="button"
+          class="px-2 py-1 border border-transparent text-xs transition-colors"
+          [class.text-kymo-ink]="page > 1"
+          [class.hover:bg-kymo-raised]="page > 1"
+          [class.text-kymo-faint]="page <= 1"
+          [class.cursor-not-allowed]="page <= 1"
+          [disabled]="page <= 1"
+          (click)="goTo(page - 1)"
+          aria-label="Previous page"
+        >&#8592;</button>
+
+        <!-- Page numbers -->
+        @for (p of pages; track $index) {
+          @if (p === '...') {
+            <span class="px-2 py-1 text-xs font-mono text-kymo-faint">…</span>
+          } @else {
+            <button
+              type="button"
+              class="min-w-[28px] px-2 py-1 border border-transparent text-xs transition-colors"
+              [class.border-kymo-amber]="p === page"
+              [class.text-kymo-amber]="p === page"
+              [class.border-transparent]="p !== page"
+              [attr.aria-current]="p === page ? 'page' : null"
+              [class.text-kymo-muted]="p !== page"
+              [class.hover:bg-kymo-raised]="p !== page"
+              (click)="goTo(+p)"
+            >{{ p }}</button>
+          }
+        }
+
+        <!-- Next -->
+        <button
+          type="button"
+          class="px-2 py-1 border border-transparent text-xs transition-colors"
+          [class.text-kymo-ink]="page < totalPages"
+          [class.hover:bg-kymo-raised]="page < totalPages"
+          [class.text-kymo-faint]="page >= totalPages"
+          [class.cursor-not-allowed]="page >= totalPages"
+          [disabled]="page >= totalPages"
+          (click)="goTo(page + 1)"
+          aria-label="Next page"
+        >&#8594;</button>
+      </div>
+    }
+  </div>
+}

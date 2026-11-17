@@ -1,0 +1,76 @@
+<div class="fixed inset-0 bg-kymo-deep/85 z-50 flex items-start justify-center px-4 pt-[12vh]" (click)="closed.emit()">
+  <div
+    appDialog
+    (dismiss)="closed.emit()"
+    aria-label="Command palette"
+    class="w-full max-w-xl bg-kymo-deep border border-kymo-rule border-t-kymo-amber"
+    (click)="$event.stopPropagation()"
+  >
+    <div class="flex items-center gap-2.5 px-3 border-b border-kymo-rule">
+      <span class="text-kymo-amber text-sm" aria-hidden="true">&gt;</span>
+      <input
+        data-autofocus
+        type="text"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-controls="kymo-palette-list"
+        [attr.aria-expanded]="items().length > 0"
+        [attr.aria-activedescendant]="items().length ? optionId(active()) : null"
+        aria-label="Search pages and containers"
+        placeholder="jump to page or container…"
+        autocomplete="off"
+        spellcheck="false"
+        class="flex-1 h-11 bg-transparent text-sm text-kymo-ink placeholder:text-kymo-faint outline-none focus-visible:outline-none"
+        [value]="query()"
+        (input)="onInput($any($event.target).value)"
+        (keydown)="onKeydown($event)"
+      />
+      @if (searching()) {
+        <span class="k-led bg-kymo-amber animate-pulse" aria-hidden="true"></span>
+      }
+      <span class="k-kbd">esc</span>
+    </div>
+
+    <ul id="kymo-palette-list" role="listbox" class="max-h-[50vh] overflow-y-auto scrollbar-thin py-1">
+      @for (item of items(); track item.key; let i = $index) {
+        @if (i === 0 && item.kind === 'page') {
+          <li role="presentation" class="k-label px-3 pt-2 pb-1">Pages</li>
+        }
+        @if (item.kind === 'container' && (i === 0 || items()[i - 1].kind === 'page')) {
+          <li role="presentation" class="k-label px-3 pt-3 pb-1 border-t border-kymo-rule mt-1 first:border-t-0 first:mt-0">Containers</li>
+        }
+        <li
+          [id]="optionId(i)"
+          role="option"
+          [attr.aria-selected]="i === active()"
+          class="flex items-center gap-3 px-3 py-2 text-xs cursor-pointer border-l-2"
+          [class.bg-kymo-raised]="i === active()"
+          [class.border-kymo-amber]="i === active()"
+          [class.border-transparent]="i !== active()"
+          (mouseenter)="active.set(i)"
+          (click)="open(item)"
+        >
+          @if (item.kind === 'page') {
+            <span class="text-kymo-faint w-3" aria-hidden="true">#</span>
+            <span class="flex-1 text-kymo-ink">{{ item.label }}</span>
+            <span class="text-kymo-faint">{{ item.path }}</span>
+          } @else {
+            <app-status-badge [status]="item.container.current_status" compact />
+            <span class="flex-1 min-w-0 truncate" [class]="i === active() ? 'text-kymo-amber' : 'text-kymo-ink'">{{ item.container.name }}</span>
+            <span class="text-kymo-muted truncate max-w-[30%]">{{ item.container.source_name }}</span>
+            <span class="w-8 text-right tabular-nums font-medium" [class]="item.container.score | scoreClass">{{ formatScore(item.container.score) }}</span>
+          }
+        </li>
+      }
+      @if (query().trim() && !searching() && containers().length === 0) {
+        <li role="presentation" class="px-3 py-3 text-xs text-kymo-faint">no containers match “{{ query() }}”</li>
+      }
+    </ul>
+
+    <div class="flex items-center gap-3 px-3 py-1.5 border-t border-kymo-rule text-[10px] text-kymo-faint">
+      <span><span class="k-kbd">↑</span> <span class="k-kbd">↓</span> move</span>
+      <span><span class="k-kbd">↵</span> open</span>
+      <span><span class="k-kbd">esc</span> close</span>
+    </div>
+  </div>
+</div>

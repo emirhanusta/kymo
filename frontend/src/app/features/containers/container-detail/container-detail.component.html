@@ -1,0 +1,275 @@
+<div class="space-y-6">
+  @if (loading()) {
+    <div class="space-y-6 animate-pulse" aria-busy="true" aria-label="Loading container">
+      <div class="flex items-center gap-4">
+        <div class="w-8 h-8  bg-kymo-raised"></div>
+        <div class="space-y-2 flex-1">
+          <div class="h-5 bg-kymo-raised  w-64 max-w-full"></div>
+          <div class="h-3 bg-kymo-raised  w-96 max-w-full"></div>
+        </div>
+      </div>
+      <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+        @for (i of [1,2,3,4,5]; track i) {
+          <div class="h-24 bg-kymo-panel border border-kymo-rule"></div>
+        }
+      </div>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div class="h-72 bg-kymo-panel border border-kymo-rule"></div>
+        <div class="h-72 bg-kymo-panel border border-kymo-rule"></div>
+      </div>
+    </div>
+  } @else if (loadError() === 'not-found') {
+    <div class="k-panel">
+      <app-empty-state icon="search" message="Container not found" hint="It may have been archived, ignored or permanently deleted.">
+        <a [routerLink]="backPath" class="mt-4 text-xs text-kymo-amber hover:underline underline-offset-4">← back to {{ backLabel.toLowerCase() }}</a>
+      </app-empty-state>
+    </div>
+  } @else if (loadError() === 'error' || !container()) {
+    <app-error-state message="Failed to load container" (retry)="retry()" />
+  } @else {
+    <!-- Header -->
+    <app-page-header [title]="container()!.name" [crumbLabel]="backLabel" [crumbLink]="backPath">
+      <span subtitle class="flex items-center gap-x-3 gap-y-1 flex-wrap">
+        <app-status-badge [status]="container()!.current_status" />
+        @if (container()!.workload_kind) {
+          <app-workload-badge [kind]="container()!.workload_kind!" />
+        }
+        @if (container()!.is_system) {
+          <span class="text-[11px] px-1.5 py-px border border-kymo-rule text-kymo-muted">SYS</span>
+        }
+        <span class="text-kymo-muted truncate max-w-full" [title]="container()!.image">{{ container()!.image }}</span>
+      </span>
+    </app-page-header>
+
+    <dl class="flex items-center gap-x-6 gap-y-1 flex-wrap text-xs -mt-3">
+      <div class="flex gap-2"><dt class="k-label">source</dt><dd class="text-kymo-ink">{{ container()!.source_name }}</dd></div>
+      @if (container()!.namespace) {
+        <div class="flex gap-2"><dt class="k-label">ns</dt><dd class="text-kymo-ink">{{ container()!.namespace }}</dd></div>
+      }
+      @if (container()!.workload_name) {
+        <div class="flex gap-2"><dt class="k-label">workload</dt><dd class="text-kymo-ink">{{ container()!.workload_name }}</dd></div>
+      }
+      @if (container()!.node_name) {
+        <div class="flex gap-2"><dt class="k-label">node</dt><dd class="text-kymo-ink">{{ container()!.node_name }}</dd></div>
+      }
+      <div class="flex gap-2" title="First seen"><dt class="k-label">since</dt><dd class="text-kymo-ink">{{ container()!.first_seen_at | timeago }}</dd></div>
+      <div class="flex gap-2" title="Last seen"><dt class="k-label">seen</dt><dd class="text-kymo-ink">{{ container()!.last_seen_at | timeago }}</dd></div>
+    </dl>
+
+    <!-- CronJob / Job info banner -->
+    @if (isK8s() && isCronJobOrJob()) {
+      <div class="flex items-center gap-2 px-4 py-2.5 border border-kymo-amber/40 border-l-2 border-l-kymo-amber text-xs text-kymo-amber">
+        <span class="k-label !text-kymo-amber flex-none">note</span>
+        <span>
+          Managed by {{ container()!.workload_kind }}
+          @if (container()!.workload_name) {
+            <span class="font-medium">{{ container()!.workload_name }}</span>
+          }. Recreated automatically on the next scheduled run.
+        </span>
+      </div>
+    }
+
+    <!-- Action Bar -->
+    <div class="flex items-center gap-2 flex-wrap border-y border-kymo-rule py-3" role="toolbar" aria-label="Container actions">
+      @if (isDocker()) {
+        <button type="button" class="k-btn k-btn-go" [disabled]="actionBusy() || !canStart()" (click)="startContainer()" title="Start container">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linejoin="round" d="M5 3l14 9-14 9V3z" /></svg>
+          Start
+        </button>
+        <button type="button" class="k-btn" [disabled]="actionBusy() || !canStop()" (click)="stopContainer()" title="Stop container">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" /></svg>
+          Stop
+        </button>
+        <button type="button" class="k-btn k-btn-primary" [disabled]="actionBusy() || !canRestart()" (click)="restartContainer()" title="Restart container">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          Restart
+        </button>
+        <button type="button" class="k-btn k-btn-danger" [disabled]="actionBusy() || !canKill()" (click)="confirmKill.set(true)" title="Force kill (SIGKILL)">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          Kill
+        </button>
+      }
+      @if (isK8s() && !isCronJobOrJob()) {
+        <button type="button" class="k-btn k-btn-primary" [disabled]="actionBusy()" (click)="restartContainer()" title="Delete pod (K8s will recreate it)">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+          Restart Pod
+        </button>
+      }
+      <button type="button" class="k-btn" (click)="openLogs()" title="View logs">
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h7" /></svg>
+        Logs
+      </button>
+      <button type="button" class="k-btn k-btn-danger ml-auto" [disabled]="actionBusy()" (click)="openDeleteModal()" title="Archive or ignore this container">
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        Remove
+      </button>
+    </div>
+
+    <!-- Metric Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4">
+      <app-metric-card label="Starts" [value]="container()!.start_count" />
+      <app-metric-card label="Crashes" [value]="container()!.crash_count" accent="rose" [muted]="!container()!.crash_count" />
+      <app-metric-card label="OOM Kills" [value]="container()!.oom_count" accent="amber" [muted]="!container()!.oom_count" />
+      <app-metric-card label="CPU Avg" [value]="cpuDisplay()" unit="%" [sub]="cpuSub()" />
+      <app-metric-card label="Memory" [value]="memDisplay()" [sub]="memSub()" accent="emerald" />
+    </div>
+
+    <!-- Stability + Events -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Stability Score -->
+      <div class="k-panel k-paper p-5">
+        <h2 class="k-label mb-5">Stability score</h2>
+        @if (score()) {
+          <div class="flex flex-col items-center gap-6">
+            <app-stability-gauge [score]="score()!.score" [size]="140" />
+            <div class="w-full space-y-2.5 bg-kymo-panel border border-kymo-rule p-3">
+              @for (p of penalties(); track p.name) {
+                <div class="flex items-center justify-between">
+                  <span class="k-label">{{ p.name }} penalty</span>
+                  <span class="text-xs tabular-nums" [class]="p.value > 0 ? 'text-kymo-ink' : 'text-kymo-faint'">{{ p.value > 0 ? '−' : '' }}{{ p.value | number:'1.2-2' }}</span>
+                </div>
+              }
+              <div class="border-t border-kymo-rule pt-2.5 flex items-baseline justify-between bg-kymo-panel">
+                <span class="k-label !text-kymo-ink">Final score</span>
+                <span class="text-2xl font-semibold tabular-nums" [class]="score()!.score | scoreClass">{{ score()!.score | number:'1.1-1' }}</span>
+              </div>
+            </div>
+          </div>
+        } @else {
+          <app-empty-state icon="chart" message="No score yet" hint="Stability scores are computed periodically from lifecycle history." />
+        }
+      </div>
+
+      <!-- Lifecycle Events -->
+      <div class="k-panel p-5 flex flex-col">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="k-label">Lifecycle events</h2>
+          @if (events().length) {
+            <span class="text-[11px] text-kymo-faint">{{ events().length }} · newest first</span>
+          }
+        </div>
+        @if (events().length === 0) {
+          <app-empty-state icon="events" message="No events recorded" hint="Start, stop and crash events will appear here." />
+        } @else {
+          <ol class="max-h-96 overflow-y-auto scrollbar-thin pr-2 relative">
+            @for (ev of sortedEvents(); track ev.id) {
+              <li class="flex items-start gap-3 py-2 border-b border-kymo-rule last:border-0">
+                <span class="k-led mt-1.5" [class]="eventDot(ev)"></span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-medium uppercase tracking-wide" [class]="eventText(ev)">{{ eventLabel(ev) }}</span>
+                    @if (showsExit(ev)) {
+                      <span class="text-[11px] text-kymo-danger border border-kymo-danger/40 px-1.5 tabular-nums">exit {{ ev.exit_code }}</span>
+                    }
+                    <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="ev.occurred_at">{{ ev.occurred_at | timeago }}</span>
+                  </div>
+                  @if (eventReason(ev); as reason) {
+                    <p class="text-xs text-kymo-muted mt-0.5 break-words">{{ reason }}</p>
+                  }
+                </div>
+              </li>
+            }
+          </ol>
+        }
+      </div>
+    </div>
+
+    <!-- Resources -->
+    <section class="space-y-3">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <h2 class="k-label flex items-center gap-2">
+          Resources
+          @if (resourcesLoading()) {
+            <span class="w-3 h-3 border border-kymo-rule border-t-kymo-amber rounded-full animate-spin" aria-hidden="true"></span>
+          }
+        </h2>
+        <div class="flex border border-kymo-rule" role="group" aria-label="Time range">
+          @for (r of ranges; track r.key) {
+            <button
+              type="button"
+              class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule last:border-r-0"
+              [class]="range() === r.key ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+              [attr.aria-pressed]="range() === r.key"
+              (click)="setRange(r.key)"
+            >{{ r.key }}</button>
+          }
+        </div>
+      </div>
+      @if (resources().length > 0) {
+        <app-resource-charts [samples]="resources()" [from]="window()?.from ?? null" [to]="window()?.to ?? null" />
+      } @else if (!resourcesLoading()) {
+        <div class="k-panel">
+          <app-empty-state icon="chart" message="No resource samples in the last {{ range() }}" hint="Try a wider time range, or check that the container is running." />
+        </div>
+      } @else {
+        <div class="h-64 bg-kymo-panel border border-kymo-rule  animate-pulse"></div>
+      }
+    </section>
+
+    <!-- Pod Info (K8s only) -->
+    @if (isK8s() && podDetail()) {
+      <div class="k-panel p-5">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="k-label">Pod</h2>
+          @if (container()!.workload_kind === 'Deployment' && container()!.workload_name) {
+            <a
+              routerLink="/deployments"
+              class="text-xs text-kymo-amber hover:underline underline-offset-4"
+              title="Go to Deployments"
+            >↑ {{ container()!.workload_name }}</a>
+          }
+        </div>
+        <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
+          <dt class="k-label">pod</dt><dd class="text-kymo-ink break-all">{{ podDetail()!.pod_name }}</dd>
+          <dt class="k-label">namespace</dt><dd class="text-kymo-ink">{{ podDetail()!.namespace }}</dd>
+          @if (podDetail()!.node_name) {
+            <dt class="k-label">node</dt><dd class="text-kymo-ink">{{ podDetail()!.node_name }}</dd>
+          }
+        </dl>
+        @if (podSiblings().length > 0) {
+          <h3 class="k-label mt-5 mb-2">Containers in this pod</h3>
+          <div class="border-t border-kymo-rule">
+            @for (sibling of podSiblings(); track sibling.id) {
+              <a
+                [routerLink]="['/pods', sibling.id]"
+                class="flex items-center gap-3 px-3 py-2 border-b border-kymo-rule hover:bg-kymo-raised transition-colors"
+              >
+                <app-status-badge [status]="sibling.current_status" compact />
+                <span class="text-xs text-kymo-ink truncate" [title]="sibling.name">{{ sibling.name }}</span>
+                <span class="text-xs text-kymo-faint ml-auto truncate max-w-[160px]" [title]="sibling.image">{{ sibling.image }}</span>
+              </a>
+            }
+          </div>
+        }
+      </div>
+    }
+  }
+</div>
+
+<!-- Log Viewer Modal -->
+@if (showLogViewer() && container()) {
+  <app-log-viewer
+    [containerId]="container()!.id"
+    [containerName]="container()!.name"
+    (closed)="showLogViewer.set(false)"
+  />
+}
+
+<!-- Kill confirmation -->
+@if (confirmKill() && container()) {
+  <app-confirm-dialog
+    title="Force kill container?"
+    [message]="'Send SIGKILL to ' + container()!.name + '. The process gets no chance to shut down gracefully.'"
+    confirmLabel="Kill"
+    (confirmed)="onKillConfirmed()"
+    (cancelled)="confirmKill.set(false)"
+  />
+}
+
+<!-- Delete / Ignore Modal -->
+@if (showDeleteModal() && container()) {
+  <app-delete-modal
+    [containerName]="container()!.name"
+    (action)="onDeleteAction($event)"
+  />
+}

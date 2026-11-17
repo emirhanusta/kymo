@@ -1,0 +1,12 @@
+<div class="k-paper border border-kymo-rule p-4 flex flex-col gap-2 h-full">
+  <div class="k-label truncate">{{ label }}</div>
+  <div class="flex items-baseline gap-1.5 min-w-0">
+    <span class="text-3xl font-medium tabular-nums truncate leading-none" [class]="valueClass">{{ value }}</span>
+    @if (unit && value !== '—') {
+      <span class="text-xs text-kymo-muted">{{ unit }}</span>
+    }
+  </div>
+  @if (sub) {
+    <div class="text-xs text-kymo-muted truncate" [title]="sub">{{ sub }}</div>
+  }
+</div>

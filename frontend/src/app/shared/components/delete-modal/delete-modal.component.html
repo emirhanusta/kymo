@@ -1,0 +1,84 @@
+<div class="fixed inset-0 bg-kymo-deep/85 z-50 flex items-center justify-center p-4" (click)="cancel()">
+  <div
+    appDialog
+    (dismiss)="cancel()"
+    aria-labelledby="delete-modal-title"
+    class="bg-kymo-panel border border-kymo-rule border-t-kymo-amber p-5 max-w-md w-full space-y-5"
+    (click)="$event.stopPropagation()"
+  >
+    <div>
+      <h3 id="delete-modal-title" class="text-sm font-semibold uppercase tracking-[0.08em] text-kymo-ink">Remove container</h3>
+      <p class="text-sm text-kymo-muted mt-1">
+        Choose how to handle
+        <span class="text-kymo-amber">{{ containerName }}</span>
+      </p>
+    </div>
+
+    <div class="space-y-3">
+      <!-- Archive option -->
+      <label
+        class="flex items-start gap-3 p-3.5 border cursor-pointer transition-colors"
+        [class.border-kymo-amber]="selected === 'soft'"
+        [class.bg-kymo-amber/5]="selected === 'soft'"
+        [class.border-kymo-rule]="selected !== 'soft'"
+        [class.hover:border-kymo-faint]="selected !== 'soft'"
+        (click)="selected = 'soft'"
+      >
+        <div
+          class="mt-0.5 w-3.5 h-3.5 border flex-none flex items-center justify-center"
+          [class.border-kymo-amber]="selected === 'soft'"
+          [class.border-kymo-faint]="selected !== 'soft'"
+        >
+          @if (selected === 'soft') {
+            <div class="w-1.5 h-1.5 bg-kymo-amber"></div>
+          }
+        </div>
+        <div>
+          <p class="text-sm font-medium text-kymo-ink">Archive</p>
+          <p class="text-xs text-kymo-muted mt-0.5">
+            Move to archive. All history is preserved. Container will be tracked again if it restarts.
+          </p>
+        </div>
+      </label>
+
+      <!-- Ignore option -->
+      <label
+        class="flex items-start gap-3 p-3.5 border cursor-pointer transition-colors"
+        [class.border-kymo-amber]="selected === 'ignore'"
+        [class.bg-kymo-amber/5]="selected === 'ignore'"
+        [class.border-kymo-rule]="selected !== 'ignore'"
+        [class.hover:border-kymo-faint]="selected !== 'ignore'"
+        (click)="selected = 'ignore'"
+      >
+        <div
+          class="mt-0.5 w-3.5 h-3.5 border flex-none flex items-center justify-center"
+          [class.border-kymo-amber]="selected === 'ignore'"
+          [class.border-kymo-faint]="selected !== 'ignore'"
+        >
+          @if (selected === 'ignore') {
+            <div class="w-1.5 h-1.5 bg-kymo-amber"></div>
+          }
+        </div>
+        <div>
+          <p class="text-sm font-medium text-kymo-ink">Ignore</p>
+          <p class="text-xs text-kymo-muted mt-0.5">
+            Stop tracking permanently. Container will not be re-added even if it restarts.
+          </p>
+        </div>
+      </label>
+    </div>
+
+    <div class="flex justify-end gap-2 pt-1">
+      <button type="button" class="k-btn" (click)="cancel()">Cancel</button>
+      <button
+        type="button"
+        data-autofocus
+        class="k-btn k-btn-primary"
+        [disabled]="selected === null"
+        (click)="confirm()"
+      >
+        Confirm
+      </button>
+    </div>
+  </div>
+</div>
