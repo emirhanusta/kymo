@@ -1,0 +1,29 @@
+<svg [attr.width]="size" [attr.height]="size" [attr.viewBox]="'0 0 ' + size + ' ' + size" role="img" [attr.aria-label]="'Stability score ' + display">
+  <!-- dial ticks every 10 points -->
+  @for (t of ticks; track t.i) {
+    <line [attr.x1]="t.x1" [attr.y1]="t.y1" [attr.x2]="t.x2" [attr.y2]="t.y2" stroke="var(--color-kymo-faint)" stroke-width="1" />
+  }
+  <circle
+    [attr.cx]="cx" [attr.cy]="cy" [attr.r]="r"
+    fill="none" stroke="var(--color-kymo-rule)" stroke-width="6"
+  />
+  <circle
+    [attr.cx]="cx" [attr.cy]="cy" [attr.r]="r"
+    fill="none"
+    [attr.stroke]="strokeColor"
+    stroke-width="6"
+    stroke-linecap="butt"
+    [attr.stroke-dasharray]="circumference"
+    [attr.stroke-dashoffset]="dashOffset"
+    [attr.transform]="transform"
+  />
+  <text
+    [attr.x]="cx" [attr.y]="cy"
+    text-anchor="middle"
+    dominant-baseline="central"
+    [attr.fill]="strokeColor"
+    font-family="IBM Plex Mono, monospace"
+    font-size="22"
+    font-weight="500"
+  >{{ display }}</text>
+</svg>

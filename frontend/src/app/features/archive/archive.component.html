@@ -1,0 +1,178 @@
+<div class="space-y-4">
+  <!-- Header -->
+  <app-page-header title="Archive" subtitle="Archived and ignored containers are stored here">
+    @if (tab() === 'archived' && archived().length > 0) {
+      <button
+        class="k-btn k-btn-danger"
+        (click)="deleteAllArchived()"
+        title="Permanently delete all archived containers"
+      >
+        ✕ Delete All Archived
+      </button>
+    }
+    @if (tab() === 'ignored' && ignored().length > 0) {
+      <button
+        class="k-btn k-btn-danger"
+        (click)="deleteAllIgnored()"
+        title="Permanently delete all ignored containers"
+      >
+        ✕ Delete All Ignored
+      </button>
+    }
+  </app-page-header>
+
+  <!-- Tabs -->
+  <div class="flex border-b border-kymo-rule" role="tablist" aria-label="Archive views">
+    <button
+      type="button"
+      role="tab"
+      [attr.aria-selected]="tab() === 'archived'"
+      class="-mb-px px-4 py-2 text-xs font-medium uppercase tracking-[0.08em] border-b-2 transition-colors"
+      [class]="tab() === 'archived' ? 'border-kymo-amber text-kymo-amber' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
+      (click)="tab.set('archived')"
+    >
+      Archived <span class="tabular-nums">{{ archived().length }}</span>
+    </button>
+    <button
+      type="button"
+      role="tab"
+      [attr.aria-selected]="tab() === 'ignored'"
+      class="-mb-px px-4 py-2 text-xs font-medium uppercase tracking-[0.08em] border-b-2 transition-colors"
+      [class]="tab() === 'ignored' ? 'border-kymo-amber text-kymo-amber' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
+      (click)="tab.set('ignored')"
+    >
+      Ignored <span class="tabular-nums">{{ ignored().length }}</span>
+    </button>
+  </div>
+
+  @if (error()) {
+    <app-error-state message="Failed to load the archive" (retry)="loadData()" />
+  }
+
+  @if (loading()) {
+    <app-skeleton [rows]="5" />
+  } @else if (!error()) {
+
+    <!-- Archived Tab -->
+    @if (tab() === 'archived') {
+      <div class="k-panel overflow-hidden">
+        <div class="overflow-auto max-h-[calc(100vh-17rem)] scrollbar-thin">
+          <table class="k-table border-separate border-spacing-0">
+            <thead class="sticky top-0 z-10">
+              <tr>
+                <th class="text-left px-4 py-2.5">Name</th>
+                <th class="text-left px-4 py-2.5 hidden md:table-cell">Image</th>
+                <th class="text-left px-4 py-2.5 hidden lg:table-cell">Source</th>
+                <th class="text-left px-4 py-2.5">Status</th>
+                <th class="text-left px-4 py-2.5 hidden sm:table-cell">Archived At</th>
+                <th class="text-right px-4 py-2.5">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (c of archived(); track c.id) {
+                <tr class="hover:bg-kymo-raised transition-colors">
+                  <td class="px-4 py-2.5 font-mono text-kymo-ink font-medium truncate max-w-[14rem]" [title]="c.name">{{ c.name }}</td>
+                  <td class="px-4 py-2.5 font-mono text-xs text-kymo-muted truncate max-w-xs hidden md:table-cell" [title]="c.image">{{ c.image }}</td>
+                  <td class="px-4 py-2.5 hidden lg:table-cell">
+                    <span class="text-xs text-kymo-muted px-1.5 py-0.5 border border-kymo-rule">{{ c.source_name }}</span>
+                  </td>
+                  <td class="px-4 py-2.5"><app-status-badge [status]="c.current_status" /></td>
+                  <td class="px-4 py-2.5 text-xs font-mono text-kymo-muted hidden sm:table-cell whitespace-nowrap" [title]="c.deleted_at ?? ''">{{ c.deleted_at | date:'medium' }}</td>
+                  <td class="px-4 py-2.5">
+                    <div class="flex items-center justify-end gap-2">
+                      <button
+                        class="k-btn k-btn-primary k-btn-sm"
+                        (click)="restore(c)"
+                        title="Restore container"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                          <path d="M3 3v5h5"/>
+                        </svg>
+                        Restore
+                      </button>
+                      <button
+                        class="k-btn k-btn-danger k-btn-sm"
+                        (click)="hardDelete(c)"
+                        title="Permanently delete all data"
+                      >
+                        ✕ Delete Forever
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="6">
+                    <app-empty-state icon="archive" message="No archived containers" hint="Containers you archive keep their full history and show up here." />
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+
+    <!-- Ignored Tab -->
+    @if (tab() === 'ignored') {
+      <div class="k-panel overflow-hidden">
+        <div class="overflow-auto max-h-[calc(100vh-17rem)] scrollbar-thin">
+          <table class="k-table border-separate border-spacing-0">
+            <thead class="sticky top-0 z-10">
+              <tr>
+                <th class="text-left px-4 py-2.5">Name</th>
+                <th class="text-left px-4 py-2.5 hidden md:table-cell">Image</th>
+                <th class="text-left px-4 py-2.5 hidden lg:table-cell">Source</th>
+                <th class="text-left px-4 py-2.5">Status</th>
+                <th class="text-left px-4 py-2.5">Last Seen</th>
+                <th class="text-right px-4 py-2.5">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (c of ignored(); track c.id) {
+                <tr class="hover:bg-kymo-raised transition-colors">
+                  <td class="px-4 py-2.5 font-mono text-kymo-ink font-medium truncate max-w-[14rem]" [title]="c.name">{{ c.name }}</td>
+                  <td class="px-4 py-2.5 font-mono text-xs text-kymo-muted truncate max-w-xs hidden md:table-cell" [title]="c.image">{{ c.image }}</td>
+                  <td class="px-4 py-2.5 hidden lg:table-cell">
+                    <span class="text-xs text-kymo-muted px-1.5 py-0.5 border border-kymo-rule">{{ c.source_name }}</span>
+                  </td>
+                  <td class="px-4 py-2.5"><app-status-badge [status]="c.current_status" /></td>
+                  <td class="px-4 py-2.5 text-xs font-mono text-kymo-muted">{{ c.last_seen_at | timeago }}</td>
+                  <td class="px-4 py-2.5">
+                    <div class="flex items-center justify-end">
+                      <button
+                        class="k-btn k-btn-primary k-btn-sm"
+                        (click)="restore(c)"
+                        title="Restore and resume tracking"
+                      >
+                        ↩ Restore
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              } @empty {
+                <tr>
+                  <td colspan="6">
+                    <app-empty-state icon="archive" message="No ignored containers" hint="Ignored containers are no longer tracked, even if they restart." />
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    }
+
+  }
+</div>
+
+@if (pending(); as p) {
+  <app-confirm-dialog
+    [title]="p.title"
+    [message]="p.message"
+    [confirmLabel]="p.label"
+    (confirmed)="confirmPending()"
+    (cancelled)="pending.set(null)"
+  />
+}

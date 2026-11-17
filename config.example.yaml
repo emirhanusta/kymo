@@ -1,0 +1,35 @@
+# KYMO configuration — copy to config.yaml and adjust.
+# Every key can also be set via environment variables prefixed with KYMO_
+# (nested keys joined by "_"), e.g. KYMO_DATABASE_DSN, KYMO_SERVER_ADDRESS.
+# config.yaml is read from the working directory or /etc/kymo/.
+
+server:
+  address: ":8080"
+  read_timeout: "15s"
+  # Directory with the built web UI (frontend/dist/frontend/browser).
+  # Leave empty to serve the API only (use `make web-dev` during development).
+  static_dir: ""
+
+database:
+  dsn: "postgres://kymo:kymo@localhost:5432/kymo?sslmode=disable"
+  max_conns: 20
+  # Apply the embedded SQL migrations on startup.
+  auto_migrate: true
+
+collector:
+  stats_poll_interval: "15s"   # default resource sampling interval
+  scoring_interval: "60s"      # how often stability scores are recomputed
+  scoring_window: "24h"        # look-back window for scoring
+  sources:
+    - name: "local-docker"
+      type: "docker"
+      # socket: "unix:///var/run/docker.sock"   # default: DOCKER_HOST
+    # - name: "dev-cluster"
+    #   type: "kubernetes"
+    #   kubeconfig_path: "/path/to/kubeconfig"
+    #   kube_context: "dev"                      # default: current-context
+    #   poll_interval: "30s"                     # needs metrics-server for CPU/memory
+
+log:
+  level: "info"      # debug | info | warn | error
+  format: "console"  # console | json

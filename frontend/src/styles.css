@@ -1,0 +1,278 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+/*
+ * KYMO — analog recorder on graphite.
+ * The default Tailwind palette is cleared so only kymo-* colors exist; any stray
+ * slate/violet/… class simply produces nothing.
+ */
+@theme static {
+  --color-*: initial;
+
+  /* surfaces */
+  --color-kymo-bg: #16181a;
+  --color-kymo-deep: #111315;
+  --color-kymo-panel: #1d2023;
+  --color-kymo-raised: #24282c;
+  --color-kymo-rule: #2c3034;
+  --color-kymo-grid: #24282c;
+
+  /* ink */
+  --color-kymo-ink: #f2e8d5;
+  --color-kymo-muted: #8a8577;
+  --color-kymo-faint: #5e5a52;
+
+  /* accent — amber phosphor */
+  --color-kymo-amber: #ffb000;
+
+  /* status (score uses running / amber / danger) */
+  --color-kymo-running: #9bd27a;
+  --color-kymo-danger: #ff5f45;
+  --color-kymo-stopped: #b8ad96;
+  --color-kymo-paused: #7fb7d9;
+  --color-kymo-unknown: #6b6860;
+
+  --font-sans: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+
+  /* square instrument corners */
+  --radius-xs: 2px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 2px;
+  --radius-xl: 2px;
+  --radius-2xl: 2px;
+  --radius-3xl: 2px;
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--color-kymo-bg);
+    color: var(--color-kymo-ink);
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::selection {
+    background: var(--color-kymo-amber);
+    color: var(--color-kymo-deep);
+  }
+
+  :focus-visible {
+    outline: 1px solid var(--color-kymo-amber);
+    outline-offset: 1px;
+  }
+
+  a {
+    color: inherit;
+  }
+
+  /* let buttons pick up uppercase labels from header rows */
+  button {
+    text-transform: inherit;
+  }
+
+  input,
+  select,
+  textarea {
+    accent-color: var(--color-kymo-amber);
+  }
+}
+
+@layer components {
+  /* Small uppercase section label */
+  .k-label {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-kymo-muted);
+  }
+
+  /* Plain panel: 1px rule, flat */
+  .k-panel {
+    background: var(--color-kymo-panel);
+    border: 1px solid var(--color-kymo-rule);
+  }
+
+  /* Chart paper: panels holding charts or big numbers */
+  .k-paper {
+    background-color: var(--color-kymo-panel);
+    background-image:
+      linear-gradient(var(--color-kymo-grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--color-kymo-grid) 1px, transparent 1px);
+    background-size: 14px 14px;
+    background-position: -1px -1px;
+  }
+
+  /* Buttons */
+  .k-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem;
+    height: 1.875rem;
+    padding: 0 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    border: 1px solid var(--color-kymo-rule);
+    background: transparent;
+    color: var(--color-kymo-ink);
+    cursor: pointer;
+    transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .k-btn:not(:disabled):hover {
+    border-color: var(--color-kymo-faint);
+    background: var(--color-kymo-raised);
+  }
+  .k-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .k-btn-sm {
+    height: 1.625rem;
+    padding: 0 0.5rem;
+    font-size: 0.6875rem;
+  }
+  .k-btn-icon {
+    padding: 0;
+    width: 1.875rem;
+  }
+  .k-btn-primary {
+    border-color: var(--color-kymo-amber);
+    color: var(--color-kymo-amber);
+  }
+  .k-btn-primary:not(:disabled):hover {
+    border-color: var(--color-kymo-amber);
+    background: var(--color-kymo-amber);
+    color: var(--color-kymo-deep);
+  }
+  .k-btn-danger {
+    border-color: var(--color-kymo-danger);
+    color: var(--color-kymo-danger);
+  }
+  .k-btn-danger:not(:disabled):hover {
+    border-color: var(--color-kymo-danger);
+    background: var(--color-kymo-danger);
+    color: var(--color-kymo-deep);
+  }
+  .k-btn-go {
+    border-color: color-mix(in srgb, var(--color-kymo-running) 60%, transparent);
+    color: var(--color-kymo-running);
+  }
+  .k-btn-go:not(:disabled):hover {
+    border-color: var(--color-kymo-running);
+    background: var(--color-kymo-running);
+    color: var(--color-kymo-deep);
+  }
+
+  /* Text inputs / selects */
+  .k-input {
+    height: 1.875rem;
+    padding: 0 0.625rem;
+    font-size: 0.75rem;
+    background: var(--color-kymo-deep);
+    border: 1px solid var(--color-kymo-rule);
+    color: var(--color-kymo-ink);
+    outline: none;
+  }
+  .k-input::placeholder {
+    color: var(--color-kymo-faint);
+  }
+  .k-input:focus {
+    border-color: var(--color-kymo-amber);
+    outline: none;
+  }
+
+  /* Data tables: 1px rules, uppercase muted headers, tabular numbers */
+  .k-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .k-table thead th {
+    padding: 0.5rem 1rem;
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--color-kymo-muted);
+    text-align: left;
+    white-space: nowrap;
+    background: var(--color-kymo-panel);
+    border-bottom: 1px solid var(--color-kymo-rule);
+  }
+  .k-table tbody td {
+    border-bottom: 1px solid var(--color-kymo-rule);
+  }
+  .k-table tbody tr:last-child td {
+    border-bottom: 0;
+  }
+
+  /* LED status dot */
+  .k-led {
+    display: inline-block;
+    width: 0.4375rem;
+    height: 0.4375rem;
+    border-radius: 9999px;
+    flex: none;
+  }
+
+  /* Keyboard hint */
+  .k-kbd {
+    display: inline-flex;
+    align-items: center;
+    height: 1.125rem;
+    padding: 0 0.3125rem;
+    font-size: 0.625rem;
+    color: var(--color-kymo-muted);
+    border: 1px solid var(--color-kymo-rule);
+  }
+}
+
+@utility scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-kymo-rule) transparent;
+
+  &::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background: var(--color-kymo-rule);
+  }
+
+  &::-webkit-scrollbar-thumb:hover {
+    background: var(--color-kymo-faint);
+  }
+}
+
+@utility scrollbar-none {
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}

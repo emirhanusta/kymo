@@ -1,0 +1,14 @@
+# Local configuration (may contain kubeconfig paths / credentials)
+config.yaml
+
+# Build output
+bin/
+frontend/dist/
+frontend/.angular/
+frontend/node_modules/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store

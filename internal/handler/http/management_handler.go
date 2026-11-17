@@ -1,0 +1,509 @@
+package httphandler
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/docker/docker/pkg/stdcopy"
+	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
+	"github.com/emirhanusta/kymo/internal/model"
+	"github.com/emirhanusta/kymo/internal/repository"
+	"github.com/emirhanusta/kymo/internal/service"
+)
+
+// ---------------------------------------------------------------------------
+// Docker management endpoints
+// ---------------------------------------------------------------------------
+
+// lookupContainer loads the container named by the :id path parameter and
+// writes a 404/500 response (returning nil) when it cannot be resolved.
+func (h *Handler) lookupContainer(c *gin.Context) *model.Container {
+	id := c.Param("id")
+	container, err := h.svc.GetContainer(c.Request.Context(), id)
+	if err != nil {
+		h.log.Error("container lookup failed", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": "failed to look up container"})
+		return nil
+	}
+	if container == nil {
+		c.JSON(http.StatusNotFound, gin.H{"success": false, "message": "container not found"})
+		return nil
+	}
+	return container
+}
+
+// sourceFor returns the explicit ?source= override or the container's own source.
+func sourceFor(c *gin.Context, container *model.Container) string {
+	if s := c.Query("source"); s != "" {
+		return s
+	}
+	return container.SourceName
+}
+
+// dockerAction runs a Docker-only management operation against the container
+// named by :id, rejecting Kubernetes containers with 400.
+func (h *Handler) dockerAction(
+	c *gin.Context, verb, okMessage string,
+	op func(ctx context.Context, sourceName, containerID string) error,
+) {
+	container := h.lookupContainer(c)
+	if container == nil {
+		return
+	}
+	if container.Runtime != model.RuntimeDocker {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": verb + " is only supported for Docker containers; use restart to recreate a Kubernetes pod",
+		})
+		return
+	}
+	if err := op(c.Request.Context(), sourceFor(c, container), container.ID); err != nil {
+		h.log.Error(verb+" container failed", zap.String("id", container.ID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": okMessage})
+}
+
+// StartContainer starts a stopped Docker container.
+//
+//	POST /api/v1/containers/:id/start
+func (h *Handler) StartContainer(c *gin.Context) {
+	h.dockerAction(c, "start", "container started", h.mgmt.StartContainer)
+}
+
+// StopContainer stops a running Docker container.
+//
+//	POST /api/v1/containers/:id/stop
+func (h *Handler) StopContainer(c *gin.Context) {
+	h.dockerAction(c, "stop", "container stopped", h.mgmt.StopContainer)
+}
+
+// KillContainer force-kills a Docker container with SIGKILL.
+//
+//	DELETE /api/v1/containers/:id/kill
+func (h *Handler) KillContainer(c *gin.Context) {
+	h.dockerAction(c, "kill", "container killed", h.mgmt.KillContainer)
+}
+
+// RestartContainer restarts a Docker container or deletes a Kubernetes pod
+// (its controller will recreate it). Runtime and source are taken from the
+// stored container record; ?source= overrides the source.
+//
+//	POST /api/v1/containers/:id/restart
+func (h *Handler) RestartContainer(c *gin.Context) {
+	container := h.lookupContainer(c)
+	if container == nil {
+		return
+	}
+	source := sourceFor(c, container)
+
+	switch container.Runtime {
+	case model.RuntimeDocker:
+		if err := h.mgmt.RestartContainer(c.Request.Context(), source, container.ID); err != nil {
+			h.log.Error("restart container failed", zap.String("id", container.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "container restarted"})
+	case model.RuntimeKubernetes:
+		ns, pod, _, parseErr := parseK8sID(container.ID)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": parseErr.Error()})
+			return
+		}
+		if err := h.mgmt.DeletePod(c.Request.Context(), source, ns, pod); err != nil {
+			h.log.Error("delete pod failed", zap.String("id", container.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "pod deleted; its controller will recreate it"})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "unsupported runtime"})
+	}
+}
+
+// GetContainerLogs streams or returns container logs.
+//
+// Query parameters:
+//   - tail   (optional, default 100, max 5000): number of lines to return.
+//   - follow (optional, default false): when true, stream via SSE; otherwise return plain text.
+//   - source (optional): override the container's own source.
+//
+// GET /api/v1/containers/:id/logs
+func (h *Handler) GetContainerLogs(c *gin.Context) {
+	tail := 100
+	if v := c.Query("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			tail = min(n, 5000)
+		}
+	}
+	follow := c.Query("follow") == "true"
+
+	container := h.lookupContainer(c)
+	if container == nil {
+		return
+	}
+	source := sourceFor(c, container)
+
+	switch container.Runtime {
+	case model.RuntimeDocker:
+		reader, tty, err := h.mgmt.GetContainerLogs(c.Request.Context(), source, container.ID, tail, follow)
+		if err != nil {
+			h.log.Error("get container logs failed", zap.String("id", container.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if tty {
+			// TTY containers emit a raw stream; treat it like plain text.
+			if follow {
+				h.sseK8sLogs(c, reader)
+			} else {
+				h.plainK8sLogs(c, reader)
+			}
+			return
+		}
+		if follow {
+			h.sseDockerLogs(c, reader)
+		} else {
+			h.plainDockerLogs(c, reader)
+		}
+
+	case model.RuntimeKubernetes:
+		ns, pod, ctr, parseErr := parseK8sID(container.ID)
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": parseErr.Error()})
+			return
+		}
+		reader, err := h.mgmt.GetPodLogs(c.Request.Context(), source, ns, pod, ctr, tail, follow)
+		if err != nil {
+			h.log.Error("get pod logs failed", zap.String("id", container.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		if follow {
+			h.sseK8sLogs(c, reader)
+		} else {
+			h.plainK8sLogs(c, reader)
+		}
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported runtime"})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Kubernetes Namespace endpoint
+// ---------------------------------------------------------------------------
+
+// ListNamespaces returns the Kubernetes namespaces reachable via the given source.
+// Falls back to ["local"] when only Docker sources are configured.
+//
+// Query parameters:
+//   - source (optional): target collector source name.
+//
+// GET /api/v1/namespaces
+func (h *Handler) ListNamespaces(c *gin.Context) {
+	source := c.Query("source")
+	namespaces, err := h.mgmt.ListNamespaces(c.Request.Context(), source)
+	if err != nil {
+		h.log.Error("list namespaces failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, namespaces)
+}
+
+// ---------------------------------------------------------------------------
+// Kubernetes Deployment endpoints
+// ---------------------------------------------------------------------------
+
+// ListDeployments returns all deployments in a namespace.
+//
+// Query parameters:
+//   - namespace (optional): omit or leave empty to list all namespaces.
+//   - source    (optional): target collector source name.
+//
+// GET /api/v1/deployments
+func (h *Handler) ListDeployments(c *gin.Context) {
+	ns := c.Query("namespace")
+	source := c.Query("source")
+	deps, err := h.mgmt.ListDeployments(c.Request.Context(), source, ns)
+	if err != nil {
+		h.log.Error("list deployments failed", zap.String("namespace", ns), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if deps == nil {
+		deps = []service.DeploymentInfo{}
+	}
+	c.JSON(http.StatusOK, deps)
+}
+
+// ScaleDeployment sets the replica count for a deployment.
+//
+// Body: {"replicas": 3}
+//
+//	POST /api/v1/deployments/:namespace/:name/scale
+func (h *Handler) ScaleDeployment(c *gin.Context) {
+	var body struct {
+		Replicas int32 `json:"replicas"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	if body.Replicas < 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "replicas must be >= 0"})
+		return
+	}
+	ns := c.Param("namespace")
+	name := c.Param("name")
+	source := c.Query("source")
+	if err := h.mgmt.ScaleDeployment(c.Request.Context(), source, ns, name, body.Replicas); err != nil {
+		h.log.Error("scale deployment failed", zap.String("ns", ns), zap.String("name", name), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("scaled to %d replicas", body.Replicas)})
+}
+
+// RestartDeployment performs a rolling restart of a deployment.
+//
+//	POST /api/v1/deployments/:namespace/:name/restart
+func (h *Handler) RestartDeployment(c *gin.Context) {
+	ns := c.Param("namespace")
+	name := c.Param("name")
+	source := c.Query("source")
+	if err := h.mgmt.RestartDeployment(c.Request.Context(), source, ns, name); err != nil {
+		h.log.Error("restart deployment failed", zap.String("ns", ns), zap.String("name", name), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "rolling restart triggered"})
+}
+
+// ---------------------------------------------------------------------------
+// Kubernetes Pod / Deployment detail endpoints
+// ---------------------------------------------------------------------------
+
+// GetPodContainers returns all containers belonging to a Kubernetes Pod along
+// with pod-level metadata (node, workload info).
+//
+// Path parameters:
+//   - namespace: Kubernetes namespace.
+//   - name:      Pod name.
+//
+// Query parameters:
+//   - source (optional): filter by collector source name.
+//
+// GET /api/v1/pods/:namespace/:name
+func (h *Handler) GetPodContainers(c *gin.Context) {
+	namespace := c.Param("namespace")
+	podName := c.Param("name")
+	source := c.Query("source")
+
+	all, err := h.svc.ListContainers(c.Request.Context(), repository.ContainerFilter{Runtime: model.RuntimeKubernetes, Source: source})
+	if err != nil {
+		h.log.Error("get pod containers failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	prefix := namespace + "/" + podName + "/"
+	var containers []*model.Container
+	for _, ct := range all {
+		if strings.HasPrefix(ct.ID, prefix) {
+			containers = append(containers, ct)
+		}
+	}
+
+	if len(containers) == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "pod not found"})
+		return
+	}
+
+	first := containers[0]
+	c.JSON(http.StatusOK, gin.H{
+		"pod_name":      podName,
+		"namespace":     namespace,
+		"node_name":     first.NodeName,
+		"workload_kind": first.WorkloadKind,
+		"workload_name": first.WorkloadName,
+		"source_name":   first.SourceName,
+		"containers":    containers,
+	})
+}
+
+// GetDeploymentDetail returns live deployment info from the management service
+// together with the pods (and their containers) recorded by KYMO.
+//
+// Path parameters:
+//   - namespace: Kubernetes namespace.
+//   - name:      Deployment name.
+//
+// Query parameters:
+//   - source (optional): filter by collector source name.
+//
+// GET /api/v1/deployments/:namespace/:name
+func (h *Handler) GetDeploymentDetail(c *gin.Context) {
+	namespace := c.Param("namespace")
+	name := c.Param("name")
+	source := c.Query("source")
+
+	// Try to fetch live deployment info; failure is non-fatal.
+	var depInfo *service.DeploymentInfo
+	if deps, err := h.mgmt.ListDeployments(c.Request.Context(), source, namespace); err == nil {
+		for i := range deps {
+			if deps[i].Name == name {
+				depInfo = &deps[i]
+				break
+			}
+		}
+	}
+
+	// Fetch all K8s containers and filter for this deployment.
+	all, err := h.svc.ListContainers(c.Request.Context(), repository.ContainerFilter{Runtime: model.RuntimeKubernetes, Source: source})
+	if err != nil {
+		h.log.Error("get deployment detail: list containers failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+
+	type podEntry struct {
+		PodName    string             `json:"pod_name"`
+		Namespace  string             `json:"namespace"`
+		NodeName   string             `json:"node_name"`
+		Status     string             `json:"status"`
+		Containers []*model.Container `json:"containers"`
+	}
+
+	podMap := make(map[string]*podEntry)
+	for _, ct := range all {
+		if ct.Namespace != namespace || ct.WorkloadName != name || ct.WorkloadKind != model.WorkloadDeployment {
+			continue
+		}
+		parts := strings.SplitN(ct.ID, "/", 3)
+		if len(parts) < 2 {
+			continue
+		}
+		podName := parts[1]
+		pe, ok := podMap[podName]
+		if !ok {
+			pe = &podEntry{
+				PodName:   podName,
+				Namespace: namespace,
+				NodeName:  ct.NodeName,
+				Status:    string(ct.CurrentStatus),
+			}
+			podMap[podName] = pe
+		}
+		pe.Containers = append(pe.Containers, ct)
+	}
+
+	pods := make([]*podEntry, 0, len(podMap))
+	for _, pe := range podMap {
+		pods = append(pods, pe)
+	}
+	sort.Slice(pods, func(i, j int) bool { return pods[i].PodName < pods[j].PodName })
+
+	c.JSON(http.StatusOK, gin.H{
+		"deployment": depInfo,
+		"pods":       pods,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// parseK8sID splits a Kubernetes container ID "namespace/pod-name/container-name"
+// into its three components.
+func parseK8sID(id string) (namespace, pod, container string, err error) {
+	parts := strings.SplitN(id, "/", 3)
+	if len(parts) != 3 {
+		return "", "", "", fmt.Errorf("invalid kubernetes container ID %q: expected namespace/pod/container", id)
+	}
+	return parts[0], parts[1], parts[2], nil
+}
+
+// sseDockerLogs demultiplexes Docker's multiplexed log stream and sends each
+// line as an SSE data event. Blocks until the stream ends or client disconnects.
+func (h *Handler) sseDockerLogs(c *gin.Context, reader io.ReadCloser) {
+	defer reader.Close()
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		stdcopy.StdCopy(pw, pw, reader) //nolint:errcheck
+	}()
+
+	flusher, _ := c.Writer.(http.Flusher)
+	scanner := bufio.NewScanner(pr)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		select {
+		case <-c.Request.Context().Done():
+			pr.CloseWithError(fmt.Errorf("client disconnected"))
+			return
+		default:
+		}
+		fmt.Fprintf(c.Writer, "data: %s\n\n", scanner.Text())
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+}
+
+// sseK8sLogs streams Kubernetes pod logs (plain text) as SSE.
+func (h *Handler) sseK8sLogs(c *gin.Context, reader io.ReadCloser) {
+	defer reader.Close()
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, _ := c.Writer.(http.Flusher)
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+
+	for scanner.Scan() {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		default:
+		}
+		fmt.Fprintf(c.Writer, "data: %s\n\n", scanner.Text())
+		if flusher != nil {
+			flusher.Flush()
+		}
+	}
+}
+
+// plainDockerLogs demultiplexes Docker logs and returns them as plain text.
+func (h *Handler) plainDockerLogs(c *gin.Context, reader io.ReadCloser) {
+	defer reader.Close()
+	var buf bytes.Buffer
+	stdcopy.StdCopy(&buf, &buf, reader) //nolint:errcheck
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", buf.Bytes())
+}
+
+// plainK8sLogs returns Kubernetes pod logs as plain text.
+func (h *Handler) plainK8sLogs(c *gin.Context, reader io.ReadCloser) {
+	defer reader.Close()
+	var buf bytes.Buffer
+	io.Copy(&buf, reader) //nolint:errcheck
+	c.Data(http.StatusOK, "text/plain; charset=utf-8", buf.Bytes())
+}

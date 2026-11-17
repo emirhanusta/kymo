@@ -1,0 +1,201 @@
+<div class="flex flex-col gap-6">
+  <app-page-header title="Overview">
+    <ng-container subtitle>
+      {{ sourceCards().length }} channel{{ sourceCards().length !== 1 ? 's' : '' }}
+      @if (totalContainers() > 0) {
+        · {{ totalContainers() }} containers
+      }
+      @if (totalCritical() > 0) {
+        · <span class="text-kymo-danger font-medium">{{ totalCritical() }} critical</span>
+      }
+    </ng-container>
+  </app-page-header>
+
+  @if (error()) {
+    <app-error-state message="Failed to load dashboard data" (retry)="loadData()" />
+  }
+
+  @if (loading()) {
+    <app-skeleton variant="cards" [rows]="3" />
+    <app-skeleton [rows]="5" />
+  } @else {
+
+    <!-- Summary strip -->
+    <div class="k-panel grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-kymo-rule">
+      <div class="px-4 py-3">
+        <div class="k-label">Channels</div>
+        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ sourceCards().length }}</div>
+      </div>
+      <div class="px-4 py-3">
+        <div class="k-label">Containers</div>
+        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ totalContainers() }}</div>
+      </div>
+      <div class="px-4 py-3">
+        <div class="k-label">Running</div>
+        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="totalRunning() > 0 ? 'text-kymo-running' : 'text-kymo-muted'">{{ totalRunning() }}</div>
+      </div>
+      <div class="px-4 py-3">
+        <div class="k-label">Critical</div>
+        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="totalCritical() > 0 ? 'text-kymo-danger' : 'text-kymo-muted'">{{ totalCritical() }}</div>
+      </div>
+      <div class="px-4 py-3">
+        <div class="k-label">Avg stability</div>
+        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="overallAvgScore() | scoreClass">{{ formatScore(overallAvgScore()) }}</div>
+      </div>
+    </div>
+
+    <!-- Source channels -->
+    @if (sourceCards().length > 0) {
+      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full">
+        @for (card of sourceCards(); track card.name; let i = $index) {
+          <button
+            type="button"
+            class="k-paper text-left border flex flex-col transition-colors hover:border-kymo-amber focus:outline-none focus-visible:outline-1 focus-visible:outline-kymo-amber"
+            [class]="card.source?.status === 'error' || card.critical > 0 ? 'border-kymo-danger/60' : 'border-kymo-rule'"
+            [title]="'Open ' + card.name"
+            [attr.aria-label]="'Channel ' + card.name + ', ' + card.running + ' of ' + card.total + ' running. Open'"
+            (click)="selectSource(card)"
+          >
+            <!-- Channel header -->
+            <div class="flex items-center gap-2 px-3 py-2 border-b border-kymo-rule bg-kymo-panel">
+              <span class="k-label text-kymo-faint tabular-nums">{{ channelNo(i) }}</span>
+              @if (card.source; as s) {
+                <span class="k-led" [class]="dotClass(s)" [title]="statusLabel(s)"></span>
+              } @else {
+                <span class="k-led bg-kymo-unknown"></span>
+              }
+              <span class="text-sm font-medium text-kymo-ink truncate flex-1 min-w-0" [title]="card.name">{{ card.name }}</span>
+              <span class="k-label px-1.5 border border-kymo-rule flex-none">{{ card.type === 'kubernetes' ? 'k8s' : 'docker' }}</span>
+            </div>
+
+            <div class="flex items-center gap-4 px-3 py-3">
+              <!-- Donut: running / stopped / critical -->
+              <svg viewBox="0 0 80 80" class="w-16 h-16 flex-none" aria-hidden="true">
+                <circle cx="40" cy="40" r="30" fill="none" stroke="var(--color-kymo-rule)" stroke-width="8"/>
+                <circle cx="40" cy="40" r="30" fill="none" stroke="var(--color-kymo-running)" stroke-width="8" transform="rotate(-90 40 40)"
+                  [attr.stroke-dasharray]="card.seg.running" stroke-dashoffset="0"/>
+                <circle cx="40" cy="40" r="30" fill="none" stroke="var(--color-kymo-stopped)" stroke-width="8" transform="rotate(-90 40 40)"
+                  [attr.stroke-dasharray]="card.seg.stopped" [attr.stroke-dashoffset]="card.seg.stoppedOffset"/>
+                <circle cx="40" cy="40" r="30" fill="none" stroke="var(--color-kymo-danger)" stroke-width="8" transform="rotate(-90 40 40)"
+                  [attr.stroke-dasharray]="card.seg.critical" [attr.stroke-dashoffset]="card.seg.criticalOffset"/>
+                <text x="40" y="38" text-anchor="middle" fill="var(--color-kymo-ink)" font-size="15" font-family="IBM Plex Mono, monospace" font-weight="500">{{ card.running }}</text>
+                <text x="40" y="52" text-anchor="middle" fill="var(--color-kymo-muted)" font-size="9" font-family="IBM Plex Mono, monospace">/ {{ card.total }}</text>
+              </svg>
+
+              <div class="flex-1 min-w-0 space-y-2">
+                @if (card.source?.status === 'error') {
+                  <p class="text-xs text-kymo-danger truncate" [title]="card.source?.last_error ?? ''">
+                    ERR {{ card.source?.last_error || 'connection error' }}
+                  </p>
+                } @else if (card.source?.status === 'connecting') {
+                  <p class="text-xs text-kymo-amber">connecting…</p>
+                } @else {
+                  <div class="flex items-center gap-x-3 gap-y-1 text-xs flex-wrap tabular-nums">
+                    <span class="text-kymo-muted">{{ card.total }} total</span>
+                    @if (card.critical > 0) {
+                      <span class="text-kymo-danger">{{ card.critical }} crit</span>
+                    }
+                    @if (card.stopped > 0) {
+                      <span class="text-kymo-stopped">{{ card.stopped }} stopped</span>
+                    }
+                  </div>
+                }
+
+                <div>
+                  <div class="flex items-baseline justify-between mb-1">
+                    <span class="k-label">Stability</span>
+                    <span class="text-xl font-medium tabular-nums leading-none" [class]="card.avgScore | scoreClass">{{ formatScore(card.avgScore) }}</span>
+                  </div>
+                  <div class="h-1 bg-kymo-rule overflow-hidden">
+                    <div class="h-full transition-all" [class]="card.avgScore | scoreClass:'bg'" [style.width.%]="card.avgScore ?? 0"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </button>
+        }
+      </div>
+    } @else if (!error()) {
+      <div class="k-panel">
+        <app-empty-state icon="box" message="No sources configured" hint="Configure a Docker or Kubernetes source in the backend to start recording." />
+      </div>
+    }
+
+    <!-- Recent events (2/3) + critical alerts (1/3) -->
+    <div class="grid grid-cols-1 xl:grid-cols-3 gap-4">
+      <section class="xl:col-span-2 k-panel overflow-hidden flex flex-col" aria-labelledby="dash-events-title">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between">
+          <h2 id="dash-events-title" class="k-label">Recent events</h2>
+          @if (eventsError()) {
+            <span class="text-xs text-kymo-danger">failed to load</span>
+          }
+        </div>
+        @if (recentEvents().length === 0) {
+          <app-empty-state icon="events" [compact]="true" message="No events recorded yet" hint="Start, stop, crash and OOM events will show up here." />
+        } @else {
+          <div class="divide-y divide-kymo-rule">
+            @for (ev of recentEvents().slice(0, 8); track ev.id) {
+              <a
+                [routerLink]="eventRoute(ev)"
+                class="px-4 py-2 flex items-center gap-3 hover:bg-kymo-raised transition-colors group"
+              >
+                <span class="w-6 h-6 flex items-center justify-center text-xs flex-none" [class]="eventChip(ev)" aria-hidden="true">{{ eventIcon(ev) }}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <span class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="ev.container_name || ev.container_id">{{ eventName(ev) }}</span>
+                    @if (ev.source_name) {
+                      <span class="text-[10px] text-kymo-faint border border-kymo-rule px-1 flex-none hidden sm:inline">{{ ev.source_name }}</span>
+                    }
+                  </div>
+                  @if (eventReason(ev); as reason) {
+                    <p class="text-[11px] text-kymo-muted truncate" [title]="reason">{{ reason }}</p>
+                  }
+                </div>
+                <span class="text-xs flex-none uppercase tracking-wide" [class]="eventText(ev)">
+                  {{ eventLabel(ev) }}@if (showsExit(ev)) {<span class="text-kymo-faint"> ({{ ev.exit_code }})</span>}
+                </span>
+                <span class="text-xs text-kymo-faint flex-none w-16 text-right tabular-nums">{{ ev.occurred_at | timeago }}</span>
+              </a>
+            }
+          </div>
+        }
+      </section>
+
+      <section class="k-panel overflow-hidden flex flex-col" aria-labelledby="dash-alerts-title">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between">
+          <h2 id="dash-alerts-title" class="k-label flex items-center gap-2">
+            <span class="k-led" [class]="criticalContainers().length ? 'bg-kymo-danger animate-pulse' : 'bg-kymo-running'"></span>
+            Critical alerts
+          </h2>
+          @if (criticalContainers().length > 0) {
+            <span class="text-xs text-kymo-danger tabular-nums">{{ criticalContainers().length }}</span>
+          }
+        </div>
+        @if (criticalContainers().length === 0) {
+          <app-empty-state icon="check" tone="success" [compact]="true" message="All systems nominal" hint="No crashing, OOM-killed or unstable containers." />
+        } @else {
+          <div class="divide-y divide-kymo-rule">
+            @for (c of criticalContainers(); track c.id) {
+              <a
+                [routerLink]="containerRoute(c)"
+                class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-start gap-3 group"
+              >
+                <span class="k-led bg-kymo-danger mt-1.5"></span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="c.name">{{ c.name }}</p>
+                  <p class="text-xs text-kymo-faint mt-0.5 truncate tabular-nums">
+                    {{ c.source_name }} · {{ c.crash_count }} crash{{ c.crash_count === 1 ? '' : 'es' }}@if (c.oom_count) {, {{ c.oom_count }} OOM}
+                  </p>
+                </div>
+                <div class="flex flex-col items-end gap-1 flex-none">
+                  <app-status-badge [status]="c.current_status" />
+                  <span class="text-sm font-medium tabular-nums" [class]="c.score | scoreClass" title="Stability score">{{ formatScore(c.score) }}</span>
+                </div>
+              </a>
+            }
+          </div>
+        }
+      </section>
+    </div>
+  }
+</div>

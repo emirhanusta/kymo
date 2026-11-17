@@ -1,0 +1,8 @@
+@if (compact) {
+  <span class="k-led" [class]="dotClass" [title]="label" role="img" [attr.aria-label]="label"></span>
+} @else {
+  <span class="inline-flex items-center gap-1.5">
+    <span class="k-led" [class]="dotClass"></span>
+    <span class="text-[11px] font-medium uppercase tracking-[0.08em]" [class]="textClass">{{ label }}</span>
+  </span>
+}

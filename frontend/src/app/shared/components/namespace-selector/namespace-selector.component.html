@@ -1,0 +1,14 @@
+<select
+  aria-label="Namespace" class="k-input pr-6 cursor-pointer"
+  [value]="selected()"
+  (change)="onChange($any($event.target).value)"
+>
+  <option value="" [selected]="!selected()">All namespaces</option>
+  @if (loading()) {
+    <option disabled>Loading...</option>
+  } @else {
+    @for (ns of namespaces(); track ns) {
+      <option [value]="ns" [selected]="ns === selected()">{{ ns }}</option>
+    }
+  }
+</select>
