@@ -3,6 +3,8 @@
     <ng-container subtitle>
       @if (!state.loaded()) {
         Loading…
+      } @else if (sources.historyMode()) {
+        Not tracked for removed clusters
       } @else if (issues().length > 0) {
         <span class="text-kymo-danger font-medium">{{ issues().length }} open issue{{ issues().length === 1 ? '' : 's' }}</span>
       } @else {
@@ -21,6 +23,14 @@
 
   @if (!state.loaded()) {
     <app-skeleton [rows]="4" />
+  } @else if (sources.historyMode()) {
+    <div class="k-panel">
+      <app-empty-state
+        icon="box"
+        message="Issues are not tracked for removed clusters"
+        hint="Statuses of a removed cluster are frozen at the moment it was removed, so nothing here is live. Browse its recorded history under Workloads, Jobs and Events."
+      />
+    </div>
   } @else if (issues().length === 0 && !state.error()) {
     <div class="k-panel">
       <app-empty-state

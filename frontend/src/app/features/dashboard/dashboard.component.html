@@ -57,7 +57,9 @@
           <a routerLink="/issues" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4">Issues →</a>
         }
       </div>
-      @if (issues().length === 0) {
+      @if (historyMode()) {
+        <app-empty-state icon="box" [compact]="true" message="Issues are not tracked for removed clusters" hint="Statuses of a removed cluster are frozen at the moment it was removed." />
+      } @else if (issues().length === 0) {
         <app-empty-state icon="check" tone="success" [compact]="true" message="No open issues" hint="Nothing is crash looping, OOM-killed, degraded or failing." />
       } @else {
         <ul class="divide-y divide-kymo-rule">

@@ -22,6 +22,7 @@ export function sourceStatusLabel(src: SourceStatus): string {
 }
 
 export const READ_ONLY_HINT = 'Read-only cluster: management actions (restart pod, scale, rollout restart) are disabled.';
+export const REMOVED_HINT = 'Removed cluster: recorded history only. Management actions and live logs are unavailable.';
 export const CONFIG_ORIGIN_HINT = 'Managed in config.yaml — edit the file; changes apply automatically';
 
 /** One-line connection summary for lists. */

@@ -161,12 +161,61 @@
       <p class="text-[11px] text-kymo-danger break-words">config.yaml is invalid, keeping current clusters: {{ err }}</p>
     }
   }
+
+  @if (state.removed().length > 0) {
+    <section class="space-y-2" aria-labelledby="removed-title">
+      <div class="flex items-baseline gap-2 pt-2">
+        <h2 id="removed-title" class="k-label !text-kymo-ink">Removed clusters ({{ state.removed().length }})</h2>
+        <span class="text-[11px] text-kymo-faint">No longer recorded; their history is kept until you delete it.</span>
+      </div>
+      <div class="k-panel overflow-x-auto scrollbar-thin">
+        <table class="k-table">
+          <thead>
+            <tr>
+              <th>Cluster</th>
+              <th class="!text-right">Workloads</th>
+              <th class="!text-right">Containers</th>
+              <th class="!text-right hidden md:table-cell">CronJob runs</th>
+              <th class="hidden lg:table-cell">First seen</th>
+              <th class="hidden sm:table-cell">Last seen</th>
+              <th><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (r of state.removed(); track r.name) {
+              <tr [class.opacity-60]="purgingName() === r.name">
+                <td class="px-4 py-3 align-top">
+                  <div class="flex items-center gap-2 min-w-0 text-kymo-muted">
+                    <svg class="w-3 h-3 flex-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 4h16v4H4zM6 8v12h12V8M10 12h4" /></svg>
+                    <span class="font-medium truncate max-w-[16rem]" [title]="r.name">{{ r.name }}</span>
+                  </div>
+                </td>
+                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink">{{ r.workloads }}</td>
+                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink">{{ r.containers }}</td>
+                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink hidden md:table-cell">{{ r.cronjob_runs }}</td>
+                <td class="px-4 py-3 align-top text-xs text-kymo-muted whitespace-nowrap hidden lg:table-cell" [title]="r.first_seen_at">{{ r.first_seen_at | timeago }}</td>
+                <td class="px-4 py-3 align-top text-xs text-kymo-muted whitespace-nowrap hidden sm:table-cell" [title]="r.last_seen_at">{{ r.last_seen_at | timeago }}</td>
+                <td class="px-4 py-3 align-top">
+                  <div class="flex items-center justify-end gap-1.5 flex-wrap">
+                    <button type="button" class="k-btn k-btn-sm" [disabled]="purgingName() === r.name" (click)="viewHistory(r)" [attr.aria-label]="'View history of ' + r.name">View history</button>
+                    <button type="button" class="k-btn k-btn-sm k-btn-primary" [disabled]="purgingName() === r.name" (click)="readd(r)" [attr.aria-label]="'Re-add ' + r.name">Re-add</button>
+                    <button type="button" class="k-btn k-btn-sm text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50" [disabled]="purgingName() === r.name" (click)="purgeTarget.set(r)" [attr.aria-label]="'Delete history of ' + r.name">Delete history</button>
+                  </div>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  }
 </div>
 
 @if (wizard()) {
   <app-cluster-wizard
     [source]="editSource()"
-    (closed)="wizard.set(null)"
+    [presetName]="readdName()"
+    (closed)="closeWizard()"
     (saved)="onSaved()"
   />
 }
@@ -187,4 +236,14 @@
       </span>
     </label>
   </app-confirm-dialog>
+}
+
+@if (purgeTarget(); as r) {
+  <app-confirm-dialog
+    [title]="'Delete history of ' + r.name + '?'"
+    [message]="purgeText(r)"
+    confirmLabel="Delete history"
+    (confirmed)="confirmPurge()"
+    (cancelled)="purgeTarget.set(null)"
+  />
 }

@@ -10,7 +10,7 @@
     <div class="px-5 pt-4 pb-3 border-b border-kymo-rule flex-none">
       <div class="flex items-start justify-between gap-4">
         <h2 id="cluster-wizard-title" class="text-sm font-semibold uppercase tracking-[0.08em] text-kymo-ink">
-          {{ isEdit() ? 'Edit cluster ' + source()!.name : 'Add cluster' }}
+          {{ isEdit() ? 'Edit cluster ' + source()!.name : presetName() ? 'Re-add cluster ' + presetName() : 'Add cluster' }}
         </h2>
         <button type="button" class="k-btn k-btn-icon k-btn-sm border-transparent text-kymo-muted -mr-2 -mt-1" (click)="closed.emit()" aria-label="Close">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -40,6 +40,12 @@
         <!-- ── Step 2: connection ───────────────────────────────────────── -->
         @case (2) {
           <div class="space-y-5">
+            @if (presetName()) {
+              <p class="text-xs text-kymo-muted border border-kymo-amber/40 bg-kymo-deep px-3 py-2.5" role="note">
+                <strong class="text-kymo-ink font-medium">{{ presetName() }}</strong> was removed earlier. Adding a cluster under the same name
+                reconnects its recorded history, so workloads, events and scores continue where they left off.
+              </p>
+            }
             <!-- Name -->
             <div>
               <label for="wiz-name" class="k-label block mb-1.5">Name</label>
@@ -49,10 +55,10 @@
                   type="text"
                   class="k-input w-full"
                   [class.!border-kymo-danger]="(nameTouched() || attempted()) && !!nameError()"
-                  [attr.data-step-focus]="isEdit() ? null : ''"
-                  [attr.data-autofocus]="isEdit() ? null : ''"
+                  [attr.data-step-focus]="nameLocked() ? null : ''"
+                  [attr.data-autofocus]="nameLocked() ? null : ''"
                   [value]="name()"
-                  [disabled]="isEdit()"
+                  [disabled]="nameLocked()"
                   placeholder="e.g. prod-eu"
                   autocomplete="off"
                   spellcheck="false"
@@ -67,7 +73,7 @@
                 <p id="wiz-name-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ nameError() }}</p>
               } @else {
                 <p id="wiz-name-help" class="text-xs text-kymo-faint mt-1.5">
-                  @if (isEdit()) { The name can't be changed. } @else { Lowercase letters, digits, "-", "_" and "."; used in URLs and filters. }
+                  @if (nameLocked()) { The name can't be changed. } @else { Lowercase letters, digits, "-", "_" and "."; used in URLs and filters. }
                 </p>
               }
             </div>
@@ -81,8 +87,8 @@
                     class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule"
                     [class]="kubeMode() === 'path' ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
                     [attr.aria-pressed]="kubeMode() === 'path'"
-                    [attr.data-step-focus]="isEdit() && kubeMode() === 'path' ? '' : null"
-                    [attr.data-autofocus]="isEdit() && kubeMode() === 'path' ? '' : null"
+                    [attr.data-step-focus]="nameLocked() && kubeMode() === 'path' ? '' : null"
+                    [attr.data-autofocus]="nameLocked() && kubeMode() === 'path' ? '' : null"
                     (click)="setKubeMode('path')"
                   >Path on server</button>
                   <button
@@ -92,8 +98,8 @@
                     [attr.aria-pressed]="kubeMode() === 'paste'"
                     [disabled]="pasteDisabled() && !storedUpload()"
                     [attr.aria-describedby]="pasteDisabled() ? 'wiz-paste-disabled' : null"
-                    [attr.data-step-focus]="isEdit() && kubeMode() === 'paste' ? '' : null"
-                    [attr.data-autofocus]="isEdit() && kubeMode() === 'paste' ? '' : null"
+                    [attr.data-step-focus]="nameLocked() && kubeMode() === 'paste' ? '' : null"
+                    [attr.data-autofocus]="nameLocked() && kubeMode() === 'paste' ? '' : null"
                     (click)="setKubeMode('paste')"
                   >Paste / upload</button>
                 </div>
@@ -304,7 +310,7 @@
                 </ul>
                 <p class="text-xs mt-3" [class]="r.ok ? 'text-kymo-running' : 'text-kymo-danger'">
                   @if (r.ok) {
-                    Connection OK. {{ isEdit() ? 'Save to apply the changes.' : 'Save to start recording.' }}
+                    Connection OK. {{ isEdit() ? 'Save to apply the changes.' : presetName() ? 'Save to start recording and reconnect the recorded history.' : 'Save to start recording.' }}
                   } @else {
                     The test failed. You can fix the connection, or save anyway — the cluster keeps retrying in the background.
                   }

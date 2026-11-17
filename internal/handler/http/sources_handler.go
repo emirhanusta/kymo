@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/emirhanusta/kymo/internal/model"
 	"github.com/emirhanusta/kymo/internal/service"
 )
 
@@ -167,6 +168,43 @@ func (h *Handler) DeleteSource(c *gin.Context) {
 		msg = "Source and its history deleted"
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": msg})
+}
+
+// ListRemovedSources lists recorded history of sources that no longer exist.
+//
+//	GET /api/v1/sources/removed
+func (h *Handler) ListRemovedSources(c *gin.Context) {
+	out, err := h.sources.RemovedSources(c.Request.Context())
+	if err != nil {
+		h.sourceError(c, "list removed sources", err)
+		return
+	}
+	if out == nil {
+		out = []model.SourceHistory{}
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+// PurgeRemovedSource deletes the history of a removed source. Requires ?confirm=true.
+//
+//	DELETE /api/v1/sources/removed/:name
+func (h *Handler) PurgeRemovedSource(c *gin.Context) {
+	if c.Query("confirm") != "true" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "confirm=true is required to purge a removed source's history"})
+		return
+	}
+	name := c.Param("name")
+	n, err := h.sources.PurgeRemovedSource(c.Request.Context(), name)
+	switch {
+	case errors.Is(err, service.ErrSourceRegistered):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.Is(err, service.ErrNoHistory):
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+	case err != nil:
+		h.sourceError(c, "purge removed source", err)
+	default:
+		c.JSON(http.StatusOK, gin.H{"success": true, "message": "History of removed source " + name + " deleted", "deleted_containers": n})
+	}
 }
 
 // guardReadOnly writes a 403 and returns true when sourceName is read-only.

@@ -3,6 +3,7 @@ import { RouterOutlet } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { TopbarComponent } from '../topbar/topbar.component';
+import { HistoryBannerComponent } from '../history-banner/history-banner.component';
 import { EventTapeComponent } from '../event-tape/event-tape.component';
 import { ToastComponent } from '../../shared/components/toast/toast.component';
 import { SourceStateService } from '../../core/services/source-state.service';
@@ -12,7 +13,7 @@ import { RefreshService } from '../../core/services/refresh.service';
 @Component({
   selector: 'app-shell',
   standalone: true,
-  imports: [RouterOutlet, TopbarComponent, EventTapeComponent, ToastComponent],
+  imports: [RouterOutlet, TopbarComponent, HistoryBannerComponent, EventTapeComponent, ToastComponent],
   templateUrl: './shell.component.html',
   host: { class: 'block' },
   changeDetection: ChangeDetectionStrategy.OnPush,

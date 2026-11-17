@@ -31,6 +31,13 @@
       @for (s of sourceSvc.sources(); track s.name) {
         <option [value]="s.name" [selected]="s.name === source()">{{ s.name }}</option>
       }
+      @if (sourceSvc.removed().length > 0) {
+        <optgroup label="Removed">
+          @for (r of sourceSvc.removed(); track r.name) {
+            <option [value]="r.name" [selected]="r.name === source()">{{ r.name }}</option>
+          }
+        </optgroup>
+      }
     </select>
   </app-page-header>
 

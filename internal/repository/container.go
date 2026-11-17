@@ -110,6 +110,16 @@ type ContainerRepository interface {
 	// (and, via CASCADE, its events, samples and scores). Returns rows deleted.
 	DeleteBySource(ctx context.Context, sourceName string) (int64, error)
 
+	// PurgeSource atomically deletes everything recorded for a source: its
+	// containers (and cascaded events, samples, scores, crash logs), its
+	// workload scores and its CronJob executions. Returns containers deleted.
+	PurgeSource(ctx context.Context, sourceName string) (int64, error)
+
+	// SourceHistory aggregates recorded data per source_name (containers and
+	// CronJob executions), newest last_seen_at first. Names are not filtered
+	// against the registered sources.
+	SourceHistory(ctx context.Context) ([]model.SourceHistory, error)
+
 	// HardDeleteIgnored permanently removes all ignored (non-deleted) containers
 	// (and all their related records via CASCADE), optionally filtered by sourceName.
 	// Returns the number of rows deleted.

@@ -58,7 +58,9 @@ export class EventsComponent {
 
   loading     = signal(true);
   error       = signal(false);
-  events      = signal<LifecycleEvent[]>([]);
+  private loaded  = signal<LifecycleEvent[]>([]);
+  /** Without a cluster filter, events of removed clusters stay out of the list. */
+  events      = computed(() => this.source() ? this.loaded() : this.sourceSvc.connectedOnly(this.loaded(), e => e.source_name));
   type        = signal<LifecycleEventType | ''>('');
   /** Page-level source filter; follows the top-bar selector but can be changed here. */
   source      = signal('');
@@ -98,7 +100,7 @@ export class EventsComponent {
 
   reset(): void {
     this.loading.set(true);
-    this.events.set([]);
+    this.loaded.set([]);
     this.load('init');
   }
 
@@ -107,7 +109,7 @@ export class EventsComponent {
    * so pages loaded with "Load older" survive auto-refresh.
    */
   load(reason: LoadReason): void {
-    const merge = (reason === 'auto' || reason === 'manual') && this.events().length > 0;
+    const merge = (reason === 'auto' || reason === 'manual') && this.loaded().length > 0;
     this.sub?.unsubscribe();
     if (!merge) this.moreSub?.unsubscribe();
     this.sub = this.svc.queryRecentEvents({
@@ -118,11 +120,11 @@ export class EventsComponent {
       next: list => {
         const page = list ?? [];
         if (merge) {
-          const seen = new Set(this.events().map(e => e.id));
+          const seen = new Set(this.loaded().map(e => e.id));
           const fresh = page.filter(e => !seen.has(e.id));
-          if (fresh.length) this.events.set([...fresh, ...this.events()].sort(byNewest));
+          if (fresh.length) this.loaded.set([...fresh, ...this.loaded()].sort(byNewest));
         } else {
-          this.events.set([...page].sort(byNewest));
+          this.loaded.set([...page].sort(byNewest));
           this.hasMore.set(page.length >= PAGE_SIZE);
           this.moreError.set(false);
         }
@@ -138,7 +140,7 @@ export class EventsComponent {
   }
 
   loadOlder(): void {
-    const list = this.events();
+    const list = this.loaded();
     if (!list.length || this.loadingMore()) return;
     const oldest = list[list.length - 1];
     this.loadingMore.set(true);
@@ -151,8 +153,8 @@ export class EventsComponent {
     }).subscribe({
       next: older => {
         const page = older ?? [];
-        const seen = new Set(this.events().map(e => e.id));
-        this.events.set([...this.events(), ...page.filter(e => !seen.has(e.id))].sort(byNewest));
+        const seen = new Set(this.loaded().map(e => e.id));
+        this.loaded.set([...this.loaded(), ...page.filter(e => !seen.has(e.id))].sort(byNewest));
         this.hasMore.set(page.length >= PAGE_SIZE);
         this.loadingMore.set(false);
       },

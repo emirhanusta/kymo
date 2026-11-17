@@ -5,6 +5,7 @@ import { catchError } from 'rxjs/operators';
 
 import { ContainerService } from '../../../core/services/container.service';
 import { RefreshService } from '../../../core/services/refresh.service';
+import { SourceStateService } from '../../../core/services/source-state.service';
 import { IssuesService } from '../../../core/services/issues.service';
 import { CrashContext } from '../../../core/services/container.service';
 import { LifecycleEvent, WorkloadDetail } from '../../../core/models/container.model';
@@ -92,7 +93,7 @@ import { normalizeStatus } from '../../utils/status';
                 </ul>
               }
             } @else {
-              <p class="text-[11px] text-kymo-faint">No running pods to tail.</p>
+              <p class="text-[11px] text-kymo-faint">{{ sources.isRemoved(wl.source_name) ? 'Removed cluster: live logs are unavailable.' : 'No running pods to tail.' }}</p>
             }
           </div>
 
@@ -120,6 +121,7 @@ export class WorkloadPeekComponent {
   private svc     = inject(ContainerService);
   private refresh = inject(RefreshService);
   protected issues = inject(IssuesService);
+  protected sources = inject(SourceStateService);
 
   readonly score = formatScore;
 
@@ -137,6 +139,8 @@ export class WorkloadPeekComponent {
   /** Pods with at least one running container, each with those containers. */
   livePods = computed(() => {
     const map = new Map<string, { id: string; name: string }[]>();
+    // Removed clusters have no live pods to tail.
+    if (this.sources.isRemoved(this.detail()?.workload.source_name)) return [];
     for (const c of this.detail()?.instances ?? []) {
       if (normalizeStatus(c.current_status) !== 'running') continue;
       const pod = podNameFromId(c.id) || c.id;

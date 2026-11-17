@@ -1,5 +1,5 @@
 import {
-  Component, ChangeDetectionStrategy, signal, inject,
+  Component, ChangeDetectionStrategy, signal, computed, inject,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { forkJoin, Observable } from 'rxjs';
@@ -43,8 +43,10 @@ export class ArchiveComponent {
   private sourceSvc  = inject(SourceStateService);
 
   tab      = signal<'archived' | 'ignored'>('archived');
-  archived = signal<Container[]>([]);
-  ignored  = signal<Container[]>([]);
+  private archivedAll = signal<Container[]>([]);
+  private ignoredAll  = signal<Container[]>([]);
+  archived = computed(() => this.sourceSvc.inScope(this.archivedAll(), c => c.source_name));
+  ignored  = computed(() => this.sourceSvc.inScope(this.ignoredAll(), c => c.source_name));
   loading  = signal(true);
   error    = signal(false);
   pending  = signal<PendingConfirm | null>(null);
@@ -60,8 +62,8 @@ export class ArchiveComponent {
       ignored:  this.svc.getIgnoredContainers(src),
     }).subscribe({
       next: ({ archived, ignored }) => {
-        this.archived.set(archived ?? []);
-        this.ignored.set(ignored ?? []);
+        this.archivedAll.set(archived ?? []);
+        this.ignoredAll.set(ignored ?? []);
         this.error.set(false);
         this.loading.set(false);
         this.refreshSvc.markUpdated();

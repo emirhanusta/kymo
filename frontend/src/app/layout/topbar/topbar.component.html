@@ -65,7 +65,7 @@
       </button>
 
       <!-- Cluster selector -->
-      @if (sourceState.sources().length > 0) {
+      @if (sourceState.sources().length > 0 || sourceState.removed().length > 0) {
         <div class="relative" data-source-menu>
           <button
             type="button"
@@ -78,10 +78,12 @@
           >
             @if (selectedSource(); as s) {
               <span class="k-led" [class]="dotClass(s)" [title]="statusLabel(s)"></span>
+            } @else if (sourceState.historyMode()) {
+              <svg class="w-3 h-3 flex-none text-kymo-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 4h16v4H4zM6 8v12h12V8M10 12h4" /></svg>
             } @else {
               <span class="k-led bg-kymo-faint"></span>
             }
-            <span class="truncate max-w-[120px]">{{ sourceState.selectedSource() || 'all clusters' }}</span>
+            <span class="truncate max-w-[120px]" [class.text-kymo-muted]="sourceState.historyMode()">{{ sourceState.selectedSource() || 'all clusters' }}</span>
             <svg class="w-3 h-3 flex-none text-kymo-muted transition-transform" [class.rotate-180]="showSourceMenu()" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
               <path stroke-linecap="square" d="M19 9l-7 7-7-7" />
             </svg>
@@ -113,6 +115,25 @@
                   <span class="k-led" [class]="dotClass(src)"></span>
                   <span class="truncate flex-1">{{ src.name }}</span>
                 </button>
+              }
+              @if (sourceState.removed().length > 0) {
+                <div class="border-t border-kymo-rule my-1"></div>
+                <div class="px-3 pt-1.5 pb-1 k-label" role="presentation">Removed</div>
+                @for (r of sourceState.removed(); track r.name) {
+                  <button
+                    type="button"
+                    role="option"
+                    [attr.aria-selected]="sourceState.selectedSource() === r.name"
+                    class="w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised transition-colors flex items-center gap-2"
+                    [class]="sourceState.selectedSource() === r.name ? 'text-kymo-amber' : 'text-kymo-muted'"
+                    [title]="'Removed cluster — recorded history only, last seen ' + (r.last_seen_at | timeago)"
+                    (click)="selectSource(r.name)"
+                  >
+                    <svg class="w-3 h-3 flex-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 4h16v4H4zM6 8v12h12V8M10 12h4" /></svg>
+                    <span class="truncate flex-1">{{ r.name }}</span>
+                    <span class="text-[10px] text-kymo-faint flex-none">{{ r.last_seen_at | timeago }}</span>
+                  </button>
+                }
               }
             </div>
           }

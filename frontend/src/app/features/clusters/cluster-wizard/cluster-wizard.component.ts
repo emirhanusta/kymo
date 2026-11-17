@@ -38,6 +38,8 @@ type ContextsResult = { ok: true; list: KubeContextList } | { ok: false; error: 
 export class ClusterWizardComponent implements OnInit {
   /** Cluster being edited; null = create. */
   source = input<SourceStatus | null>(null);
+  /** Re-adding a removed cluster: the name is prefilled and locked so its recorded history reconnects. */
+  presetName = input('');
   closed = output<void>();
   saved  = output<SourceStatus>();
 
@@ -52,6 +54,7 @@ export class ClusterWizardComponent implements OnInit {
   ];
 
   isEdit = computed(() => !!this.source());
+  nameLocked = computed(() => this.isEdit() || !!this.presetName());
   step   = signal<Step>(2);
 
   // ── form ──────────────────────────────────────────────────────────────────
@@ -98,6 +101,8 @@ export class ClusterWizardComponent implements OnInit {
   nameError = computed(() => {
     if (this.isEdit()) return '';
     const n = this.name().trim();
+    // A removed cluster's historic name is taken as is (it was valid when it was added).
+    if (this.presetName()) return this.nameTaken() === n || this.sources.find(n) ? 'A cluster with this name already exists.' : '';
     if (!n) return 'Name is required.';
     if (!CLUSTER_NAME_RE.test(n)) {
       return 'Use lowercase letters, digits, "-", "_" or "."; start with a letter or digit; at most 63 characters.';
@@ -153,6 +158,7 @@ export class ClusterWizardComponent implements OnInit {
       error: () => this.meta.set(null), // unknown → allow paste; the backend validates on save
     });
 
+    if (this.presetName()) this.name.set(this.presetName());
     const src = this.source();
     if (!src) return;
     const s = src.settings ?? { kubeconfig_uploaded: false };

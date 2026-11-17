@@ -6,6 +6,7 @@ import { catchError } from 'rxjs/operators';
 
 import { ContainerService } from '../../../core/services/container.service';
 import { RefreshService } from '../../../core/services/refresh.service';
+import { SourceStateService } from '../../../core/services/source-state.service';
 import { Container, LifecycleEvent, Revision } from '../../../core/models/container.model';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
@@ -104,7 +105,7 @@ interface Section {
                 <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell" [title]="p.firstSeen">{{ p.firstSeen | timeago }}</td>
                 <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap" [title]="p.lastSeen">{{ p.lastSeen | timeago }}</td>
                 <td class="px-4 py-2.5 text-right whitespace-nowrap">
-                  @if (p.current) {
+                  @if (p.current && !frozen()) {
                     <button type="button" class="k-btn k-btn-sm" [attr.aria-label]="'Logs of ' + p.name" (click)="openLogs(p)">
                       @if (p.status === 'running') { <span class="k-led bg-kymo-running animate-pulse" aria-hidden="true"></span> }
                       Logs
@@ -204,6 +205,7 @@ export class WorkloadPodsComponent {
 
   private svc     = inject(ContainerService);
   private refresh = inject(RefreshService);
+  private sources = inject(SourceStateService);
 
   readonly dotClass = (s: string) => STATUS_DOT_CLASS[normalizeStatus(s)];
   readonly short = shortRev;
@@ -212,11 +214,13 @@ export class WorkloadPodsComponent {
   readonly evReason = eventReason;
   readonly isRunning = (c: Container) => normalizeStatus(c.current_status) === 'running';
   /** Still part of the current pod set (not stopped): the pod exists, so live logs can work. */
-  readonly isActive = (c: Container) => normalizeStatus(c.current_status) !== 'stopped';
+  readonly isActive = (c: Container) => !this.sources.isRemoved(c.source_name) && normalizeStatus(c.current_status) !== 'stopped';
   /** Stopped containers keep crash-time snapshots only when they crashed or were OOM-killed. */
   readonly hasSnapshots = (c: Container) => c.crash_count + c.oom_count > 0;
   readonly restartsOf = (c: Container) => Math.max(0, c.start_count - 1);
 
+  /** Pods of a removed cluster no longer exist: only crash snapshots can be opened. */
+  frozen = computed(() => this.sources.isRemoved(this.instances()[0]?.source_name));
   noun = computed(() => this.label().toLowerCase());
   private openOverrides = signal<ReadonlyMap<string, boolean>>(new Map());
   private expandedRows  = signal<ReadonlySet<string>>(new Set());

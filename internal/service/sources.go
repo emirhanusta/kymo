@@ -29,6 +29,10 @@ var (
 	ErrSourceNotFound = errors.New("source not found")
 	// ErrSourceExists is returned when a source name is already taken.
 	ErrSourceExists = errors.New("a source with this name already exists")
+	// ErrSourceRegistered is returned when purging "removed" history of a live source.
+	ErrSourceRegistered = errors.New("source is currently registered; delete the source itself instead")
+	// ErrNoHistory is returned when no history is recorded for a name.
+	ErrNoHistory = errors.New("no recorded history for this source")
 )
 
 // ValidationError describes invalid source input.
@@ -287,9 +291,48 @@ func (m *SourceManager) Delete(ctx context.Context, name string, purge bool) err
 	m.recorder.DetachSource(name)
 	m.mgmt.UnregisterSource(name)
 	if purge {
-		return m.recorder.PurgeSource(ctx, name)
+		_, err := m.recorder.PurgeSource(ctx, name)
+		return err
 	}
 	return nil
+}
+
+// RemovedSources lists recorded history of sources that are no longer registered.
+func (m *SourceManager) RemovedSources(ctx context.Context) ([]model.SourceHistory, error) {
+	all, err := m.recorder.SourceHistory(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]model.SourceHistory, 0, len(all))
+	for _, h := range all {
+		if _, registered := m.recorder.Source(h.Name); !registered {
+			out = append(out, h)
+		}
+	}
+	return out, nil
+}
+
+// PurgeRemovedSource deletes the history of a source that is no longer
+// registered. It returns the number of containers deleted.
+func (m *SourceManager) PurgeRemovedSource(ctx context.Context, name string) (int64, error) {
+	if _, registered := m.recorder.Source(name); registered {
+		return 0, ErrSourceRegistered
+	}
+	all, err := m.recorder.SourceHistory(ctx)
+	if err != nil {
+		return 0, err
+	}
+	found := false
+	for _, h := range all {
+		if h.Name == name {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return 0, ErrNoHistory
+	}
+	return m.recorder.PurgeSource(ctx, name)
 }
 
 // Contexts lists kubeconfig contexts from a server-side path or raw content.

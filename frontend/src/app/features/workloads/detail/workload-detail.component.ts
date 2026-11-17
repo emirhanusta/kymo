@@ -25,6 +25,7 @@ import { WorkloadPodsComponent } from './workload-pods.component';
 import { WorkloadBadgeComponent } from '../../../shared/components/workload-badge/workload-badge.component';
 import { StabilityGaugeComponent } from '../../../shared/components/stability-gauge/stability-gauge.component';
 import { ResourceChartsComponent } from '../../../shared/components/resource-charts/resource-charts.component';
+import { READ_ONLY_HINT, REMOVED_HINT } from '../../../shared/utils/source';
 import { ReadOnlyTagComponent } from '../../../shared/components/read-only-tag/read-only-tag.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
@@ -120,6 +121,7 @@ export class WorkloadDetailComponent {
   workload = computed(() => this.detail()?.workload ?? null);
   score    = computed(() => this.detail()?.score ?? null);
   readOnly = computed(() => this.sources.isReadOnly(this.workload()?.source_name));
+  readOnlyHint = computed(() => this.sources.isRemoved(this.workload()?.source_name) ? REMOVED_HINT : READ_ONLY_HINT);
   isDeployment = computed(() => this.workload()?.kind === 'Deployment');
   isCronJob    = computed(() => this.workload()?.kind === 'CronJob');
   isJob        = computed(() => this.workload()?.kind === 'Job');

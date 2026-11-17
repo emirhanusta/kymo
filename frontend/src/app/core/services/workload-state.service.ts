@@ -15,8 +15,8 @@ const MAX_LOOKUPS = 25;
 
 /**
  * Shared, app-wide snapshot of everything the Overview, Workloads, Jobs and Issues pages (and the top-bar
- * issue badge) need. Always loads every cluster, system workloads included; pages scope it client-side with
- * the top-bar cluster selector and their own "show system" toggle. Reloads on the shared refresh bus.
+ * issue badge) need. Always loads every recorded cluster (removed ones included), system workloads included;
+ * pages scope it client-side via SourceStateService.inScope and their own "show system" toggle. Reloads on the shared refresh bus.
  */
 @Injectable({ providedIn: 'root' })
 export class WorkloadStateService {
@@ -51,9 +51,9 @@ export class WorkloadStateService {
     this.refresh.refresh$.subscribe(() => this.load());
   }
 
+  /** Cluster scoping is centralised in SourceStateService (connected clusters only, unless one is selected). */
   inScope<T>(list: T[], source: (x: T) => string): T[] {
-    const sel = this.selectedCluster();
-    return sel ? list.filter(x => source(x) === sel) : list;
+    return this.sources.inScope(list, source);
   }
 
   load(): void {

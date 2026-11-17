@@ -146,7 +146,10 @@ type RecorderService interface {
 	IsReadOnly(name string) bool
 	// PurgeSource permanently deletes every container, event, sample, score and
 	// CronJob execution recorded for a source.
-	PurgeSource(ctx context.Context, name string) error
+	// It returns the number of containers deleted.
+	PurgeSource(ctx context.Context, name string) (int64, error)
+	// SourceHistory aggregates recorded data per source name, registered or not.
+	SourceHistory(ctx context.Context) ([]model.SourceHistory, error)
 }
 
 // SourceSettings are the non-secret connection settings of a source.
@@ -417,17 +420,19 @@ func (s *recorderService) IsReadOnly(name string) bool {
 	return ok && spec.ReadOnly
 }
 
-// PurgeSource deletes everything recorded for a source.
-func (s *recorderService) PurgeSource(ctx context.Context, name string) error {
-	n, err := s.containers.DeleteBySource(ctx, name)
+// PurgeSource deletes everything recorded for a source in one transaction.
+func (s *recorderService) PurgeSource(ctx context.Context, name string) (int64, error) {
+	n, err := s.containers.PurgeSource(ctx, name)
 	if err != nil {
-		return err
-	}
-	if _, err := s.cronJobs.DeleteBySource(ctx, name); err != nil {
-		return err
+		return 0, err
 	}
 	s.log.Info("source history purged", zap.String("source", name), zap.Int64("containers", n))
-	return nil
+	return n, nil
+}
+
+// SourceHistory aggregates recorded data per source name.
+func (s *recorderService) SourceHistory(ctx context.Context) ([]model.SourceHistory, error) {
+	return s.containers.SourceHistory(ctx)
 }
 
 // startEntry launches an enabled source's collector. Caller holds s.mu and

@@ -12,6 +12,7 @@ import { IssuesService } from '../../core/services/issues.service';
 import { sourceDotClass, sourceStatusLabel } from '../../shared/utils/source';
 import { SourceStatus } from '../../core/models/container.model';
 import { PageContextService } from '../../core/services/page-context.service';
+import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import { LogoComponent } from '../../shared/components/logo/logo.component';
 import { CommandPaletteComponent } from '../command-palette/command-palette.component';
 
@@ -50,7 +51,7 @@ function isTypingOrModal(ev: KeyboardEvent): boolean {
 @Component({
   selector: 'app-topbar',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, LogoComponent, CommandPaletteComponent],
+  imports: [RouterLink, RouterLinkActive, TimeagoPipe, LogoComponent, CommandPaletteComponent],
   templateUrl: './topbar.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
