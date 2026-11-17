@@ -33,6 +33,12 @@
         @if (readOnly()) {
           <app-read-only-tag [hint]="readOnlyHint()" />
         }
+        @if (warnings1h() > 0) {
+          <span class="inline-flex items-center gap-1 text-[11px] px-1.5 py-px border border-kymo-amber/50 text-kymo-amber tabular-nums"
+              title="Kubernetes Warning events in the last hour (including repeats)">
+          <span aria-hidden="true">⚠</span> {{ warnings1h() }} warning{{ warnings1h() === 1 ? '' : 's' }} (1h)
+        </span>
+        }
       </span>
     </app-page-header>
 

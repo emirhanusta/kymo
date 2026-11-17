@@ -130,6 +130,14 @@ type RecorderService interface {
 	// GetWorkloadRevisions returns the workload's revisions, newest first.
 	GetWorkloadRevisions(ctx context.Context, workloadID string) ([]model.Revision, error)
 
+	// --- Kubernetes events ---
+
+	// ListK8sEvents returns persisted Kubernetes Events matching q, newest
+	// last_seen first. q.Limit is clamped to [1, 500] (default 100).
+	ListK8sEvents(ctx context.Context, q repository.K8sEventQuery) ([]*model.K8sEvent, error)
+	// ListK8sEventReasons aggregates event reasons since the given time.
+	ListK8sEventReasons(ctx context.Context, source string, since time.Time) ([]model.K8sEventReason, error)
+
 	// --- Source registry ---
 
 	// AttachSource registers a source and its collector. c may be nil when the
@@ -218,6 +226,7 @@ type recorderService struct {
 	cronJobs   repository.CronJobRepository
 	workloads  repository.WorkloadRepository
 	crashLogs  repository.CrashLogRepository
+	k8sEvents  repository.K8sEventRepository
 	scorer     stability.StabilityScorer
 	scoring    ScoringConfig
 	log        *zap.Logger
@@ -277,6 +286,7 @@ func NewRecorderService(
 	cronJobs repository.CronJobRepository,
 	workloads repository.WorkloadRepository,
 	crashLogs repository.CrashLogRepository,
+	k8sEvents repository.K8sEventRepository,
 	scoring ScoringConfig,
 	log *zap.Logger,
 ) RecorderService {
@@ -294,6 +304,7 @@ func NewRecorderService(
 		cronJobs:   cronJobs,
 		workloads:  workloads,
 		crashLogs:  crashLogs,
+		k8sEvents:  k8sEvents,
 		scorer:     stability.NewScorer(events, resources, scores, log),
 		scoring:    scoring,
 		log:        log,
@@ -540,6 +551,9 @@ func (s *recorderService) dispatch(ctx context.Context, event collector.Collecto
 	case collector.CollectorEventSync:
 		s.handleSync(ctx, event)
 		return
+	case collector.CollectorEventK8sEvent:
+		s.handleK8sEvent(ctx, event)
+		return
 	}
 
 	if event.Container == nil {
@@ -711,6 +725,21 @@ func (s *recorderService) handleCrashLog(ctx context.Context, event collector.Co
 	}
 	if err := s.crashLogs.Save(ctx, cl); err != nil {
 		s.log.Error("failed to save crash log", zap.String("container_id", cl.ContainerID), zap.Error(err))
+	}
+}
+
+// handleK8sEvent persists a Kubernetes Event. It is independent of container
+// rows; the repository upsert is idempotent so informer replays are harmless.
+func (s *recorderService) handleK8sEvent(ctx context.Context, event collector.CollectorEvent) {
+	e := event.K8sEvent
+	if e == nil || s.k8sEvents == nil {
+		return
+	}
+	if e.SourceName == "" {
+		e.SourceName = event.SourceName
+	}
+	if err := s.k8sEvents.Upsert(ctx, e); err != nil {
+		s.log.Error("failed to save k8s event", zap.String("uid", e.UID), zap.Error(err))
 	}
 }
 
@@ -1028,4 +1057,13 @@ func (s *recorderService) GetWorkloadRevisions(ctx context.Context, workloadID s
 		return nil, err
 	}
 	return model.BuildRevisions(members), nil
+}
+
+func (s *recorderService) ListK8sEvents(ctx context.Context, q repository.K8sEventQuery) ([]*model.K8sEvent, error) {
+	q.Limit = clampLimit(q.Limit, 100, 500)
+	return s.k8sEvents.List(ctx, q)
+}
+
+func (s *recorderService) ListK8sEventReasons(ctx context.Context, source string, since time.Time) ([]model.K8sEventReason, error) {
+	return s.k8sEvents.Reasons(ctx, source, since)
 }

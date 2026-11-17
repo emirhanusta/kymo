@@ -21,9 +21,11 @@ export class IssuesService {
   readonly eventInfo = computed<ReadonlyMap<string, WorkloadEventInfo>>(() =>
     attributeEvents(this.state.events(), this.liveWorkloads(), this.state.containerWorkloads()));
 
-  /** Every issue of the connected clusters, system workloads included. */
+  private liveK8sWarnings = computed(() => this.sources.connectedOnly(this.state.k8sWarnings(), e => e.source_name));
+
+  /** Every issue of the connected clusters, system workloads included (status-derived + Kubernetes Warning events). */
   readonly all = computed<Issue[]>(() =>
-    deriveIssues(this.liveWorkloads(), this.liveJobRows(), this.eventInfo()));
+    deriveIssues(this.liveWorkloads(), this.liveJobRows(), this.eventInfo(), this.liveK8sWarnings()));
 
   /** Issues of the top-bar cluster, system workloads hidden. */
   readonly open = computed(() => this.forCluster(this.state.selectedCluster(), false));

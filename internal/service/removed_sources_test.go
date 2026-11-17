@@ -64,7 +64,7 @@ func (m *memSources) Delete(_ context.Context, name string) error {
 func newRemovedManager(t *testing.T, hist map[string]model.SourceHistory) (*SourceManager, *historyContainers) {
 	t.Helper()
 	fc := &historyContainers{history: hist}
-	r := NewRecorderService(fc, nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop())
+	r := NewRecorderService(fc, nil, nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop())
 	factory := func(model.SourceSpec) collector.Collector { return newFake(0) }
 	box, _ := secret.New("")
 	m := NewSourceManager(&memSources{rows: map[string]*model.SourceSpec{}}, box, r,

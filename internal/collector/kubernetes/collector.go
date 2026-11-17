@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
@@ -91,11 +92,16 @@ type Collector struct {
 	kubeContext    string
 	pollInterval   time.Duration
 	crashLogs      CrashLogOptions
+	k8sEvents      K8sEventOptions
+	k8sEventFilter k8sEventFilter
 
 	clientset        kubernetes.Interface
 	metricsAvailable bool // true when metrics-server is reachable
 
 	factory informers.SharedInformerFactory
+	// podLister reads the pod informer cache (set in Start; used to resolve
+	// the workload of Pod events). nil outside a running informer.
+	podLister corelisters.PodLister
 
 	// pods tracks the live state of all observed pods for diffing.
 	// Keyed by "namespace/pod-name".
@@ -142,6 +148,8 @@ func New(log *zap.Logger, sourceName, kubeconfigPath string, kubeconfigData []by
 	}
 	return &Collector{
 		crashLogs:      opts.CrashLogs.normalized(),
+		k8sEvents:      opts.K8sEvents,
+		k8sEventFilter: newK8sEventFilter(opts.K8sEvents),
 		logged:         make(map[string]struct{}),
 		logSem:         make(chan struct{}, maxConcurrentCrashLogFetches),
 		log:            log,
@@ -196,17 +204,22 @@ func (c *Collector) Start(ctx context.Context) error {
 		return fmt.Errorf("kubernetes: add event handler: %w", err)
 	}
 
+	if c.k8sEvents.Enabled {
+		if err = c.registerK8sEventInformer(runCtx, podInformer.Lister()); err != nil {
+			cancel()
+			return fmt.Errorf("kubernetes: add k8s event handler: %w", err)
+		}
+	}
+
 	// Start all informers (non-blocking; goroutines are owned by the factory).
 	c.factory.Start(runCtx.Done())
 
 	// Block until the initial list is complete and the cache is warm.
 	c.log.Info("kubernetes: waiting for cache sync")
-	synced := c.factory.WaitForCacheSync(runCtx.Done())
-	for t, ok := range synced {
-		if !ok {
-			c.log.Warn("kubernetes: informer cache sync timed out",
-				zap.String("type", fmt.Sprintf("%v", t)))
-		}
+	// Only the pod cache gates startup: the Events informer may lack RBAC and
+	// must not block (or fail) the source.
+	if !cache.WaitForCacheSync(runCtx.Done(), podInformer.Informer().HasSynced) {
+		c.log.Warn("kubernetes: pod informer cache sync timed out")
 	}
 
 	// Reconcile: anything stored for this source that no longer exists in the
@@ -215,8 +228,10 @@ func (c *Collector) Start(ctx context.Context) error {
 	if pods, err := podInformer.Lister().List(labels.Everything()); err == nil {
 		ids := make([]string, 0, len(pods))
 		for _, pod := range pods {
-			for _, cs := range pod.Status.ContainerStatuses {
-				ids = append(ids, containerID(pod.Namespace, pod.Name, cs.Name))
+			// Spec containers, not just reported statuses: a Pending pod has no
+			// statuses yet but its containers exist (see emitPendingContainers).
+			for _, ctr := range pod.Spec.Containers {
+				ids = append(ids, containerID(pod.Namespace, pod.Name, ctr.Name))
 			}
 		}
 		c.wg.Add(1)
@@ -387,6 +402,8 @@ func (c *Collector) onPodAdd(ctx context.Context, obj interface{}, isInInitialLi
 	c.workloadCache[pk] = wl
 	c.mu.Unlock()
 
+	c.emitPendingContainers(ctx, pod, wl)
+
 	if isInInitialList {
 		// Startup seeding: record each container's current state without
 		// inventing lifecycle events — KYMO did not observe a start,
@@ -502,6 +519,40 @@ func (c *Collector) onPodUpdate(ctx context.Context, oldObj, newObj interface{})
 		c.mu.Unlock()
 
 		c.processContainerChange(ctx, newPod, newCS, oldCS, snap, wl)
+	}
+
+	c.emitPendingContainers(ctx, newPod, wl)
+}
+
+// emitPendingContainers records containers that the pod spec declares but the
+// kubelet has not reported yet — typically a Pending pod that cannot be
+// scheduled (no node, so no container statuses at all). Without this, a
+// workload whose pods never start would be invisible in KYMO, which is exactly
+// when it matters most. The rows are upserted with an unknown status and no
+// lifecycle event; real statuses take over once the kubelet reports them.
+func (c *Collector) emitPendingContainers(ctx context.Context, pod *corev1.Pod, wl WorkloadInfo) {
+	if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+		return
+	}
+	reported := make(map[string]bool, len(pod.Status.ContainerStatuses))
+	for _, cs := range pod.Status.ContainerStatuses {
+		reported[cs.Name] = true
+	}
+	for _, ctr := range pod.Spec.Containers {
+		if reported[ctr.Name] {
+			continue
+		}
+		snap := &containerSnapshot{firstSeenAt: pod.CreationTimestamp.UTC()}
+		if snap.firstSeenAt.IsZero() {
+			snap.firstSeenAt = time.Now().UTC()
+		}
+		ct := buildContainerModel(c.sourceName, pod, ctr.Name, ctr.Image, snap, wl)
+		ct.CurrentStatus = model.StatusUnknown
+		c.emit(ctx, collector.CollectorEvent{
+			Kind:       collector.CollectorEventState,
+			SourceName: c.sourceName,
+			Container:  ct,
+		})
 	}
 }
 
@@ -1074,7 +1125,10 @@ func containerStateToStatus(state corev1.ContainerState) model.ContainerStatus {
 			return model.StatusCrashing
 		}
 		return model.StatusStopped
-	default: // Waiting
+	case state.Waiting != nil && state.Waiting.Reason == "CrashLoopBackOff":
+		// Waiting between restarts of a crashing container.
+		return model.StatusCrashing
+	default: // Waiting (ContainerCreating, ImagePullBackOff, …) or not reported
 		return model.StatusUnknown
 	}
 }

@@ -176,6 +176,7 @@
               <th class="!text-right">Workloads</th>
               <th class="!text-right">Containers</th>
               <th class="!text-right hidden md:table-cell">CronJob runs</th>
+              <th class="!text-right hidden md:table-cell">K8s events</th>
               <th class="hidden lg:table-cell">First seen</th>
               <th class="hidden sm:table-cell">Last seen</th>
               <th><span class="sr-only">Actions</span></th>
@@ -193,6 +194,7 @@
                 <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink">{{ r.workloads }}</td>
                 <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink">{{ r.containers }}</td>
                 <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink hidden md:table-cell">{{ r.cronjob_runs }}</td>
+                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink hidden md:table-cell">{{ r.k8s_events ?? '—' }}</td>
                 <td class="px-4 py-3 align-top text-xs text-kymo-muted whitespace-nowrap hidden lg:table-cell" [title]="r.first_seen_at">{{ r.first_seen_at | timeago }}</td>
                 <td class="px-4 py-3 align-top text-xs text-kymo-muted whitespace-nowrap hidden sm:table-cell" [title]="r.last_seen_at">{{ r.last_seen_at | timeago }}</td>
                 <td class="px-4 py-3 align-top">

@@ -49,7 +49,7 @@ func TestRecorderSavesCrashLogs(t *testing.T) {
 		known:   map[string]*model.Container{"ns/p/app": {ID: "ns/p/app"}, "ns/p/ign": {ID: "ns/p/ign"}},
 		ignored: map[string]bool{"ns/p/ign": true},
 	}
-	r := NewRecorderService(fc, nil, nil, nil, nil, nil, cl, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	r := NewRecorderService(fc, nil, nil, nil, nil, nil, cl, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 
 	at := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	ev := func(id string) collector.CollectorEvent {

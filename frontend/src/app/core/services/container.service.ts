@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of, forkJoin } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery, WorkloadSummary, WorkloadDetail, WorkloadQuery, WorkloadEventsQuery, WorkloadScore, CrashLog, Revision } from '../models/container.model';
+import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery, WorkloadSummary, WorkloadDetail, WorkloadQuery, WorkloadEventsQuery, WorkloadScore, CrashLog, Revision, K8sEvent, K8sEventsQuery, K8sReasonCount, WorkloadK8sEventsQuery } from '../models/container.model';
 
 export const API_BASE = '/api/v1';
 
@@ -175,6 +175,37 @@ export class ContainerService {
     if (q.type) params = params.set('type', q.type);
     if (q.before) params = params.set('before', q.before);
     return this.http.get<LifecycleEvent[]>(`${this.base}/events/recent`, { params });
+  }
+
+  // --- Kubernetes events ---
+
+  /** Newest `last_seen` first; `before` pages backwards. */
+  queryK8sEvents(q: K8sEventsQuery): Observable<K8sEvent[]> {
+    let params = new HttpParams().set('limit', String(Math.min(q.limit ?? 100, 500)));
+    if (q.source) params = params.set('source', q.source);
+    if (q.namespace) params = params.set('namespace', q.namespace);
+    if (q.type) params = params.set('type', q.type);
+    if (q.reason) params = params.set('reason', q.reason);
+    if (q.workload_id) params = params.set('workload_id', q.workload_id);
+    if (q.q?.trim()) params = params.set('q', q.q.trim());
+    if (q.since) params = params.set('since', q.since);
+    if (q.before) params = params.set('before', q.before);
+    return this.http.get<K8sEvent[]>(`${this.base}/k8s-events`, { params }).pipe(map(l => l ?? []));
+  }
+
+  getWorkloadK8sEvents(id: string, q: WorkloadK8sEventsQuery = {}): Observable<K8sEvent[]> {
+    let params = new HttpParams().set('limit', String(Math.min(q.limit ?? 100, 500)));
+    if (q.since) params = params.set('since', q.since);
+    if (q.before) params = params.set('before', q.before);
+    return this.http.get<K8sEvent[]>(`${this.base}/workloads/${encodeURIComponent(id)}/k8s-events`, { params }).pipe(map(l => l ?? []));
+  }
+
+  /** Reasons seen since `since` (server default: last 24h), most frequent first. */
+  getK8sEventReasons(source?: string, since?: string): Observable<K8sReasonCount[]> {
+    let params = new HttpParams();
+    if (source) params = params.set('source', source);
+    if (since) params = params.set('since', since);
+    return this.http.get<K8sReasonCount[]>(`${this.base}/k8s-events/reasons`, { params }).pipe(map(l => l ?? []));
   }
 
   // --- Namespaces ---

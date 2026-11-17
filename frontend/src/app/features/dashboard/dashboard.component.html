@@ -65,7 +65,7 @@
         <ul class="divide-y divide-kymo-rule">
           @for (i of topIssues(); track i.id) {
             <li>
-              <a [routerLink]="['/workloads', i.workloadId]" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
+              <a [routerLink]="i.workloadId ? ['/workloads', i.workloadId] : ['/events']" [queryParams]="i.workloadId ? null : { view: 'k8s' }" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
                 <span class="k-led flex-none" [class]="i.severity === 'critical' ? 'bg-kymo-danger' : 'bg-kymo-amber'" aria-hidden="true"></span>
                 <app-workload-badge class="flex-none" [kind]="i.workloadKind" />
                 <div class="flex-1 min-w-0">

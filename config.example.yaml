@@ -39,6 +39,25 @@ collector:
     enabled: true
     tail_lines: 200            # max 2000
     max_bytes: 65536           # max 1048576 (1 MiB)
+  # Kubernetes Events expire in the cluster after ~1h; KYMO keeps them for 90
+  # days. Warning events are always kept; Normal events only for the listed
+  # reasons. Needs list/watch on "events" (cluster-wide) in the source's RBAC.
+  k8s_events:
+    enabled: true
+    normal_reasons:
+      - ScalingReplicaSet
+      - SuccessfulCreate
+      - SuccessfulDelete
+      - Killing
+      - SawCompletedJob
+      - SuccessfulRescale
+      - Preempted
+      - Rebooted
+      - NodeNotReady
+      - RegisteredNode
+      - RemovingNode
+      - Evicted
+    exclude_namespaces: []     # e.g. [kube-system]
   # Sources declared here are locked in the UI and reloaded live when this file
   # changes (added, changed and removed sources are applied without a restart).
   # Sources can also be added, edited and removed at runtime from the Sources

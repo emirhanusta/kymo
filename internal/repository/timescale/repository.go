@@ -459,6 +459,9 @@ func (r *containerRepo) PurgeSource(ctx context.Context, sourceName string) (int
 	if _, err := tx.Exec(ctx, `DELETE FROM cronjob_executions WHERE source_name = $1`, sourceName); err != nil {
 		return 0, fmt.Errorf("timescale: purge source cronjob executions: %w", err)
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM k8s_events WHERE source_name = $1`, sourceName); err != nil {
+		return 0, fmt.Errorf("timescale: purge source k8s events: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("timescale: purge source commit: %w", err)
 	}
@@ -475,12 +478,20 @@ WITH c AS (
 ), j AS (
   SELECT source_name, COUNT(*) AS runs, MIN(sampled_at) AS first_seen, MAX(sampled_at) AS last_seen
   FROM cronjob_executions WHERE source_name <> '' GROUP BY source_name
+), k AS (
+  SELECT source_name, COUNT(*) AS n, MIN(first_seen) AS first_seen, MAX(last_seen) AS last_seen FROM k8s_events WHERE source_name <> '' GROUP BY source_name
+), cj AS (
+  SELECT COALESCE(c.source_name, j.source_name) AS source_name,
+         COALESCE(c.workloads, 0) AS workloads, COALESCE(c.containers, 0) AS containers,
+         COALESCE(j.runs, 0) AS runs,
+         COALESCE(c.first_seen, j.first_seen) AS first_seen, COALESCE(c.last_seen, j.last_seen) AS last_seen
+  FROM c FULL JOIN j ON c.source_name = j.source_name
 )
-SELECT COALESCE(c.source_name, j.source_name),
-       COALESCE(c.workloads, 0), COALESCE(c.containers, 0), COALESCE(j.runs, 0),
-       COALESCE(c.first_seen, j.first_seen), COALESCE(c.last_seen, j.last_seen)
-FROM c FULL JOIN j ON c.source_name = j.source_name
-ORDER BY 6 DESC, 1`
+SELECT COALESCE(cj.source_name, k.source_name),
+       COALESCE(cj.workloads, 0), COALESCE(cj.containers, 0), COALESCE(cj.runs, 0), COALESCE(k.n, 0),
+       COALESCE(cj.first_seen, k.first_seen), COALESCE(cj.last_seen, k.last_seen)
+FROM cj FULL JOIN k ON cj.source_name = k.source_name
+ORDER BY 7 DESC, 1`
 
 // SourceHistory aggregates recorded data per source_name.
 func (r *containerRepo) SourceHistory(ctx context.Context) ([]model.SourceHistory, error) {
@@ -492,7 +503,7 @@ func (r *containerRepo) SourceHistory(ctx context.Context) ([]model.SourceHistor
 	out := []model.SourceHistory{}
 	for rows.Next() {
 		var h model.SourceHistory
-		if err := rows.Scan(&h.Name, &h.Workloads, &h.Containers, &h.CronJobRuns, &h.FirstSeenAt, &h.LastSeenAt); err != nil {
+		if err := rows.Scan(&h.Name, &h.Workloads, &h.Containers, &h.CronJobRuns, &h.K8sEvents, &h.FirstSeenAt, &h.LastSeenAt); err != nil {
 			return nil, fmt.Errorf("timescale: source history scan: %w", err)
 		}
 		out = append(out, h)

@@ -27,6 +27,7 @@ const (
 // Options carries optional collector behaviour.
 type Options struct {
 	CrashLogs CrashLogOptions
+	K8sEvents K8sEventOptions
 }
 
 // CrashLogOptions configures crash-time log snapshots. Logs can contain
