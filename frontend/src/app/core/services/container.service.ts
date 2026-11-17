@@ -247,6 +247,14 @@ export class ContainerService {
     );
   }
 
+  /** A container's crash-log snapshots, newest first (empty on error). */
+  getContainerCrashLogs(containerId: string, limit = 20): Observable<CrashLog[]> {
+    const params = new HttpParams().set('limit', String(limit));
+    return this.http.get<CrashLog[]>(`${this.base}/containers/${encodeURIComponent(containerId)}/crash-logs`, { params }).pipe(
+      map(l => l ?? []), catchError(() => of([]))
+    );
+  }
+
   /** The snapshot of one termination; errors with 404 when there is none. */
   getContainerCrashLog(containerId: string, occurredAt: string): Observable<CrashLog> {
     const params = new HttpParams().set('occurred_at', occurredAt);

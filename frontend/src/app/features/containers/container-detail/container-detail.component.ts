@@ -24,6 +24,7 @@ import { WorkloadBadgeComponent } from '../../../shared/components/workload-badg
 import { StabilityGaugeComponent } from '../../../shared/components/stability-gauge/stability-gauge.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { CrashLogInlineComponent } from '../../../shared/components/crash-log-inline/crash-log-inline.component';
+import { normalizeStatus } from '../../../shared/utils/status';
 import { LogViewerComponent } from '../../../shared/components/log-viewer/log-viewer.component';
 import { DeleteModalComponent } from '../../../shared/components/delete-modal/delete-modal.component';
 import { ResourceChartsComponent } from '../../../shared/components/resource-charts/resource-charts.component';
@@ -300,6 +301,9 @@ export class ContainerDetailComponent {
   restartContainer(): void {
     this.runAction(() => this.svc.restartContainer(this.id()), 'Pod deleted — Kubernetes will recreate it', 'Failed to restart pod');
   }
+
+  /** Stopped containers: the pod is (almost always) gone, so open the logs viewer in snapshot mode. */
+  isStopped = computed(() => normalizeStatus(this.container()?.current_status ?? '') === 'stopped');
 
   openLogs(): void { this.showLogViewer.set(true); }
 

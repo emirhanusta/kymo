@@ -3,6 +3,7 @@ package httphandler
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/emirhanusta/kymo/internal/model"
 	"github.com/emirhanusta/kymo/internal/repository"
@@ -112,8 +114,7 @@ func (h *Handler) GetContainerLogs(c *gin.Context) {
 		}
 		reader, err := h.mgmt.GetPodLogs(c.Request.Context(), source, ns, pod, ctr, tail, follow)
 		if err != nil {
-			h.log.Error("get pod logs failed", zap.String("id", container.ID), zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			h.logsError(c, container.ID, pod, err)
 			return
 		}
 		if follow {
@@ -124,6 +125,48 @@ func (h *Handler) GetContainerLogs(c *gin.Context) {
 
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported runtime"})
+	}
+}
+
+// logsError writes the response for a failed pod-logs request: 410 pod_gone
+// when Kubernetes reports the pod/container as not found (with the number of
+// stored crash-log snapshots), otherwise 502 logs_unavailable.
+func (h *Handler) logsError(c *gin.Context, containerID, pod string, err error) {
+	if apierrors.IsNotFound(err) {
+		n := 0
+		if logs, lerr := h.svc.GetContainerCrashLogs(c.Request.Context(), containerID, 50); lerr != nil {
+			h.log.Warn("count crash logs failed", zap.String("id", containerID), zap.Error(lerr))
+		} else {
+			n = len(logs)
+		}
+		c.JSON(http.StatusGone, gin.H{
+			"error":      pod + " no longer exists in the cluster",
+			"code":       "pod_gone",
+			"crash_logs": n,
+		})
+		return
+	}
+	h.log.Error("get pod logs failed", zap.String("id", containerID), zap.Error(err))
+	c.JSON(http.StatusBadGateway, gin.H{
+		"error": "could not fetch logs from the cluster: " + logsErrMessage(err),
+		"code":  "logs_unavailable",
+	})
+}
+
+// logsErrMessage returns the innermost, user-presentable message of err.
+func logsErrMessage(err error) string {
+	var st apierrors.APIStatus
+	if errors.As(err, &st) {
+		if m := st.Status().Message; m != "" {
+			return m
+		}
+	}
+	for {
+		u := errors.Unwrap(err)
+		if u == nil {
+			return err.Error()
+		}
+		err = u
 	}
 }
 
