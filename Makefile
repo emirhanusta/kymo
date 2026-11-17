@@ -1,4 +1,4 @@
-.PHONY: run build tidy lint test migrate docker-up docker-down web web-dev
+.PHONY: run build tidy lint test test-db migrate docker-up docker-down web web-dev
 
 BINARY := bin/kymo
 CMD    := ./cmd/kymo
@@ -42,6 +42,25 @@ lint:
 ## test: run all tests with the race detector enabled.
 test:
 	go test -race -count=1 -timeout=60s ./...
+
+## test-db: run the repository integration tests against a throwaway TimescaleDB container.
+TEST_DB_NAME  ?= kymo-test-db
+TEST_DB_PORT  ?= 55433
+TEST_DB_IMAGE ?= timescale/timescaledb:latest-pg16
+test-db:
+	@set -e; \
+	trap 'docker stop $(TEST_DB_NAME) >/dev/null 2>&1 || true' EXIT INT TERM; \
+	docker stop $(TEST_DB_NAME) >/dev/null 2>&1 || true; \
+	docker run -d --rm --name $(TEST_DB_NAME) -e POSTGRES_USER=kymo -e POSTGRES_PASSWORD=kymo \
+	  -p 127.0.0.1:$(TEST_DB_PORT):5432 $(TEST_DB_IMAGE) >/dev/null; \
+	echo "waiting for $(TEST_DB_NAME)..."; \
+	ok=; for i in $$(seq 1 90); do \
+	  if docker exec $(TEST_DB_NAME) pg_isready -U kymo -h 127.0.0.1 >/dev/null 2>&1 \
+	     && docker exec $(TEST_DB_NAME) psql -U kymo -h 127.0.0.1 -tAc 'select 1' >/dev/null 2>&1; then ok=1; break; fi; \
+	  sleep 1; done; \
+	[ -n "$$ok" ] || { echo "database did not become ready"; exit 1; }; \
+	KYMO_TEST_DSN='postgres://kymo:kymo@localhost:$(TEST_DB_PORT)/postgres?sslmode=disable' \
+	  go test -race -count=1 ./internal/repository/...
 
 # ---------------------------------------------------------------------------
 # Database
