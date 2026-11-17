@@ -42,13 +42,13 @@
     </app-page-header>
 
     <dl class="flex items-center gap-x-6 gap-y-1 flex-wrap text-xs -mt-3">
-      <div class="flex gap-2"><dt class="k-label">source</dt><dd class="text-kymo-ink">{{ container()!.source_name }}</dd></div>
+      <div class="flex gap-2"><dt class="k-label">cluster</dt><dd class="text-kymo-ink">{{ container()!.source_name }}</dd></div>
       @if (container()!.namespace) {
         <div class="flex gap-2"><dt class="k-label">ns</dt><dd class="text-kymo-ink">{{ container()!.namespace }}</dd></div>
       }
       @if (container()!.workload_name) {
         <div class="flex gap-2">
-          <dt class="k-label">{{ container()!.workload_kind === 'Compose' ? 'project' : 'workload' }}</dt>
+          <dt class="k-label">workload</dt>
           <dd class="flex items-center gap-2">
             @if (container()!.workload_id) {
               <a
@@ -75,7 +75,7 @@
     </dl>
 
     <!-- CronJob / Job info banner -->
-    @if (isK8s() && isCronJobOrJob()) {
+    @if (isCronJobOrJob()) {
       <div class="flex items-center gap-2 px-4 py-2.5 border border-kymo-amber/40 border-l-2 border-l-kymo-amber text-xs text-kymo-amber">
         <span class="k-label !text-kymo-amber flex-none">note</span>
         <span>
@@ -89,28 +89,10 @@
 
     <!-- Action Bar -->
     <div class="flex items-center gap-2 flex-wrap border-y border-kymo-rule py-3" role="toolbar" aria-label="Container actions">
-      @if (readOnly() && !(isK8s() && isCronJobOrJob())) {
+      @if (readOnly() && !isCronJobOrJob()) {
         <app-read-only-tag />
       }
-      @if (isDocker() && !readOnly()) {
-        <button type="button" class="k-btn k-btn-go" [disabled]="actionBusy() || !canStart()" (click)="startContainer()" title="Start container">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linejoin="round" d="M5 3l14 9-14 9V3z" /></svg>
-          Start
-        </button>
-        <button type="button" class="k-btn" [disabled]="actionBusy() || !canStop()" (click)="stopContainer()" title="Stop container">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><rect x="6" y="6" width="12" height="12" /></svg>
-          Stop
-        </button>
-        <button type="button" class="k-btn k-btn-primary" [disabled]="actionBusy() || !canRestart()" (click)="restartContainer()" title="Restart container">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-          Restart
-        </button>
-        <button type="button" class="k-btn k-btn-danger" [disabled]="actionBusy() || !canKill()" (click)="confirmKill.set(true)" title="Force kill (SIGKILL)">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-          Kill
-        </button>
-      }
-      @if (isK8s() && !isCronJobOrJob() && !readOnly()) {
+      @if (!isCronJobOrJob() && !readOnly()) {
         <button type="button" class="k-btn k-btn-primary" [disabled]="actionBusy()" (click)="restartContainer()" title="Delete pod (K8s will recreate it)">
           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
           Restart Pod
@@ -227,8 +209,8 @@
       }
     </section>
 
-    <!-- Pod Info (K8s only) -->
-    @if (isK8s() && podDetail()) {
+    <!-- Pod Info -->
+    @if (podDetail()) {
       <div class="k-panel p-5">
         <div class="flex items-center justify-between mb-4">
           <h2 class="k-label">Pod</h2>
@@ -273,17 +255,6 @@
     [containerId]="container()!.id"
     [containerName]="container()!.name"
     (closed)="showLogViewer.set(false)"
-  />
-}
-
-<!-- Kill confirmation -->
-@if (confirmKill() && container()) {
-  <app-confirm-dialog
-    title="Force kill container?"
-    [message]="'Send SIGKILL to ' + container()!.name + '. The process gets no chance to shut down gracefully.'"
-    confirmLabel="Kill"
-    (confirmed)="onKillConfirmed()"
-    (cancelled)="confirmKill.set(false)"
   />
 }
 

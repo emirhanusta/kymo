@@ -21,14 +21,13 @@ export function sourceStatusLabel(src: SourceStatus): string {
   }
 }
 
-export const READ_ONLY_HINT = 'Read-only source: management actions (start, stop, restart, kill, scale) are disabled.';
+export const READ_ONLY_HINT = 'Read-only cluster: management actions (restart pod, scale, rollout restart) are disabled.';
 export const CONFIG_ORIGIN_HINT = 'Managed in config.yaml — edit the file; changes apply automatically';
 
 /** One-line connection summary for lists. */
 export function sourceConnectionSummary(src: SourceStatus): string {
   const s = src.settings;
   if (!s) return '—';
-  if (src.type === 'docker') return s.socket || 'server default socket';
   const where = s.kubeconfig_uploaded ? 'uploaded kubeconfig' : (s.kubeconfig_path || 'default kubeconfig');
   return s.kube_context ? `${where} · ${s.kube_context}` : where;
 }

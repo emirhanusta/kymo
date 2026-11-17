@@ -41,11 +41,10 @@ export interface ContainerQuery {
   limit: number;
   sort?: ContainerSortField;
   order?: 'asc' | 'desc';
-  runtime?: 'docker' | 'kubernetes';
   source?: string;
   q?: string;
   status?: ContainerStatusFilter;
-  /** Exact match on workload_kind (e.g. 'Deployment', 'Compose'). */
+  /** Exact match on workload_kind (e.g. 'Deployment'). */
   workload_kind?: string;
   /** Exact match on workload_name. */
   workload?: string;
@@ -115,7 +114,6 @@ export interface ActionResult {
 export type SourceType = 'docker' | 'kubernetes';
 
 export interface SourceSettings {
-  socket?: string;
   kubeconfig_path?: string;
   kube_context?: string;
   kubeconfig_uploaded: boolean;
@@ -128,7 +126,7 @@ export interface SourceStatus {
   /** `config` = defined in config.yaml (read-only in the UI); `user` = created through the UI/API. */
   origin: 'config' | 'user';
   enabled: boolean;
-  /** Management actions (start/stop/scale/…) are refused for read-only sources. */
+  /** Management actions (restart/scale/…) are refused for read-only clusters. */
   read_only: boolean;
   status: 'connecting' | 'connected' | 'error' | 'disabled';
   last_error?: string;
@@ -144,7 +142,6 @@ export interface SourceInput {
   type: SourceType;
   enabled?: boolean;
   read_only: boolean;
-  socket?: string;
   kubeconfig_path?: string;
   /** Raw kubeconfig YAML. Omit on update to keep the stored one. */
   kubeconfig?: string;

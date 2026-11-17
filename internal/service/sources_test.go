@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -69,7 +70,7 @@ func TestRecorderAttachDetachWhileRunning(t *testing.T) {
 	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 
 	before := newFake(0)
-	r.AttachSource(model.SourceSpec{Name: "a", Type: "docker", Enabled: true}, before, nil)
+	r.AttachSource(model.SourceSpec{Name: "a", Type: "kubernetes", Enabled: true}, before, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -79,7 +80,7 @@ func TestRecorderAttachDetachWhileRunning(t *testing.T) {
 
 	// Attached while running: starts immediately.
 	during := newFake(0)
-	r.AttachSource(model.SourceSpec{Name: "b", Type: "docker", Enabled: true, ReadOnly: true}, during, nil)
+	r.AttachSource(model.SourceSpec{Name: "b", Type: "kubernetes", Enabled: true, ReadOnly: true}, during, nil)
 	waitFor(t, func() bool { return healthOf(t, r, "b").status == SourceConnected })
 	if !r.IsReadOnly("b") || r.IsReadOnly("a") {
 		t.Fatal("read-only flags not tracked per source")
@@ -87,14 +88,14 @@ func TestRecorderAttachDetachWhileRunning(t *testing.T) {
 
 	// Disabled sources never start.
 	off := newFake(0)
-	r.AttachSource(model.SourceSpec{Name: "c", Type: "docker", Enabled: false}, off, nil)
+	r.AttachSource(model.SourceSpec{Name: "c", Type: "kubernetes", Enabled: false}, off, nil)
 	if h := healthOf(t, r, "c"); h.status != SourceDisabled || off.starts.Load() != 0 {
 		t.Fatalf("disabled source started: %+v", h)
 	}
 
 	// Re-attaching replaces (and stops) the previous collector.
 	replacement := newFake(0)
-	r.AttachSource(model.SourceSpec{Name: "b", Type: "docker", Enabled: true}, replacement, nil)
+	r.AttachSource(model.SourceSpec{Name: "b", Type: "kubernetes", Enabled: true}, replacement, nil)
 	if !during.stopped.Load() {
 		t.Fatal("replaced collector was not stopped")
 	}
@@ -140,10 +141,11 @@ func TestBuildSpecValidation(t *testing.T) {
 		in   SourceInput
 		ok   bool
 	}{
-		{"docker ok", SourceInput{Name: "local-docker", Type: "docker"}, true},
-		{"bad name", SourceInput{Name: "Bad Name", Type: "docker"}, false},
+		{"docker rejected", SourceInput{Name: "local", Type: "docker"}, false},
+		{"k8s ok", SourceInput{Name: "prod", Type: "kubernetes"}, true},
+		{"bad name", SourceInput{Name: "Bad Name", Type: "kubernetes"}, false},
 		{"bad type", SourceInput{Name: "x", Type: "podman"}, false},
-		{"poll too low", SourceInput{Name: "x", Type: "docker", PollIntervalSeconds: 1}, false},
+		{"poll too low", SourceInput{Name: "x", Type: "kubernetes", PollIntervalSeconds: 1}, false},
 		{"k8s path", SourceInput{Name: "dev", Type: "kubernetes", KubeconfigPath: "/k/config"}, true},
 		{"upload without key", SourceInput{Name: "dev", Type: "kubernetes", Kubeconfig: "apiVersion: v1"}, false},
 	}
@@ -169,8 +171,18 @@ func TestBuildSpecValidation(t *testing.T) {
 	if len(spec.Kubeconfig) != 0 {
 		t.Error("switching to a path should drop the uploaded kubeconfig")
 	}
-	if _, err := m.buildSpec(SourceInput{Type: "docker"}, existing); err == nil {
+	if _, err := m.buildSpec(SourceInput{Type: "podman"}, existing); err == nil {
 		t.Error("type change accepted")
+	}
+}
+
+func TestBuildSpecRejectsDocker(t *testing.T) {
+	noKey, _ := secret.New("")
+	m := &SourceManager{box: noKey}
+	_, err := m.buildSpec(SourceInput{Name: "x", Type: "docker"}, nil)
+	var ve *ValidationError
+	if !errors.As(err, &ve) || !strings.Contains(err.Error(), `source "x" has type "docker": only "kubernetes" sources are supported`) {
+		t.Fatalf("docker source not rejected clearly: %v", err)
 	}
 }
 

@@ -65,10 +65,7 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		v1.GET("/containers/:id/logs", h.GetContainerLogs)
 
 		// Container management endpoints
-		v1.POST("/containers/:id/start", h.StartContainer)
-		v1.POST("/containers/:id/stop", h.StopContainer)
 		v1.POST("/containers/:id/restart", h.RestartContainer)
-		v1.DELETE("/containers/:id/kill", h.KillContainer)
 
 		// Soft-delete / ignore / restore / hard-delete endpoints
 		v1.DELETE("/containers/:id", h.DeleteContainer)
@@ -144,8 +141,8 @@ func (h *Handler) ListSources(c *gin.Context) {
 // ListContainers returns containers known to KYMO.
 //
 // Query parameters:
-//   - runtime (optional): filter by "docker" or "kubernetes".
-//   - source  (optional): filter by collector source name (e.g. "local-docker").
+//   - runtime (optional): filter by runtime (only "kubernetes").
+//   - source  (optional): filter by collector source name (e.g. "prod-k8s").
 //   - q       (optional): case-insensitive substring of name/image/namespace/workload.
 //   - status  (optional): filter by current status (running, stopped, crashing, …).
 //   - workload_kind / workload (optional): filter by workload kind / exact name.

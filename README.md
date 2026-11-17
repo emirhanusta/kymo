@@ -1,7 +1,7 @@
 # KYMO
 
-A recorder for container lifecycles. KYMO watches Docker daemons and Kubernetes
-clusters, records every start, crash, OOM kill and resource sample in
+A recorder for container lifecycles. KYMO watches Kubernetes clusters
+(Kubernetes-only for now), records every start, crash, OOM kill and resource sample in
 TimescaleDB, and turns that history into a stability score per container —
 like a kymograph tracing a needle over chart paper.
 
@@ -19,12 +19,12 @@ like a kymograph tracing a needle over chart paper.
   (long ranges are downsampled server-side).
 - **Stability score (0–100)** — penalties for restarts, crashes, OOM kills,
   CPU volatility and reporting gaps over a configurable window.
-- **Sources from the UI** — add, edit, pause and remove Docker daemons and
-  Kubernetes clusters at runtime, with a connection test before saving. Mark a
+- **Sources from the UI** — add, edit, pause and remove Kubernetes
+  clusters at runtime, with a connection test before saving. Mark a
   source read-only to disable every management action for it. Unreachable
   sources are retried in the background and shown as such.
-- **Management** — start / stop / restart / kill Docker containers, delete
-  pods, scale and restart Deployments, stream logs.
+- **Management** — restart (delete) pods, scale and restart Deployments,
+  stream pod logs.
 - **Kubernetes extras** — workload detection (Deployment, Job, CronJob, …) and
   CronJob execution history.
 - **Archive / ignore** — hide containers without losing their history, or stop
@@ -32,25 +32,23 @@ like a kymograph tracing a needle over chart paper.
 
 | | |
 |---|---|
-| ![Containers](docs/screenshots/02-containers.jpg) | ![Container detail](docs/screenshots/03-detail.jpg) |
-| ![Resource traces](docs/screenshots/04-resources.jpg) | ![Command palette](docs/screenshots/05-command-palette.jpg) |
-| ![Sources](docs/screenshots/06-sources.jpg) | ![Add source](docs/screenshots/07-add-source.jpg) |
-| ![Workloads](docs/screenshots/09-workloads.jpg) | ![Workload detail](docs/screenshots/11-workload-detail.jpg) |
-| ![Workload pods](docs/screenshots/12-workload-pods.jpg) | ![Events](docs/screenshots/10-events.jpg) |
+| ![Issues](docs/screenshots/02-issues.jpg) | ![Workloads](docs/screenshots/03-workloads.jpg) |
+| ![Jobs](docs/screenshots/04-jobs.jpg) | ![Workload detail](docs/screenshots/11-workload-detail.jpg) |
 
 ## Quick start (Docker Compose)
 
 ```bash
+export KYMO_SECRET_KEY=$(openssl rand -hex 32)   # keep it; needed to decrypt stored kubeconfigs
 docker compose up -d --build
 ```
 
-Open <http://localhost:8080>. With no config file mounted, KYMO watches the
-local Docker daemon. The service runs as a non-root user, so it needs the
-Docker socket's group:
-
-```bash
-DOCKER_GID=$(stat -c '%g' /var/run/docker.sock) docker compose up -d --build
-```
+This starts TimescaleDB and KYMO (the compose file only runs KYMO itself; it
+does not monitor Docker). Open <http://localhost:8080>. With no sources
+configured KYMO starts empty — add a Kubernetes source on the **Sources**
+page by pasting a kubeconfig (requires `KYMO_SECRET_KEY`). Alternatively mount
+a `config.yaml` at `/etc/kymo/config.yaml` plus the kubeconfig it references
+(see the commented `volumes` in `docker-compose.yml` and
+[`config.example.yaml`](config.example.yaml)).
 
 ## Running locally
 
@@ -68,8 +66,10 @@ startup; `make migrate DSN=...` applies them by hand.
 
 ## Configuration
 
-Sources can be declared in `config.yaml` (locked in the UI) or managed on the
-**Sources** page. For Kubernetes you can point at a kubeconfig file on the
+Only Kubernetes sources are supported for now; a source of any other type is
+rejected. With no sources configured KYMO starts empty. Sources can be
+declared in `config.yaml` (locked in the UI) or managed on the
+**Sources** page. You can point at a kubeconfig file on the
 server, or paste/upload one — uploads are stored encrypted and require
 `KYMO_SECRET_KEY` to be set.
 
@@ -88,7 +88,7 @@ Kubernetes sources need a kubeconfig; CPU/memory sampling requires
 metrics-server in the cluster.
 
 > **Security note:** the API has no authentication and exposes management
-> actions (kill, delete pod, scale). Run it on a trusted network or behind an
+> actions (delete pod, scale, rollout restart). Run it on a trusted network or behind an
 > authenticating proxy, and be careful which kubeconfig context a source uses.
 
 ## Keyboard
@@ -104,7 +104,7 @@ metrics-server in the cluster.
 
 ```
 cmd/kymo            entry point
-internal/collector  Docker and Kubernetes collectors
+internal/collector  Kubernetes collector
 internal/service    recorder (event pipeline, scoring loop) and management actions
 internal/repository TimescaleDB persistence + embedded migration runner
 internal/handler    REST API (/api/v1) and SPA serving

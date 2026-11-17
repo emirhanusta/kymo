@@ -167,7 +167,7 @@ export class EventsComponent {
     return containerRoute(ev.container_id, ev.runtime);
   }
 
-  /** Kubernetes events belong to a pod (id is `namespace/pod/container`); Docker containers have none. */
+  /** Kubernetes events belong to a pod (id is `namespace/pod/container`). */
   pod(ev: LifecycleEvent): string {
     return podNameFromId(ev.container_id);
   }

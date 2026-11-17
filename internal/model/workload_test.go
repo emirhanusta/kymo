@@ -6,10 +6,8 @@ func TestWorkloadID(t *testing.T) {
 	tests := []struct {
 		source, ns, kind, name, want string
 	}{
-		{"local", "", WorkloadContainer, "redis", "local::Container:redis"},
-		{"local", "", WorkloadCompose, "shop", "local::Compose:shop"},
 		{"prod", "default", WorkloadDeployment, "api", "prod:default:Deployment:api"},
-		{"local", "", WorkloadContainer, "", ""},
+		{"local", "default", WorkloadDeployment, "", ""},
 		{"local", "", WorkloadUnknown, "x", ""},
 	}
 	for _, tt := range tests {

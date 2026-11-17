@@ -19,8 +19,6 @@ const (
 type Runtime string
 
 const (
-	// RuntimeDocker indicates a container managed directly by the Docker daemon.
-	RuntimeDocker Runtime = "docker"
 	// RuntimeKubernetes indicates a container managed by a Kubernetes cluster.
 	RuntimeKubernetes Runtime = "kubernetes"
 )
@@ -65,24 +63,22 @@ const (
 // observed container. It is updated in-place via upsert so it always reflects
 // the current state derived from all collected events.
 type Container struct {
-	// ID is the runtime-assigned unique identifier (Docker container ID or Kubernetes UID).
+	// ID is the runtime-assigned unique identifier (Kubernetes UID).
 	ID string `json:"id" db:"id"`
 
-	// Runtime identifies whether this container runs under Docker or Kubernetes.
+	// Runtime identifies whether this container runs under (currently always Kubernetes).
 	Runtime Runtime `json:"runtime" db:"runtime"`
 
-	// Name is the human-readable container name (Docker) or Pod/container name pair (k8s).
+	// Name is the human-readable Pod/container name pair.
 	Name string `json:"name" db:"name"`
 
 	// Image is the fully-qualified image reference including tag or digest.
 	Image string `json:"image" db:"image"`
 
 	// Namespace is the Kubernetes namespace in which the container runs.
-	// Empty for Docker containers.
 	Namespace string `json:"namespace,omitempty" db:"namespace"`
 
 	// NodeName is the Kubernetes node (hostname) that schedules the container.
-	// Empty for Docker containers.
 	NodeName string `json:"node_name,omitempty" db:"node_name"`
 
 	// FirstSeenAt is the timestamp when the container was first observed by the collector.
@@ -104,7 +100,7 @@ type Container struct {
 	CurrentStatus ContainerStatus `json:"current_status" db:"current_status"`
 
 	// SourceName is the name of the collector source that manages this container
-	// (e.g. "local-docker", "prod-k8s"). Set from config.Source.Name.
+	// (e.g. "prod-k8s"). Set from config.Source.Name.
 	SourceName string `json:"source_name" db:"source_name"`
 
 	// DeletedAt is set when a container is soft-deleted (archived). A nil value
@@ -120,17 +116,14 @@ type Container struct {
 	// WorkloadKind is the Kubernetes controller kind that owns this container's pod
 	// (e.g. "Deployment", "DaemonSet", "StatefulSet", "Job", "CronJob", "Pod").
 	// Set to "unknown" for containers whose owner cannot be determined.
-	// Empty for Docker containers.
 	WorkloadKind string `json:"workload_kind" db:"workload_kind"`
 
 	// WorkloadName is the name of the Kubernetes workload that owns this pod
 	// (e.g. the Deployment name for a pod owned by a ReplicaSet owned by a Deployment).
-	// Empty for Docker containers.
 	WorkloadName string `json:"workload_name" db:"workload_name"`
 
 	// IsSystem is true when the container runs in a known system namespace
 	// (kube-system, kube-public, etc.) or has a well-known system name prefix.
-	// False for Docker containers.
 	IsSystem bool `json:"is_system" db:"is_system"`
 
 	// WorkloadID is model.WorkloadID(SourceName, Namespace, WorkloadKind,
@@ -203,7 +196,7 @@ type LifecycleEvent struct {
 	NodeName string `json:"node_name,omitempty" db:"node_name"`
 
 	// Metadata stores runtime-specific supplementary data as an arbitrary key-value map.
-	// Examples: Kubernetes restart reason, Docker stop signal, label snapshots.
+	// Examples: Kubernetes restart reason, label snapshots.
 	Metadata map[string]any `json:"metadata,omitempty" db:"metadata"`
 
 	// OccurredAt is the authoritative event timestamp reported by the runtime.

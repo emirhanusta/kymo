@@ -64,19 +64,15 @@ type DatabaseConfig struct {
 	AutoMigrate bool `mapstructure:"auto_migrate"`
 }
 
-// Source describes a single collector source — either a Docker daemon or a
-// Kubernetes cluster. Multiple sources of the same type are supported.
+// Source describes a single collector source (a Kubernetes cluster).
+// Multiple sources are supported.
 type Source struct {
 	// Name is a human-readable identifier used to tag every container, event, and
-	// resource sample originating from this source (e.g. "local-docker", "prod-k8s").
+	// resource sample originating from this source (e.g. "prod-k8s").
 	Name string `mapstructure:"name"`
 
-	// Type is the runtime type: "docker" or "kubernetes".
+	// Type is the runtime type; only "kubernetes" is supported.
 	Type string `mapstructure:"type"`
-
-	// Socket is the Docker daemon socket path (e.g. "unix:///var/run/docker.sock").
-	// Only used when Type == "docker". Leave empty to use the DOCKER_HOST env var.
-	Socket string `mapstructure:"socket"`
 
 	// KubeconfigPath is the path to a kubeconfig file used when Type == "kubernetes".
 	// Leave empty to fall back to in-cluster credentials then ~/.kube/config.
@@ -90,16 +86,16 @@ type Source struct {
 	// Zero means use the global default.
 	PollInterval time.Duration `mapstructure:"poll_interval"`
 
-	// ReadOnly disables management actions (start/stop/kill, delete pod,
-	// scale, rollout restart) for this source.
+	// ReadOnly disables management actions (delete pod, scale,
+	// rollout restart) for this source.
 	ReadOnly bool `mapstructure:"read_only"`
 }
 
 // CollectorConfig controls which runtime collectors are enabled and how they behave.
 type CollectorConfig struct {
 	// Sources is the list of collector sources to activate. Each source maps to
-	// one collector instance (Docker daemon or Kubernetes cluster).
-	// If empty, a default local-docker source is added automatically.
+	// one collector instance (Kubernetes cluster).
+	// If empty, KYMO starts with no sources; they can be added from the UI.
 	Sources []Source `mapstructure:"sources"`
 
 	// StatsPollInterval is the default interval at which collectors sample
@@ -157,7 +153,6 @@ func SourceSpecs(cfg *Config) []model.SourceSpec {
 			Origin:         model.SourceOriginConfig,
 			Enabled:        true,
 			ReadOnly:       src.ReadOnly,
-			Socket:         src.Socket,
 			KubeconfigPath: src.KubeconfigPath,
 			KubeContext:    src.KubeContext,
 			PollInterval:   src.PollInterval,
@@ -217,13 +212,6 @@ func load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: unmarshal failed: %w", err)
 	}
 
-	// If no sources are configured, default to a single local Docker source.
-	if len(cfg.Collector.Sources) == 0 {
-		cfg.Collector.Sources = []Source{
-			{Name: "local-docker", Type: "docker"},
-		}
-	}
-
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -242,8 +230,8 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: duplicate collector source name %q", s.Name)
 		}
 		seen[s.Name] = true
-		if s.Type != "docker" && s.Type != "kubernetes" {
-			return fmt.Errorf("config: source %q has unknown type %q (want docker or kubernetes)", s.Name, s.Type)
+		if s.Type != model.SourceTypeKubernetes {
+			return fmt.Errorf("config: source %q has type %q: only %q sources are supported", s.Name, s.Type, model.SourceTypeKubernetes)
 		}
 	}
 	return nil

@@ -4,11 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
 
-const validYAML = "collector:\n  sources:\n    - name: a\n      type: docker\n"
+const validYAML = "collector:\n  sources:\n    - name: a\n      type: kubernetes\n"
 
 func writeCfg(t *testing.T, path, content string) {
 	t.Helper()
@@ -24,7 +25,7 @@ func TestReload(t *testing.T) {
 	if err != nil || cfg.File != path {
 		t.Fatalf("LoadFile: %+v %v", cfg, err)
 	}
-	writeCfg(t, path, validYAML+"    - name: a\n      type: docker\n")
+	writeCfg(t, path, validYAML+"    - name: a\n      type: kubernetes\n")
 	if _, err := cfg.Reload(); err == nil {
 		t.Fatal("duplicate source names accepted")
 	}
@@ -53,7 +54,7 @@ func TestWatch(t *testing.T) {
 	}
 	// Editors replace the file via rename.
 	tmp := path + ".tmp"
-	writeCfg(t, tmp, validYAML+"    - name: b\n      type: docker\n")
+	writeCfg(t, tmp, validYAML+"    - name: b\n      type: kubernetes\n")
 	if err := os.Rename(tmp, path); err != nil {
 		t.Fatal(err)
 	}
@@ -65,5 +66,23 @@ func TestWatch(t *testing.T) {
 
 	if err := Watch(ctx, "", time.Millisecond, func() {}); err != nil {
 		t.Fatalf("empty path must be a no-op: %v", err)
+	}
+}
+
+func TestDockerSourceRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeCfg(t, path, "collector:\n  sources:\n    - name: x\n      type: docker\n")
+	_, err := LoadFile(path)
+	if err == nil || !strings.Contains(err.Error(), `source "x" has type "docker": only "kubernetes" sources are supported`) {
+		t.Fatalf("docker source not rejected: %v", err)
+	}
+}
+
+func TestNoSourcesIsValid(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeCfg(t, path, "server:\n  address: \":9999\"\n")
+	cfg, err := LoadFile(path)
+	if err != nil || len(cfg.Collector.Sources) != 0 {
+		t.Fatalf("empty sources: %+v %v", cfg, err)
 	}
 }

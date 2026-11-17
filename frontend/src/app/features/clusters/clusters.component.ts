@@ -17,20 +17,20 @@ import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import {
   CONFIG_ORIGIN_HINT, sourceConnectionSummary, sourceDotClass, sourceStatusLabel,
 } from '../../shared/utils/source';
-import { SourceWizardComponent } from './source-wizard/source-wizard.component';
+import { ClusterWizardComponent } from './cluster-wizard/cluster-wizard.component';
 
-/** Sources: list with status + management of user-created sources (config.yaml ones are locked). */
+/** Clusters: list with status + management of user-created clusters (config.yaml ones are locked). */
 @Component({
-  selector: 'app-sources',
+  selector: 'app-clusters',
   standalone: true,
   imports: [
     RouterLink, TimeagoPipe, PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
-    ConfirmDialogComponent, ReadOnlyTagComponent, SourceWizardComponent,
+    ConfirmDialogComponent, ReadOnlyTagComponent, ClusterWizardComponent,
   ],
-  templateUrl: './sources.component.html',
+  templateUrl: './clusters.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class SourcesComponent {
+export class ClustersComponent {
   private api        = inject(SourceService);
   private toast      = inject(ToastService);
   private route      = inject(ActivatedRoute);
@@ -73,7 +73,7 @@ export class SourcesComponent {
     this.state.loadSources();
     this.loadMeta();
 
-    // The source list is this page's data: feed the top bar's "updated" label.
+    // The cluster list is this page's data: feed the top bar's "updated" label.
     effect(() => {
       this.state.sources();
       if (this.state.loaded() && !this.state.sourcesError()) {
@@ -81,7 +81,7 @@ export class SourcesComponent {
       }
     });
 
-    // /sources?add=1 (command palette, empty states) opens the wizard directly.
+    // /clusters?add=1 (command palette, empty states) opens the wizard directly.
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(qp => {
       if (qp.get('add')) {
         this.wizard.set('new');
@@ -101,7 +101,7 @@ export class SourcesComponent {
       next: res => {
         this.reloading.set(false);
         if (res.conflicts.length > 0) {
-          this.toast.error(`Name already used by a source added in the UI: ${res.conflicts.join(', ')} (config entry ignored)`);
+          this.toast.error(`Name already used by a cluster added in the UI: ${res.conflicts.join(', ')} (config entry ignored)`);
         } else {
           this.toast.success(this.syncSummary(res));
         }
@@ -141,7 +141,7 @@ export class SourcesComponent {
     this.api.update(src.name, sourceToInput(src, { enabled })).subscribe({
       next: () => {
         this.busyName.set(null);
-        this.toast.success(enabled ? `Source ${src.name} enabled — connecting…` : `Source ${src.name} disabled`);
+        this.toast.success(enabled ? `Cluster ${src.name} enabled — connecting…` : `Cluster ${src.name} disabled`);
         this.state.loadSources();
       },
       error: err => {
@@ -166,7 +166,7 @@ export class SourcesComponent {
     this.api.delete(src.name, purge).subscribe({
       next: res => {
         this.busyName.set(null);
-        this.toast.success(res?.message || `Source ${src.name} deleted${purge ? ' with its history' : ''}`);
+        this.toast.success(res?.message || `Cluster ${src.name} deleted${purge ? ' with its history' : ''}`);
         this.state.loadSources();
       },
       error: err => {

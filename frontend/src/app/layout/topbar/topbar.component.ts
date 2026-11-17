@@ -8,6 +8,7 @@ import { filter, map } from 'rxjs/operators';
 
 import { RefreshService } from '../../core/services/refresh.service';
 import { SourceStateService } from '../../core/services/source-state.service';
+import { IssuesService } from '../../core/services/issues.service';
 import { sourceDotClass, sourceStatusLabel } from '../../shared/utils/source';
 import { SourceStatus } from '../../core/models/container.model';
 import { PageContextService } from '../../core/services/page-context.service';
@@ -19,23 +20,24 @@ export interface NavTab {
   label: string;
 }
 
-/** Fixed main navigation (digit hotkeys 1–4 in this order). The source selector only filters data. */
+/** Fixed main navigation (digit hotkeys 1–6 in this order). The cluster selector only filters data. */
 export const NAV_TABS: NavTab[] = [
   { path: '/dashboard',  label: 'Overview' },
+  { path: '/issues',     label: 'Issues' },
   { path: '/workloads',  label: 'Workloads' },
+  { path: '/jobs',       label: 'Jobs' },
   { path: '/events',     label: 'Events' },
-  { path: '/sources',    label: 'Sources' },
+  { path: '/clusters',   label: 'Clusters' },
 ];
 
 /** Command palette "pages": the tabs plus deep links into sub-views. */
 export const PALETTE_PAGES: NavTab[] = [
   ...NAV_TABS,
   { path: '/workloads?kind=Deployment',     label: 'Deployments' },
-  { path: '/workloads?kind=CronJob',        label: 'CronJobs' },
-  { path: '/workloads?kind=Compose',        label: 'Compose projects' },
-  { path: '/workloads?kind=Container',      label: 'Standalone containers' },
+  { path: '/workloads?kind=StatefulSet',    label: 'StatefulSets' },
+  { path: '/workloads?kind=DaemonSet',      label: 'DaemonSets' },
   { path: '/workloads/archived',            label: 'Archived & ignored' },
-  { path: '/sources?add=1',                 label: 'Add source' },
+  { path: '/clusters?add=1',                label: 'Add cluster' },
 ];
 
 /** True when a keystroke should be left alone (typing in a field, or a modal is open). */
@@ -64,6 +66,7 @@ export class TopbarComponent {
   private title   = inject(Title);
   refreshSvc      = inject(RefreshService);
   sourceState     = inject(SourceStateService);
+  issues          = inject(IssuesService);
 
   showSourceMenu = signal(false);
   paletteOpen    = signal(false);
@@ -151,8 +154,8 @@ export class TopbarComponent {
       return;
     }
 
-    // 1–4: switch tabs.
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || !/^[1-4]$/.test(ev.key)) return;
+    // 1–6: switch tabs.
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || !/^[1-6]$/.test(ev.key)) return;
     if (isTypingOrModal(ev)) return;
     const tab = this.tabs[+ev.key - 1];
     if (!tab) return;

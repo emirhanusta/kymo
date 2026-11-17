@@ -8,7 +8,7 @@ import (
 // WorkloadID builds the stable identifier of a workload:
 // "source:namespace:kind:name". Kubernetes names and KYMO source names cannot
 // contain ':', so the ID is unambiguous. It returns "" when name is empty
-// (e.g. a standalone Docker container that belongs to no workload).
+// (a container that belongs to no workload).
 func WorkloadID(source, namespace, kind, name string) string {
 	if name == "" || kind == "" || kind == WorkloadUnknown {
 		return ""
@@ -17,8 +17,7 @@ func WorkloadID(source, namespace, kind, name string) string {
 }
 
 // WorkloadSummary aggregates every recorded container instance of a workload
-// (all pods of a Deployment across rollouts, all containers of a Compose
-// project, …). History and stability survive pod replacement because they are
+// (all pods of a Deployment across rollouts, …). History and stability survive pod replacement because they are
 // keyed by the workload, not by the pod.
 type WorkloadSummary struct {
 	ID         string  `json:"id"`
@@ -34,7 +33,7 @@ type WorkloadSummary struct {
 	// Images are the distinct images of currently active instances.
 	Images []string `json:"images"`
 
-	// Instances counts pods (Kubernetes) or containers (Compose) ever recorded;
+	// Instances counts pods ever recorded;
 	// ActiveInstances those not stopped; RunningInstances those running.
 	Instances        int `json:"instances"`
 	ActiveInstances  int `json:"active_instances"`

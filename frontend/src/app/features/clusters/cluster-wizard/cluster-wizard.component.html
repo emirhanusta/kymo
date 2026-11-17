@@ -2,15 +2,15 @@
   <div
     appDialog
     (dismiss)="closed.emit()"
-    aria-labelledby="source-wizard-title"
+    aria-labelledby="cluster-wizard-title"
     class="bg-kymo-panel border border-kymo-rule border-t-kymo-amber w-full max-w-2xl flex flex-col max-h-[calc(100vh-2rem)]"
     (click)="$event.stopPropagation()"
   >
     <!-- Header + steps -->
     <div class="px-5 pt-4 pb-3 border-b border-kymo-rule flex-none">
       <div class="flex items-start justify-between gap-4">
-        <h2 id="source-wizard-title" class="text-sm font-semibold uppercase tracking-[0.08em] text-kymo-ink">
-          {{ isEdit() ? 'Edit source ' + source()!.name : 'Add source' }}
+        <h2 id="cluster-wizard-title" class="text-sm font-semibold uppercase tracking-[0.08em] text-kymo-ink">
+          {{ isEdit() ? 'Edit cluster ' + source()!.name : 'Add cluster' }}
         </h2>
         <button type="button" class="k-btn k-btn-icon k-btn-sm border-transparent text-kymo-muted -mr-2 -mt-1" (click)="closed.emit()" aria-label="Close">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M6 18L18 6M6 6l12 12" /></svg>
@@ -18,19 +18,17 @@
       </div>
       <ol class="flex items-center gap-2 mt-3 text-[11px] uppercase tracking-[0.08em]" aria-label="Steps">
         @for (s of steps; track s.n) {
-          @if (!(isEdit() && s.n === 1)) {
-            <li
+          <li
               class="flex items-center gap-1.5"
               [class]="step() === s.n ? 'text-kymo-amber' : (step() > s.n ? 'text-kymo-ink' : 'text-kymo-faint')"
               [attr.aria-current]="step() === s.n ? 'step' : null"
             >
-              <span class="w-4 h-4 flex items-center justify-center border text-[10px]" [class]="step() === s.n ? 'border-kymo-amber' : 'border-kymo-rule'">{{ isEdit() ? s.n - 1 : s.n }}</span>
+              <span class="w-4 h-4 flex items-center justify-center border text-[10px]" [class]="step() === s.n ? 'border-kymo-amber' : 'border-kymo-rule'">{{ s.n - 1 }}</span>
               {{ s.label }}
               @if (s.n < 3) {
                 <span class="text-kymo-faint ml-1" aria-hidden="true">—</span>
               }
             </li>
-          }
         }
       </ol>
     </div>
@@ -38,55 +36,6 @@
     <!-- Body -->
     <div class="px-5 py-5 overflow-y-auto scrollbar-thin flex-1 min-h-0">
       @switch (step()) {
-
-        <!-- ── Step 1: type ─────────────────────────────────────────────── -->
-        @case (1) {
-          <p id="wiz-type-label" class="k-label mb-3">What do you want to record?</p>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-labelledby="wiz-type-label" (keydown)="onTypeKeydown($event)">
-            <button
-              type="button"
-              role="radio"
-              data-type="docker"
-              [attr.data-step-focus]="type() !== 'kubernetes' ? '' : null"
-              [attr.data-autofocus]="type() !== 'kubernetes' ? '' : null"
-              [attr.aria-checked]="type() === 'docker'"
-              [attr.tabindex]="type() === 'kubernetes' ? -1 : 0"
-              class="text-left p-4 border transition-colors flex flex-col gap-2 min-h-32"
-              [class]="type() === 'docker' ? 'border-kymo-amber bg-kymo-raised' : 'border-kymo-rule hover:border-kymo-faint'"
-              (click)="chooseType('docker')"
-              (dblclick)="chooseType('docker'); next()"
-            >
-              <span class="flex items-center justify-between">
-                <span class="text-sm font-semibold" [class]="type() === 'docker' ? 'text-kymo-amber' : 'text-kymo-ink'">Docker</span>
-                <span class="w-3.5 h-3.5 border flex items-center justify-center" [class]="type() === 'docker' ? 'border-kymo-amber' : 'border-kymo-faint'" aria-hidden="true">
-                  @if (type() === 'docker') { <span class="w-1.5 h-1.5 bg-kymo-amber"></span> }
-                </span>
-              </span>
-              <span class="text-xs text-kymo-muted">A Docker engine reached through its socket or TCP host. Records containers, Compose projects, restarts, crashes and resource usage.</span>
-            </button>
-            <button
-              type="button"
-              role="radio"
-              data-type="kubernetes"
-              [attr.data-step-focus]="type() === 'kubernetes' ? '' : null"
-              [attr.data-autofocus]="type() === 'kubernetes' ? '' : null"
-              [attr.aria-checked]="type() === 'kubernetes'"
-              [attr.tabindex]="type() === 'kubernetes' ? 0 : -1"
-              class="text-left p-4 border transition-colors flex flex-col gap-2 min-h-32"
-              [class]="type() === 'kubernetes' ? 'border-kymo-amber bg-kymo-raised' : 'border-kymo-rule hover:border-kymo-faint'"
-              (click)="chooseType('kubernetes')"
-              (dblclick)="chooseType('kubernetes'); next()"
-            >
-              <span class="flex items-center justify-between">
-                <span class="text-sm font-semibold" [class]="type() === 'kubernetes' ? 'text-kymo-amber' : 'text-kymo-ink'">Kubernetes</span>
-                <span class="w-3.5 h-3.5 border flex items-center justify-center" [class]="type() === 'kubernetes' ? 'border-kymo-amber' : 'border-kymo-faint'" aria-hidden="true">
-                  @if (type() === 'kubernetes') { <span class="w-1.5 h-1.5 bg-kymo-amber"></span> }
-                </span>
-              </span>
-              <span class="text-xs text-kymo-muted">A cluster reached through a kubeconfig context. Records pods, deployments and cronjob runs across namespaces.</span>
-            </button>
-          </div>
-        }
 
         <!-- ── Step 2: connection ───────────────────────────────────────── -->
         @case (2) {
@@ -104,7 +53,7 @@
                   [attr.data-autofocus]="isEdit() ? null : ''"
                   [value]="name()"
                   [disabled]="isEdit()"
-                  placeholder="e.g. prod-cluster or build-host"
+                  placeholder="e.g. prod-eu"
                   autocomplete="off"
                   spellcheck="false"
                   maxlength="63"
@@ -113,37 +62,16 @@
                   (input)="onName($any($event.target).value)"
                   (blur)="nameTouched.set(true)"
                 />
-                <span class="k-label px-1.5 h-[1.875rem] flex items-center border border-kymo-rule flex-none">{{ type() === 'kubernetes' ? 'k8s' : 'docker' }}</span>
               </div>
               @if ((nameTouched() || attempted()) && nameError()) {
                 <p id="wiz-name-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ nameError() }}</p>
               } @else {
                 <p id="wiz-name-help" class="text-xs text-kymo-faint mt-1.5">
-                  @if (isEdit()) { Name and type can't be changed. } @else { Lowercase letters, digits, "-", "_" and "."; used in URLs and filters. }
+                  @if (isEdit()) { The name can't be changed. } @else { Lowercase letters, digits, "-", "_" and "."; used in URLs and filters. }
                 </p>
               }
             </div>
 
-            @if (type() === 'docker') {
-              <!-- Docker socket -->
-              <div>
-                <label for="wiz-socket" class="k-label block mb-1.5">Socket / host <span class="normal-case tracking-normal text-kymo-faint">(optional)</span></label>
-                <input
-                  id="wiz-socket"
-                  type="text"
-                  class="k-input w-full"
-                  [attr.data-step-focus]="isEdit() ? '' : null"
-                  [attr.data-autofocus]="isEdit() ? '' : null"
-                  [value]="socket()"
-                  placeholder="unix:///var/run/docker.sock"
-                  autocomplete="off"
-                  spellcheck="false"
-                  aria-describedby="wiz-socket-help"
-                  (input)="socket.set($any($event.target).value)"
-                />
-                <p id="wiz-socket-help" class="text-xs text-kymo-faint mt-1.5">Empty = the server's default (DOCKER_HOST or the local socket). Also accepts tcp://host:2376.</p>
-              </div>
-            } @else {
               <!-- Kubeconfig -->
               <fieldset>
                 <legend class="k-label mb-1.5">Kubeconfig</legend>
@@ -295,7 +223,6 @@
                   <span>This context looks like a production cluster. Read-only has been ticked so KYMO can't restart, scale or delete anything there — untick it only if you really want management actions.</span>
                 </div>
               }
-            }
 
             <!-- Common -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -326,7 +253,7 @@
                   <input type="checkbox" class="mt-0.5" [checked]="readOnly()" (change)="readOnly.set($any($event.target).checked)" />
                   <span>
                     Read-only (disable management actions)
-                    <span class="block text-kymo-faint mt-0.5">Start / stop / restart / kill / scale are refused. Logs and history stay available.</span>
+                    <span class="block text-kymo-faint mt-0.5">Pod restart, scale and rollout restart are refused. Logs and history stay available.</span>
                   </span>
                 </label>
               </div>
@@ -379,7 +306,7 @@
                   @if (r.ok) {
                     Connection OK. {{ isEdit() ? 'Save to apply the changes.' : 'Save to start recording.' }}
                   } @else {
-                    The test failed. You can fix the connection, or save anyway — the source keeps retrying in the background.
+                    The test failed. You can fix the connection, or save anyway — the cluster keeps retrying in the background.
                   }
                 </p>
               }
@@ -387,11 +314,7 @@
 
             <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs border-t border-kymo-rule pt-3">
               <dt class="k-label">name</dt><dd class="text-kymo-ink">{{ buildInput().name }}</dd>
-              <dt class="k-label">type</dt><dd class="text-kymo-ink">{{ type() }}</dd>
-              @if (type() === 'docker') {
-                <dt class="k-label">socket</dt><dd class="text-kymo-ink break-all">{{ socket() || 'server default' }}</dd>
-              } @else {
-                <dt class="k-label">kubeconfig</dt>
+              <dt class="k-label">kubeconfig</dt>
                 <dd class="text-kymo-ink break-all">
                   @if (kubeMode() === 'path') {
                     {{ kubeconfigPath() || 'server default' }}
@@ -400,7 +323,6 @@
                   }
                 </dd>
                 <dt class="k-label">context</dt><dd class="text-kymo-ink">{{ context() || 'current' }}</dd>
-              }
               <dt class="k-label">read-only</dt><dd [class]="readOnly() ? 'text-kymo-amber' : 'text-kymo-ink'">{{ readOnly() ? 'yes' : 'no' }}</dd>
             </dl>
 
@@ -417,21 +339,18 @@
 
     <!-- Footer -->
     <div class="px-5 py-3 border-t border-kymo-rule flex items-center gap-2 flex-none">
-      @if (step() > 1 && !(isEdit() && step() === 2)) {
+      @if (step() === 3) {
         <button type="button" class="k-btn" (click)="back()" [disabled]="saving()">← Back</button>
       }
       <span class="flex-1"></span>
       <button type="button" class="k-btn" (click)="closed.emit()">Cancel</button>
       @switch (step()) {
-        @case (1) {
-          <button type="button" class="k-btn k-btn-primary" [disabled]="!type()" (click)="next()">Next →</button>
-        }
         @case (2) {
           <button type="button" class="k-btn k-btn-primary" (click)="next()">Test connection →</button>
         }
         @case (3) {
           @if (canSaveAnyway()) {
-            <button type="button" class="k-btn" (click)="save()" title="Save even though the test failed; the source retries in the background">Save anyway</button>
+            <button type="button" class="k-btn" (click)="save()" title="Save even though the test failed; the cluster retries in the background">Save anyway</button>
           }
           <button type="button" class="k-btn k-btn-primary" [disabled]="!canSave()" (click)="save()">
             @if (saving()) {

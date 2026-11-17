@@ -28,7 +28,7 @@ func newSyncManager(t *testing.T) (*SourceManager, *recorderService, map[string]
 }
 
 func cfgSpec(name string) model.SourceSpec {
-	return model.SourceSpec{Name: name, Type: model.SourceTypeDocker, Enabled: true}
+	return model.SourceSpec{Name: name, Type: model.SourceTypeKubernetes, Enabled: true}
 }
 
 func TestSyncConfigDiff(t *testing.T) {
@@ -45,7 +45,7 @@ func TestSyncConfigDiff(t *testing.T) {
 		waitFor(t, func() bool { return healthOf(t, r, n).status == SourceConnected })
 	}
 	// A user source that the config will later collide with.
-	r.AttachSource(model.SourceSpec{Name: "u", Type: "docker", Origin: model.SourceOriginUser, Enabled: true}, newFake(0), nil)
+	r.AttachSource(model.SourceSpec{Name: "u", Type: "kubernetes", Origin: model.SourceOriginUser, Enabled: true}, newFake(0), nil)
 
 	changed := cfgSpec("b")
 	changed.ReadOnly = true

@@ -13,7 +13,7 @@
     </div>
   } @else if (loadError() === 'not-found') {
     <div class="k-panel">
-      <app-empty-state icon="search" message="Workload not found" hint="It may belong to a source that was removed, or its containers were permanently deleted.">
+      <app-empty-state icon="search" message="Workload not found" hint="It may belong to a cluster that was removed, or its containers were permanently deleted.">
         <a routerLink="/workloads" class="mt-4 text-xs text-kymo-amber hover:underline underline-offset-4">← back to workloads</a>
       </app-empty-state>
     </div>
@@ -23,9 +23,9 @@
     @let w = workload()!;
 
     <!-- Header -->
-    <app-page-header [title]="w.name" crumbLabel="Workloads" crumbLink="/workloads">
+    <app-page-header [title]="w.name" [crumbLabel]="isJobKind() ? 'Jobs' : 'Workloads'" [crumbLink]="isJobKind() ? '/jobs' : '/workloads'">
       <span subtitle class="flex items-center gap-x-3 gap-y-1 flex-wrap">
-        <app-status-badge [status]="w.status" />
+        <app-status-badge [status]="w.status" [text]="issues.reasonOf(w)" />
         <app-workload-badge [kind]="w.kind" />
         @if (w.is_system) {
           <span class="text-[11px] px-1.5 py-px border border-kymo-rule text-kymo-muted">SYS</span>
@@ -40,7 +40,7 @@
       @if (w.namespace) {
         <div class="flex gap-2"><dt class="k-label">ns</dt><dd class="text-kymo-ink">{{ w.namespace }}</dd></div>
       }
-      <div class="flex gap-2"><dt class="k-label">source</dt><dd class="text-kymo-ink">{{ w.source_name }}</dd></div>
+      <div class="flex gap-2"><dt class="k-label">cluster</dt><dd class="text-kymo-ink">{{ w.source_name }}</dd></div>
       <div class="flex gap-2">
         <dt class="k-label">{{ isCronJob() ? 'pods' : instanceLabel().toLowerCase() + 's' }}</dt>
         <dd class="text-kymo-ink tabular-nums" [title]="w.instances + ' ever recorded'">{{ w.running_instances }}/{{ w.active_instances }} <span class="text-kymo-faint">({{ w.instances }})</span></dd>
@@ -63,7 +63,7 @@
           @if (readOnly()) { <app-read-only-tag /> }
         </div>
         @if (!deployment()?.deployment) {
-          <p class="px-5 py-6 text-center text-xs text-kymo-faint">— live deployment state unavailable (not found on the cluster, or the source is offline) —</p>
+          <p class="px-5 py-6 text-center text-xs text-kymo-faint">— live deployment state unavailable (not found on the cluster, or the cluster is offline) —</p>
         } @else {
           @let d = deployment()!.deployment!;
           <div class="px-5 py-4 flex items-center gap-x-8 gap-y-3 flex-wrap">
@@ -75,7 +75,7 @@
                  [class.text-kymo-danger]="replicaState() === 'down'">{{ d.ready_replicas }}/{{ d.replicas }}</p>
             </div>
             @if (readOnly()) {
-              <p class="text-xs text-kymo-muted">Scaling and rollout restart are disabled for this source.</p>
+              <p class="text-xs text-kymo-muted">Scaling and rollout restart are disabled for this cluster.</p>
             } @else {
               <div class="flex items-center gap-2 flex-wrap" role="group" aria-label="Deployment actions">
                 <span class="k-label mr-1">Replicas</span>
@@ -172,7 +172,7 @@
                       <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="ev.occurred_at">{{ ev.occurred_at | timeago }}</span>
                     </div>
                     <p class="text-[11px] text-kymo-muted truncate group-hover:text-kymo-ink">
-                      @if (isK8s() && podOf(ev.container_id); as pod) { {{ pod }} · }{{ ev.container_name || ev.container_id }}
+                      @if (podOf(ev.container_id); as pod) { {{ pod }} · }{{ ev.container_name || ev.container_id }}
                     </p>
                     @if (eventReason(ev); as reason) {
                       <p class="text-xs text-kymo-muted mt-0.5 break-words">{{ reason }}</p>
@@ -280,7 +280,7 @@
             <thead>
               <tr>
                 <th>{{ instanceLabel() }}</th>
-                @if (isK8s()) { <th class="hidden lg:table-cell">Node</th> }
+                <th class="hidden lg:table-cell">Node</th>
                 <th>Status</th>
                 <th>Containers</th>
                 <th class="text-right hidden sm:table-cell">Restarts</th>
@@ -293,7 +293,7 @@
               @for (g of rows; track g.key) {
                 <tr class="hover:bg-kymo-raised/60 transition-colors">
                   <td class="px-4 py-2.5 max-w-[16rem]"><div class="truncate text-kymo-ink" [title]="g.name">{{ g.name }}</div></td>
-                  @if (isK8s()) { <td class="px-4 py-2.5 text-xs text-kymo-muted hidden lg:table-cell"><div class="truncate max-w-[12rem]" [title]="g.node">{{ g.node || '—' }}</div></td> }
+                  <td class="px-4 py-2.5 text-xs text-kymo-muted hidden lg:table-cell"><div class="truncate max-w-[12rem]" [title]="g.node">{{ g.node || '—' }}</div></td>
                   <td class="px-4 py-2.5"><app-status-badge [status]="g.status" /></td>
                   <td class="px-4 py-2.5">
                     <div class="flex flex-wrap gap-1.5">

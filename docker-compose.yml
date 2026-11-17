@@ -44,18 +44,16 @@ services:
       # Required to upload kubeconfigs from the Sources page; keep it stable,
       # stored kubeconfigs cannot be decrypted with a different key.
       KYMO_SECRET_KEY:                    "${KYMO_SECRET_KEY:-}"
-      # With no config file mounted a single "local-docker" source is used.
-      # Mount a config.yaml at /etc/kymo/config.yaml to add Kubernetes
-      # sources (and the kubeconfig files they reference).
-    # The service runs as a non-root user; give it the Docker socket's group.
-    # Find yours with: stat -c '%g' /var/run/docker.sock
-    group_add:
-      - "${DOCKER_GID:-999}"
+      # With no sources configured KYMO starts empty. Kubernetes sources can be
+      # added from the web UI (Sources page: paste a kubeconfig; this needs
+      # KYMO_SECRET_KEY above), or declared in a config file: mount it at
+      # /etc/kymo/config.yaml together with the kubeconfig it references
+      # (see config.example.yaml), e.g. by uncommenting the volumes below.
     ports:
       - "8080:8080"
-    volumes:
-      # Mount the Docker socket so the Docker collector can reach the daemon.
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+    # volumes:
+    #   - ./config.yaml:/etc/kymo/config.yaml:ro
+    #   - ./kubeconfig:/etc/kymo/kubeconfig:ro   # kubeconfig_path: /etc/kymo/kubeconfig
     restart: unless-stopped
 
 volumes:

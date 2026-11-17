@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	containertypes "github.com/docker/docker/api/types/container"
 	"go.uber.org/zap"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -47,8 +46,6 @@ type SourceInput struct {
 	Type     string `json:"type"`
 	Enabled  *bool  `json:"enabled,omitempty"`
 	ReadOnly bool   `json:"read_only"`
-
-	Socket string `json:"socket,omitempty"`
 
 	KubeconfigPath string `json:"kubeconfig_path,omitempty"`
 	// Kubeconfig is raw kubeconfig YAML. On update, empty keeps the stored
@@ -135,6 +132,10 @@ func (m *SourceManager) Bootstrap(ctx context.Context, configSpecs []model.Sourc
 
 // attach registers a spec with the recorder and the management service.
 func (m *SourceManager) attach(spec model.SourceSpec, initErr error) {
+	if initErr == nil && spec.Type != model.SourceTypeKubernetes {
+		// e.g. a legacy row stored by an earlier version.
+		initErr = errors.New(unsupportedTypeMsg(spec.Name, spec.Type))
+	}
 	if initErr != nil {
 		m.mgmt.UnregisterSource(spec.Name)
 		m.recorder.AttachSource(spec, nil, initErr)
@@ -148,6 +149,11 @@ func (m *SourceManager) attach(spec model.SourceSpec, initErr error) {
 		m.mgmt.UnregisterSource(spec.Name)
 	}
 	m.recorder.AttachSource(spec, m.factory(spec), nil)
+}
+
+// unsupportedTypeMsg is the error for a source type other than kubernetes.
+func unsupportedTypeMsg(name, typ string) string {
+	return fmt.Sprintf("source %q has type %q: only %q sources are supported", name, typ, model.SourceTypeKubernetes)
 }
 
 var sourceNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
@@ -177,8 +183,6 @@ func (m *SourceManager) buildSpec(in SourceInput, existing *model.SourceSpec) (m
 	spec.PollInterval = time.Duration(in.PollIntervalSeconds) * time.Second
 
 	switch spec.Type {
-	case model.SourceTypeDocker:
-		spec.Socket = strings.TrimSpace(in.Socket)
 	case model.SourceTypeKubernetes:
 		spec.KubeconfigPath = strings.TrimSpace(in.KubeconfigPath)
 		spec.KubeContext = strings.TrimSpace(in.KubeContext)
@@ -196,7 +200,7 @@ func (m *SourceManager) buildSpec(in SourceInput, existing *model.SourceSpec) (m
 			spec.Kubeconfig = existing.Kubeconfig // keep the stored upload
 		}
 	default:
-		return spec, invalid("type must be \"docker\" or \"kubernetes\"")
+		return spec, invalid("%s", unsupportedTypeMsg(spec.Name, spec.Type))
 	}
 	return spec, nil
 }
@@ -320,12 +324,7 @@ func (m *SourceManager) Test(ctx context.Context, in SourceInput) SourceTestResu
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	var checks []SourceCheck
-	if spec.Type == model.SourceTypeDocker {
-		checks = testDocker(ctx, spec)
-	} else {
-		checks = testKubernetes(ctx, spec)
-	}
+	checks := testKubernetes(ctx, spec)
 	ok := true
 	for _, c := range checks {
 		if !c.OK {
@@ -333,37 +332,6 @@ func (m *SourceManager) Test(ctx context.Context, in SourceInput) SourceTestResu
 		}
 	}
 	return SourceTestResult{OK: ok, Checks: checks}
-}
-
-func testDocker(ctx context.Context, spec model.SourceSpec) []SourceCheck {
-	cli, err := NewDockerClient(spec.Socket)
-	if err != nil {
-		return []SourceCheck{{Name: "Docker client", Detail: err.Error()}}
-	}
-	defer cli.Close()
-
-	if _, err := cli.Ping(ctx); err != nil {
-		return []SourceCheck{{Name: "Daemon reachable", Detail: err.Error()}}
-	}
-	checks := []SourceCheck{}
-	if v, err := cli.ServerVersion(ctx); err == nil {
-		checks = append(checks, SourceCheck{Name: "Daemon reachable", OK: true,
-			Detail: fmt.Sprintf("Docker %s (API %s, %s/%s)", v.Version, v.APIVersion, v.Os, v.Arch)})
-	} else {
-		checks = append(checks, SourceCheck{Name: "Daemon reachable", OK: true})
-	}
-	list, err := cli.ContainerList(ctx, containertypes.ListOptions{All: true})
-	if err != nil {
-		return append(checks, SourceCheck{Name: "List containers", Detail: err.Error()})
-	}
-	running := 0
-	for _, c := range list {
-		if c.State == "running" {
-			running++
-		}
-	}
-	return append(checks, SourceCheck{Name: "List containers", OK: true,
-		Detail: fmt.Sprintf("%d containers, %d running", len(list), running)})
 }
 
 func testKubernetes(ctx context.Context, spec model.SourceSpec) []SourceCheck {

@@ -35,17 +35,17 @@ collector:
   # changes (added, changed and removed sources are applied without a restart).
   # Sources can also be added, edited and removed at runtime from the Sources
   # page (stored in the database); a name used here must not clash with them.
-  sources:
-    - name: "local-docker"
-      type: "docker"
-      # read_only: true                          # hide/forbid start, stop, kill, …
-      # socket: "unix:///var/run/docker.sock"   # default: DOCKER_HOST
-    # - name: "dev-cluster"
-    #   type: "kubernetes"
-    #   kubeconfig_path: "/path/to/kubeconfig"
-    #   kube_context: "dev"                      # default: current-context
-    #   poll_interval: "30s"                     # needs metrics-server for CPU/memory
-    #   read_only: true                          # recommended for production clusters
+  # With no sources configured KYMO starts empty; add Kubernetes sources from
+  # the Sources page instead (paste a kubeconfig; needs KYMO_SECRET_KEY).
+  # Only "kubernetes" sources are supported for now.
+  sources: []
+  # sources:
+  #   - name: "dev-cluster"
+  #     type: "kubernetes"
+  #     kubeconfig_path: "/path/to/kubeconfig"   # placeholder; default: in-cluster, then ~/.kube/config
+  #     kube_context: "dev"                      # default: current-context
+  #     poll_interval: "30s"                     # needs metrics-server for CPU/memory
+  #     read_only: true                          # recommended for production clusters
 
 log:
   level: "info"      # debug | info | warn | error

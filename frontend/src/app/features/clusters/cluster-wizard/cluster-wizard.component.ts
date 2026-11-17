@@ -10,32 +10,33 @@ import { SourceService } from '../../../core/services/source.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import { ToastService, apiErrorMessage, isForbidden } from '../../../core/services/toast.service';
 import {
-  KubeContext, KubeContextList, ServerMeta, SourceInput, SourceStatus, SourceTestResult, SourceType,
+  KubeContext, KubeContextList, ServerMeta, SourceInput, SourceStatus, SourceTestResult,
 } from '../../../core/models/container.model';
 import { DialogDirective } from '../../../shared/directives/dialog.directive';
 
-export const SOURCE_NAME_RE = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
+export const CLUSTER_NAME_RE = /^[a-z0-9][a-z0-9_.-]{0,62}$/;
 const MAX_KUBECONFIG_BYTES = 1024 * 1024;
 const PROD_RE = /prod/i;
 
-type Step = 1 | 2 | 3;
+/** Internal step ids: 2 = connection, 3 = test & save (shown as 1 and 2). */
+type Step = 2 | 3;
 type KubeMode = 'path' | 'paste';
 type ContextsResult = { ok: true; list: KubeContextList } | { ok: false; error: string } | null;
 
 /**
- * Add / edit source wizard (modal):
- *   1. type (create only)  2. connection  3. test & save.
- * In edit mode name and type are locked and an empty kubeconfig textarea keeps the stored kubeconfig.
+ * Add / edit cluster wizard (modal):
+ *   1. connection  2. test & save.
+ * In edit mode the name is locked and an empty kubeconfig textarea keeps the stored kubeconfig.
  */
 @Component({
-  selector: 'app-source-wizard',
+  selector: 'app-cluster-wizard',
   standalone: true,
   imports: [DialogDirective],
-  templateUrl: './source-wizard.component.html',
+  templateUrl: './cluster-wizard.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class SourceWizardComponent implements OnInit {
-  /** Source being edited; null = create. */
+export class ClusterWizardComponent implements OnInit {
+  /** Cluster being edited; null = create. */
   source = input<SourceStatus | null>(null);
   closed = output<void>();
   saved  = output<SourceStatus>();
@@ -46,20 +47,17 @@ export class SourceWizardComponent implements OnInit {
   private host     = inject<ElementRef<HTMLElement>>(ElementRef);
 
   readonly steps: { n: Step; label: string }[] = [
-    { n: 1, label: 'Type' },
     { n: 2, label: 'Connection' },
     { n: 3, label: 'Test & save' },
   ];
 
   isEdit = computed(() => !!this.source());
-  step   = signal<Step>(1);
+  step   = signal<Step>(2);
 
   // ── form ──────────────────────────────────────────────────────────────────
-  type           = signal<SourceType | null>(null);
   name           = signal('');
   nameTouched    = signal(false);
   nameTaken      = signal('');           // set from a 409
-  socket         = signal('');
   kubeMode       = signal<KubeMode>('path');
   kubeconfigPath = signal('');
   kubeconfigText = signal('');
@@ -93,7 +91,6 @@ export class SourceWizardComponent implements OnInit {
   selectedContext = computed(() => this.contexts().find(c => c.name === this.context()) ?? null);
 
   isProd = computed(() => {
-    if (this.type() !== 'kubernetes') return false;
     const c = this.selectedContext();
     return [this.context(), c?.cluster, c?.server].some(v => !!v && PROD_RE.test(v));
   });
@@ -102,10 +99,10 @@ export class SourceWizardComponent implements OnInit {
     if (this.isEdit()) return '';
     const n = this.name().trim();
     if (!n) return 'Name is required.';
-    if (!SOURCE_NAME_RE.test(n)) {
+    if (!CLUSTER_NAME_RE.test(n)) {
       return 'Use lowercase letters, digits, "-", "_" or "."; start with a letter or digit; at most 63 characters.';
     }
-    if (this.nameTaken() === n || this.sources.find(n)) return 'A source with this name already exists.';
+    if (this.nameTaken() === n || this.sources.find(n)) return 'A cluster with this name already exists.';
     return '';
   });
 
@@ -116,7 +113,6 @@ export class SourceWizardComponent implements OnInit {
   });
 
   kubeError = computed(() => {
-    if (this.type() !== 'kubernetes') return '';
     if (this.kubeMode() === 'paste') {
       if (this.pasteDisabled() && !this.storedUpload()) return 'Paste / upload is unavailable on this server.';
       if (!this.kubeconfigText().trim() && !(this.isEdit() && this.storedUpload())) return 'Paste or upload a kubeconfig.';
@@ -160,39 +156,19 @@ export class SourceWizardComponent implements OnInit {
     const src = this.source();
     if (!src) return;
     const s = src.settings ?? { kubeconfig_uploaded: false };
-    this.type.set(src.type);
     this.name.set(src.name);
-    this.socket.set(s.socket ?? '');
     this.kubeMode.set(s.kubeconfig_uploaded ? 'paste' : 'path');
     this.kubeconfigPath.set(s.kubeconfig_path ?? '');
     this.context.set(s.kube_context ?? '');
     this.prodTickedFor = s.kube_context ?? '';
     this.pollInterval.set(s.poll_interval_seconds ? String(s.poll_interval_seconds) : '');
     this.readOnly.set(src.read_only);
-    this.step.set(2);
-    if (src.type === 'kubernetes') this.requestContexts();
+    this.requestContexts();
   }
 
   // ── navigation ────────────────────────────────────────────────────────────
 
-  chooseType(t: SourceType): void {
-    this.type.set(t);
-  }
-
-  onTypeKeydown(ev: KeyboardEvent): void {
-    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(ev.key)) return;
-    ev.preventDefault();
-    const next: SourceType = this.type() === 'docker' ? 'kubernetes' : 'docker';
-    this.type.set(next);
-    this.host.nativeElement.querySelector<HTMLElement>(`[data-type="${next}"]`)?.focus();
-  }
-
   next(): void {
-    if (this.step() === 1) {
-      if (!this.type()) return;
-      this.goTo(2);
-      return;
-    }
     if (this.step() === 2) {
       this.attempted.set(true);
       this.nameTouched.set(true);
@@ -207,7 +183,6 @@ export class SourceWizardComponent implements OnInit {
 
   back(): void {
     if (this.step() === 3) this.goTo(2);
-    else if (this.step() === 2 && !this.isEdit()) this.goTo(1);
   }
 
   private goTo(step: Step): void {
@@ -273,7 +248,6 @@ export class SourceWizardComponent implements OnInit {
   }
 
   private requestContexts(): void {
-    if (this.type() !== 'kubernetes') return;
     if (this.kubeMode() === 'path') {
       const p = this.kubeconfigPath().trim();
       this.contexts$.next(p ? { kubeconfig_path: p } : null);
@@ -323,26 +297,20 @@ export class SourceWizardComponent implements OnInit {
   // ── test & save ───────────────────────────────────────────────────────────
 
   buildInput(): SourceInput {
-    const type = this.type()!;
     const input: SourceInput = {
       name: this.isEdit() ? this.source()!.name : this.name().trim(),
-      type,
+      type: 'kubernetes',
       enabled: this.isEdit() ? this.source()!.enabled : true,
       read_only: this.readOnly(),
     };
-    if (type === 'docker') {
-      const sock = this.socket().trim();
-      if (sock) input.socket = sock;
-    } else {
-      if (this.kubeMode() === 'path') {
-        const p = this.kubeconfigPath().trim();
-        if (p) input.kubeconfig_path = p;
-      } else if (this.kubeconfigText().trim()) {
-        input.kubeconfig = this.kubeconfigText();
-      }
-      const ctx = this.context().trim();
-      if (ctx) input.kube_context = ctx;
+    if (this.kubeMode() === 'path') {
+      const p = this.kubeconfigPath().trim();
+      if (p) input.kubeconfig_path = p;
+    } else if (this.kubeconfigText().trim()) {
+      input.kubeconfig = this.kubeconfigText();
     }
+    const ctx = this.context().trim();
+    if (ctx) input.kube_context = ctx;
     const poll = this.pollInterval().trim();
     if (poll) input.poll_interval_seconds = +poll;
     return input;
@@ -374,14 +342,14 @@ export class SourceWizardComponent implements OnInit {
     req.subscribe({
       next: saved => {
         this.saving.set(false);
-        this.toast.success(this.isEdit() ? `Source ${input.name} updated` : `Source ${input.name} added — connecting…`);
+        this.toast.success(this.isEdit() ? `Cluster ${input.name} updated` : `Cluster ${input.name} added — connecting…`);
         this.sources.loadSources();
         this.saved.emit(saved);
       },
       error: (err: HttpErrorResponse) => {
         this.saving.set(false);
         if (isForbidden(err)) return; // toasted by the interceptor
-        const msg = apiErrorMessage(err, 'Saving the source failed.');
+        const msg = apiErrorMessage(err, 'Saving the cluster failed.');
         if (err?.status === 409 && !this.isEdit()) {
           this.nameTaken.set(input.name);
           this.nameTouched.set(true);

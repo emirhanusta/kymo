@@ -1,10 +1,20 @@
 import { inject } from '@angular/core';
-import { Router, Routes } from '@angular/router';
+import { CanActivateFn, Router, Routes } from '@angular/router';
 import { ShellComponent } from './layout/shell/shell.component';
 
 /** Old top-level workload pages now live under /workloads. */
 const workloadRedirect = (queryParams: Record<string, string>) => () =>
   inject(Router).createUrlTree(['/workloads'], { queryParams });
+
+/** CronJobs and Jobs moved to /jobs: old `/workloads?kind=CronJob|Job` links land there. */
+const jobsKindRedirect: CanActivateFn = route => {
+  const kind = route.queryParamMap.get('kind');
+  if (kind !== 'CronJob' && kind !== 'Job') return true;
+  const qp: Record<string, string> = {};
+  const q = route.queryParamMap.get('q');
+  if (q) qp['q'] = q;
+  return inject(Router).createUrlTree(['/jobs'], { queryParams: qp });
+};
 
 export const routes: Routes = [
   {
@@ -25,7 +35,18 @@ export const routes: Routes = [
           ),
       },
       {
+        path: 'issues',
+        loadComponent: () =>
+          import('./features/issues/issues.component').then(m => m.IssuesComponent),
+      },
+      {
+        path: 'jobs',
+        loadComponent: () =>
+          import('./features/jobs/jobs.component').then(m => m.JobsComponent),
+      },
+      {
         path: 'workloads',
+        canActivate: [jobsKindRedirect],
         loadComponent: () =>
           import('./features/workloads/list/workload-list.component').then(m => m.WorkloadListComponent),
       },
@@ -46,9 +67,9 @@ export const routes: Routes = [
           import('./features/events/events.component').then(m => m.EventsComponent),
       },
       {
-        path: 'sources',
+        path: 'clusters',
         loadComponent: () =>
-          import('./features/sources/sources.component').then(m => m.SourcesComponent),
+          import('./features/clusters/clusters.component').then(m => m.ClustersComponent),
       },
 
       // ── legacy links ──────────────────────────────────────────────────────
@@ -71,7 +92,12 @@ export const routes: Routes = [
         redirectTo: ({ params }) => inject(Router).createUrlTree(['/containers', params['id']]),
       },
       { path: 'deployments', pathMatch: 'full', redirectTo: workloadRedirect({ kind: 'Deployment' }) },
-      { path: 'cronjobs', pathMatch: 'full', redirectTo: workloadRedirect({ kind: 'CronJob' }) },
+      { path: 'cronjobs', pathMatch: 'full', redirectTo: '/jobs' },
+      {
+        path: 'sources',
+        pathMatch: 'full',
+        redirectTo: ({ queryParams }) => inject(Router).createUrlTree(['/clusters'], { queryParams }),
+      },
       { path: 'archive', pathMatch: 'full', redirectTo: '/workloads/archived' },
     ],
   },

@@ -14,7 +14,7 @@ import (
 )
 
 // ListWorkloads returns one summary per workload, aggregated over every
-// recorded instance (pods across rollouts, Compose containers).
+// recorded instance (pods across rollouts).
 //
 // Query parameters: source, namespace, kind, q (name/namespace substring),
 // status (running|crashing|stopped|unknown), system (true to include system

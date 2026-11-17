@@ -7,7 +7,7 @@ import {
   ActionResult, KubeContextList, ServerMeta, SourceInput, SourceStatus, SourceTestResult, SyncResult,
 } from '../models/container.model';
 
-/** Source management (CRUD, connection test, kubeconfig context discovery) and server meta. */
+/** Cluster (API: source) management (CRUD, connection test, kubeconfig context discovery) and server meta. */
 @Injectable({ providedIn: 'root' })
 export class SourceService {
   private http = inject(HttpClient);
@@ -52,12 +52,8 @@ export function sourceToInput(src: SourceStatus, patch: Partial<SourceInput> = {
     enabled: src.enabled,
     read_only: src.read_only,
   };
-  if (src.type === 'docker') {
-    if (s.socket) input.socket = s.socket;
-  } else {
-    if (s.kubeconfig_path) input.kubeconfig_path = s.kubeconfig_path;
-    if (s.kube_context) input.kube_context = s.kube_context;
-  }
+  if (s.kubeconfig_path) input.kubeconfig_path = s.kubeconfig_path;
+  if (s.kube_context) input.kube_context = s.kube_context;
   if (s.poll_interval_seconds) input.poll_interval_seconds = s.poll_interval_seconds;
   return { ...input, ...patch };
 }

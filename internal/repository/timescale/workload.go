@@ -19,8 +19,8 @@ type workloadRepo struct{ db *DB }
 func (db *DB) Workloads() repository.WorkloadRepository { return &workloadRepo{db} }
 
 // workloadSummarySQL aggregates active container rows by workload. An
-// "instance" is a pod for Kubernetes (second segment of namespace/pod/container)
-// and a container for Docker. %s is the extra WHERE clause.
+// "instance" is a pod for Kubernetes (second segment of namespace/pod/container).
+// %s is the extra WHERE clause.
 const workloadSummarySQL = `
 WITH members AS (
   SELECT c.*,

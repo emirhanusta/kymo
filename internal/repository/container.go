@@ -20,7 +20,7 @@ type ContainerFilter struct {
 	Query string
 	// Status restricts results to a single current_status value.
 	Status model.ContainerStatus
-	// WorkloadKind restricts results to a workload kind (e.g. "Deployment", "Compose").
+	// WorkloadKind restricts results to a workload kind (e.g. "Deployment").
 	WorkloadKind string
 	// Workload restricts results to an exact workload name.
 	Workload string
