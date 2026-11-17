@@ -25,6 +25,8 @@ import (
 	"github.com/emirhanusta/kymo/internal/repository/timescale"
 	"github.com/emirhanusta/kymo/internal/secret"
 	"github.com/emirhanusta/kymo/internal/service"
+	"github.com/emirhanusta/kymo/internal/service/issues"
+	"github.com/emirhanusta/kymo/internal/service/notify"
 	"github.com/emirhanusta/kymo/migrations"
 )
 
@@ -95,6 +97,30 @@ func main() {
 		log.Info("KYMO_SECRET_KEY not set; uploading kubeconfigs through the UI is disabled")
 	}
 
+	notifier := notify.New(db.Notifications(), db.CrashLogs(), box, db.Issues(), notify.Options{
+		Enabled:   cfg.Notifications.Enabled,
+		PublicURL: cfg.Server.PublicURL,
+	}, log)
+	if err := syncNotificationChannels(notifier, cfg.Notifications.Channels, log); err != nil {
+		log.Warn("syncing notification channels from config.yaml failed", zap.Error(err))
+	}
+	engine := issues.New(issues.Config{
+		Interval:      cfg.Issues.EvaluateInterval,
+		DegradedAfter: cfg.Issues.DegradedAfter,
+		ResolveAfter:  cfg.Issues.ResolveAfter,
+		ReopenWindow:  cfg.Issues.ReopenWindow,
+		IncludeSystem: cfg.Issues.IncludeSystem,
+	}, issues.Deps{
+		Workloads: db.Workloads(),
+		Events:    db.Events(),
+		K8sEvents: db.K8sEvents(),
+		CronJobs:  db.CronJobs(),
+		Issues:    db.Issues(),
+		Sources:   svc,
+		Notifier:  notifier,
+		Log:       log,
+	})
+
 	factory := func(spec model.SourceSpec) collector.Collector {
 		interval := spec.PollInterval
 		if interval <= 0 {
@@ -126,6 +152,9 @@ func main() {
 			if note := restartOnlyChanges(running, fresh); note != "" {
 				log.Info("config.yaml: these settings changed and need a restart to apply", zap.String("settings", note))
 			}
+			if err := syncNotificationChannels(notifier, fresh.Notifications.Channels, log); err != nil {
+				log.Warn("syncing notification channels from config.yaml failed", zap.Error(err))
+			}
 			return config.SourceSpecs(fresh), nil
 		})
 	}
@@ -150,7 +179,7 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(func(c *gin.Context) {
 		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 		c.Header("Access-Control-Allow-Headers", "Content-Type")
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -158,7 +187,10 @@ func main() {
 		}
 		c.Next()
 	})
-	httphandler.New(svc, mgmt, sources, db, log, router)
+	httphandler.New(svc, mgmt, sources, db, log, router,
+		httphandler.WithIssues(db.Issues()),
+		httphandler.WithNotifications(notifier),
+		httphandler.WithServerInfo(cfg.Server.PublicURL, cfg.Notifications.Enabled))
 	if cfg.Server.StaticDir != "" {
 		if err := httphandler.ServeSPA(router, cfg.Server.StaticDir); err != nil {
 			log.Fatal("cannot serve frontend", zap.String("static_dir", cfg.Server.StaticDir), zap.Error(err))
@@ -212,6 +244,10 @@ func main() {
 		log.Warn("cannot watch config file; use POST /api/v1/sources/reload", zap.String("file", cfg.File), zap.Error(err))
 	}
 
+	// Issue engine and notification workers.
+	notifier.Start(rootCtx)
+	go engine.Run(rootCtx)
+
 	// Run the recorder event loop in the background.
 	go func() {
 		if err := svc.Run(rootCtx); err != nil && !errors.Is(err, context.Canceled) {
@@ -242,6 +278,12 @@ func restartOnlyChanges(old, fresh *config.Config) string {
 	if old.Log != fresh.Log {
 		changed = append(changed, "log")
 	}
+	if old.Issues != fresh.Issues {
+		changed = append(changed, "issues")
+	}
+	if old.Notifications.Enabled != fresh.Notifications.Enabled {
+		changed = append(changed, "notifications.enabled")
+	}
 	if old.SecretKey != fresh.SecretKey {
 		changed = append(changed, "secret_key")
 	}
@@ -250,6 +292,20 @@ func restartOnlyChanges(old, fresh *config.Config) string {
 		changed = append(changed, "collector (poll/scoring/crash_logs/k8s_events)")
 	}
 	return strings.Join(changed, ", ")
+}
+
+// syncNotificationChannels mirrors the channels declared in config.yaml into the
+// database (they are locked in the UI).
+func syncNotificationChannels(n *notify.Service, declared []config.NotificationChannel, log *zap.Logger) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := n.SyncConfig(ctx, declared); err != nil {
+		return err
+	}
+	if len(declared) > 0 {
+		log.Info("notification channels loaded from config.yaml", zap.Int("count", len(declared)))
+	}
+	return nil
 }
 
 // buildLogger constructs a zap.Logger from the provided LogConfig.

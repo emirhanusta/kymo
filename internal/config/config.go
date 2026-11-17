@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,6 +21,9 @@ type Config struct {
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Collector CollectorConfig `mapstructure:"collector"`
 	Log       LogConfig       `mapstructure:"log"`
+	Issues    IssuesConfig    `mapstructure:"issues"`
+
+	Notifications NotificationsConfig `mapstructure:"notifications"`
 
 	// SecretKey encrypts kubeconfigs uploaded through the UI (env KYMO_SECRET_KEY).
 	// Without it, Kubernetes sources can only reference kubeconfig files on the server.
@@ -49,6 +53,52 @@ type ServerConfig struct {
 	// (frontend/dist/frontend/browser). It is served at "/" with SPA fallback to
 	// index.html for any non-API path.
 	StaticDir string `mapstructure:"static_dir"`
+
+	// PublicURL is the externally reachable base URL of the web UI (e.g.
+	// "https://kymo.example.com"). Notifications use it to link to workloads.
+	PublicURL string `mapstructure:"public_url"`
+}
+
+// IssuesConfig tunes the server-side issue engine.
+type IssuesConfig struct {
+	// EvaluateInterval is how often all workloads are evaluated (default 30s).
+	EvaluateInterval time.Duration `mapstructure:"evaluate_interval"`
+	// DegradedAfter is how long a workload must stay partially ready before a
+	// "degraded" issue opens (default 3m).
+	DegradedAfter time.Duration `mapstructure:"degraded_after"`
+	// ResolveAfter is how long a problem must be gone before its issue resolves (default 5m).
+	ResolveAfter time.Duration `mapstructure:"resolve_after"`
+	// ReopenWindow is how long after resolving a returning problem reopens the
+	// same issue as a flap instead of opening a new one (default 15m).
+	ReopenWindow time.Duration `mapstructure:"reopen_window"`
+	// IncludeSystem also evaluates system workloads (kube-system, …).
+	IncludeSystem bool `mapstructure:"include_system"`
+}
+
+// NotificationsConfig configures issue notifications.
+type NotificationsConfig struct {
+	// Enabled turns sending on or off (default true). Channels are still managed.
+	Enabled bool `mapstructure:"enabled"`
+	// Channels are channels declared in the file: locked in the UI. The URL is
+	// stored in plain text in the file, so keep the file private.
+	Channels []NotificationChannel `mapstructure:"channels"`
+}
+
+// NotificationChannel is a channel declared in config.yaml. Pointer fields are
+// optional; omitted ones take the defaults of API-created channels.
+type NotificationChannel struct {
+	Name           string   `mapstructure:"name"`
+	Type           string   `mapstructure:"type"` // slack | discord | webhook
+	URL            string   `mapstructure:"url"`
+	Secret         string   `mapstructure:"secret"` // webhook HMAC secret
+	Enabled        *bool    `mapstructure:"enabled"`
+	MinSeverity    string   `mapstructure:"min_severity"` // critical (default) | warning
+	Sources        []string `mapstructure:"sources"`
+	Namespaces     []string `mapstructure:"namespaces"`
+	Types          []string `mapstructure:"types"`
+	NotifyResolved *bool    `mapstructure:"notify_resolved"`
+	IncludeLogs    *bool    `mapstructure:"include_logs"`
+	RepeatMinutes  int      `mapstructure:"repeat_minutes"`
 }
 
 // DatabaseConfig holds TimescaleDB/PostgreSQL connection parameters.
@@ -230,6 +280,14 @@ func load(path string) (*Config, error) {
 	v.SetDefault("server.read_timeout", "15s")
 	v.SetDefault("server.write_timeout", "15s")
 	v.SetDefault("server.static_dir", "")
+	v.SetDefault("server.public_url", "")
+
+	v.SetDefault("issues.evaluate_interval", "30s")
+	v.SetDefault("issues.degraded_after", "3m")
+	v.SetDefault("issues.resolve_after", "5m")
+	v.SetDefault("issues.reopen_window", "15m")
+	v.SetDefault("issues.include_system", false)
+	v.SetDefault("notifications.enabled", true)
 
 	v.SetDefault("database.dsn", "postgres://kymo:kymo@localhost:5432/kymo?sslmode=disable")
 	v.SetDefault("database.max_conns", 20)
@@ -302,6 +360,39 @@ func (c *Config) validate() error {
 		seen[s.Name] = true
 		if s.Type != model.SourceTypeKubernetes {
 			return fmt.Errorf("config: source %q has type %q: only %q sources are supported", s.Name, s.Type, model.SourceTypeKubernetes)
+		}
+	}
+	c.Server.PublicURL = strings.TrimRight(strings.TrimSpace(c.Server.PublicURL), "/")
+	if c.Server.PublicURL != "" {
+		if u, err := url.Parse(c.Server.PublicURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("config: server.public_url %q must be an http(s) URL", c.Server.PublicURL)
+		}
+	}
+	seenCh := make(map[string]bool, len(c.Notifications.Channels))
+	for i, ch := range c.Notifications.Channels {
+		if ch.Name == "" {
+			return fmt.Errorf("config: notifications.channels[%d] has no name", i)
+		}
+		if seenCh[ch.Name] {
+			return fmt.Errorf("config: duplicate notification channel name %q", ch.Name)
+		}
+		seenCh[ch.Name] = true
+		if err := model.ValidateChannelType(ch.Type); err != nil {
+			return fmt.Errorf("config: notification channel %q: %w", ch.Name, err)
+		}
+		if err := model.ValidateChannelURL(ch.Type, ch.URL); err != nil {
+			return fmt.Errorf("config: notification channel %q: %w", ch.Name, err)
+		}
+		if sev := ch.MinSeverity; sev != "" && sev != "critical" && sev != "warning" {
+			return fmt.Errorf("config: notification channel %q: min_severity must be critical or warning", ch.Name)
+		}
+		for _, t := range ch.Types {
+			if !model.ValidIssueType(t) {
+				return fmt.Errorf("config: notification channel %q: unknown issue type %q", ch.Name, t)
+			}
+		}
+		if ch.RepeatMinutes < 0 {
+			return fmt.Errorf("config: notification channel %q: repeat_minutes must be >= 0", ch.Name)
 		}
 	}
 	return nil

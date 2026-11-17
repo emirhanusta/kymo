@@ -133,6 +133,7 @@ func TestEventFindRecent(t *testing.T) {
 		{"source", repository.EventQuery{Limit: 10, Source: "src1"}, []int64{e3.ID, e2.ID, e1.ID}},
 		{"type", repository.EventQuery{Limit: 10, Type: model.EventTypeCrash}, []int64{e3.ID, e2.ID}},
 		{"before is strict", repository.EventQuery{Limit: 10, Before: at(3 * time.Minute)}, []int64{e2.ID, e1.ID}},
+		{"since is inclusive", repository.EventQuery{Limit: 10, Since: at(3 * time.Minute)}, []int64{e4.ID, e3.ID}},
 		{"workload", repository.EventQuery{Limit: 10, WorkloadID: webID}, []int64{e2.ID, e1.ID}},
 		{"combined", repository.EventQuery{Limit: 10, Source: "src1", Type: model.EventTypeCrash, WorkloadID: webID}, []int64{e2.ID}},
 		{"no match", repository.EventQuery{Limit: 10, Source: "nope"}, nil},
@@ -150,6 +151,9 @@ func TestEventFindRecent(t *testing.T) {
 	}
 
 	got, _ := db.Events().FindRecent(ctx, repository.EventQuery{Limit: 10})
+	if got[0].WorkloadID != model.WorkloadID("src2", "ns", "Deployment", "web") || got[2].WorkloadID != webID {
+		t.Errorf("workload ids: %q %q", got[0].WorkloadID, got[2].WorkloadID)
+	}
 	if got[0].ContainerName != o.Name || got[0].Runtime != model.RuntimeKubernetes ||
 		got[2].ContainerName != a.Name {
 		t.Errorf("container join: %q/%q , %q", got[0].ContainerName, got[0].Runtime, got[2].ContainerName)

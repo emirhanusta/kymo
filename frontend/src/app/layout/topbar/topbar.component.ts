@@ -39,6 +39,7 @@ export const PALETTE_PAGES: NavTab[] = [
   { path: '/workloads?kind=DaemonSet',      label: 'DaemonSets' },
   { path: '/workloads/archived',            label: 'Archived & ignored' },
   { path: '/clusters?add=1',                label: 'Add cluster' },
+  { path: '/settings/notifications',        label: 'Notification channels' },
 ];
 
 /** True when a keystroke should be left alone (typing in a field, or a modal is open). */
@@ -102,6 +103,7 @@ export class TopbarComponent {
   /** Document title: detail pages show the container name (from PageContextService), others the tab name. */
   pageTitle = computed(() => {
     const segs = this.url().split(/[?#]/)[0].split('/').filter(Boolean);
+    if (segs[0] === 'settings') return 'Notifications';
     const tab = NAV_TABS.find(t => t.path === '/' + (segs[0] ?? 'dashboard'));
     if (segs.length > 1) return this.pageCtx.detailLabel() ?? tab?.label ?? null;
     return tab?.label ?? null;

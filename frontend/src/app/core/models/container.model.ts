@@ -225,6 +225,8 @@ export interface KubeContextList {
 export interface ServerMeta {
   version: string;
   secret_key_configured: boolean;
+  /** Base URL used for links in notifications; "" when server.public_url is not set. */
+  public_url: string;
   /** Path of the config file in use, or "" when none. */
   config_file: string;
   /** Last automatic/manual config.yaml sync (null before the first one). */

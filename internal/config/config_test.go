@@ -108,3 +108,82 @@ func TestK8sEventsDefaults(t *testing.T) {
 		t.Fatalf("defaults: %+v", k)
 	}
 }
+
+func TestIssuesAndNotificationsDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeCfg(t, path, "server:\n  address: \":9999\"\n")
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := cfg.Issues
+	if i.EvaluateInterval != 30*time.Second || i.DegradedAfter != 3*time.Minute || i.ResolveAfter != 5*time.Minute ||
+		i.ReopenWindow != 15*time.Minute || i.IncludeSystem {
+		t.Fatalf("issues defaults: %+v", i)
+	}
+	if !cfg.Notifications.Enabled || len(cfg.Notifications.Channels) != 0 || cfg.Server.PublicURL != "" {
+		t.Fatalf("notification defaults: %+v / %q", cfg.Notifications, cfg.Server.PublicURL)
+	}
+}
+
+func TestNotificationChannelsFromFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeCfg(t, path, `
+server:
+  public_url: "https://kymo.example.com/"
+issues:
+  evaluate_interval: 10s
+  include_system: true
+notifications:
+  enabled: false
+  channels:
+    - name: ops
+      type: slack
+      url: https://hooks.slack.com/services/T/B/X
+      min_severity: warning
+      sources: [prod]
+      repeat_minutes: 30
+      notify_resolved: false
+    - name: hook
+      type: webhook
+      url: http://localhost:9000/in
+      secret: s
+`)
+	cfg, err := LoadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.PublicURL != "https://kymo.example.com" || cfg.Issues.EvaluateInterval != 10*time.Second ||
+		!cfg.Issues.IncludeSystem || cfg.Notifications.Enabled {
+		t.Fatalf("cfg: %+v", cfg)
+	}
+	ch := cfg.Notifications.Channels
+	if len(ch) != 2 || ch[0].MinSeverity != "warning" || ch[0].Sources[0] != "prod" || ch[0].RepeatMinutes != 30 ||
+		ch[0].NotifyResolved == nil || *ch[0].NotifyResolved || ch[1].NotifyResolved != nil || ch[1].Secret != "s" {
+		t.Fatalf("channels: %+v", ch)
+	}
+}
+
+func TestNotificationChannelValidation(t *testing.T) {
+	for name, body := range map[string]string{
+		"no name":    "- type: webhook\n      url: https://example.com/x",
+		"bad type":   "- name: a\n      type: email\n      url: https://example.com/x",
+		"http":       "- name: a\n      type: webhook\n      url: http://example.com/x",
+		"slack host": "- name: a\n      type: slack\n      url: https://example.com/x",
+		"severity":   "- name: a\n      type: webhook\n      url: https://example.com/x\n      min_severity: info",
+		"issue type": "- name: a\n      type: webhook\n      url: https://example.com/x\n      types: [nope]",
+		"dup":        "- name: a\n      type: webhook\n      url: https://example.com/x\n    - name: a\n      type: webhook\n      url: https://example.com/y",
+		"neg repeat": "- name: a\n      type: webhook\n      url: https://example.com/x\n      repeat_minutes: -1",
+	} {
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		writeCfg(t, path, "notifications:\n  channels:\n    "+body+"\n")
+		if _, err := LoadFile(path); err == nil {
+			t.Errorf("%s: invalid channel accepted", name)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeCfg(t, path, "server:\n  public_url: \"kymo.example.com\"\n")
+	if _, err := LoadFile(path); err == nil {
+		t.Error("public_url without scheme accepted")
+	}
+}

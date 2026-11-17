@@ -556,6 +556,27 @@ func (c *Collector) emitPendingContainers(ctx context.Context, pod *corev1.Pod, 
 	}
 }
 
+// stopUnreportedContainers emits an UpdateOnly "stopped" state for every spec
+// container of a deleted pod that has no snapshot in rec.
+func (c *Collector) stopUnreportedContainers(ctx context.Context, pod *corev1.Pod, rec *podRecord, wl WorkloadInfo) {
+	for _, ctr := range pod.Spec.Containers {
+		if rec != nil {
+			if _, ok := rec.containers[ctr.Name]; ok {
+				continue
+			}
+		}
+		snap := &containerSnapshot{firstSeenAt: pod.CreationTimestamp.UTC()}
+		ct := buildContainerModel(c.sourceName, pod, ctr.Name, ctr.Image, snap, wl)
+		ct.CurrentStatus = model.StatusStopped
+		c.emit(ctx, collector.CollectorEvent{
+			Kind:       collector.CollectorEventState,
+			SourceName: c.sourceName,
+			Container:  ct,
+			UpdateOnly: true,
+		})
+	}
+}
+
 // onPodDelete is called by the informer when a Pod is removed from the cluster.
 // It emits EventTypeStop for every container that was last seen as Running and
 // an UpdateOnly state event (status stopped) for all other containers, then
@@ -584,14 +605,19 @@ func (c *Collector) onPodDelete(ctx context.Context, obj interface{}) {
 	delete(c.workloadCache, pk)
 	c.mu.Unlock()
 
-	if rec == nil {
-		return
-	}
-
 	// The workload may be missing from the cache (e.g. update raced with add);
 	// resolve it so the emitted containers carry correct workload fields.
 	if wl.Kind == "" {
 		wl = c.owners.detect(ctx, c.clientset, pod)
+	}
+
+	// Spec containers that never reported a status (pod stuck Pending) were
+	// recorded by emitPendingContainers; mark them stopped too, otherwise they
+	// stay "unknown" and keep the workload looking active forever.
+	defer c.stopUnreportedContainers(ctx, pod, rec, wl)
+
+	if rec == nil {
+		return
 	}
 
 	for containerName, snap := range rec.containers {

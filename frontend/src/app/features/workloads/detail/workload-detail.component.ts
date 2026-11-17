@@ -13,6 +13,9 @@ import { ToastService } from '../../../core/services/toast.service';
 import { RefreshService } from '../../../core/services/refresh.service';
 import { PageContextService } from '../../../core/services/page-context.service';
 import { IssuesService } from '../../../core/services/issues.service';
+import { Issue } from '../../../core/models/issue.model';
+import { IssueChipsComponent } from '../../../shared/components/issue-chips/issue-chips.component';
+import { statusReason } from '../../../shared/utils/issues';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import {
   CronJobExecution, DeploymentDetail, K8sEvent, ResourceSample, WorkloadDetail, WorkloadScore,
@@ -55,7 +58,7 @@ type TabKey = 'timeline' | 'pods' | 'resources' | 'runs';
     RouterLink, DecimalPipe, DatePipe, PageHeaderComponent, StatusBadgeComponent, WorkloadBadgeComponent,
     StabilityGaugeComponent, ResourceChartsComponent, ReadOnlyTagComponent, EmptyStateComponent,
     ErrorStateComponent, TimeagoPipe, ScoreClassPipe, LastCrashCardComponent, WorkloadTimelineComponent,
-    WorkloadPodsComponent,
+    WorkloadPodsComponent, IssueChipsComponent,
   ],
   templateUrl: './workload-detail.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -68,7 +71,8 @@ export class WorkloadDetailComponent {
   private refreshSvc = inject(RefreshService);
   private pageCtx    = inject(PageContextService);
   private sources    = inject(SourceStateService);
-  protected issues   = inject(IssuesService);
+  private issueSvc   = inject(IssuesService);
+  readonly statusReason = statusReason;
 
   readonly ranges = RANGES;
 
@@ -93,6 +97,8 @@ export class WorkloadDetailComponent {
   history   = signal<WorkloadScore[]>([]);
   /** Kubernetes Warning events (incl. repeats) of the last hour. */
   warnings1h = signal(0);
+  /** The workload's open issues (server-detected). */
+  openIssues = signal<Issue[]>([]);
 
   /** Newest crash/OOM events, crash-log snapshots and revisions (Last crash card, timeline markers, pods). */
   ctx = signal<CrashContext>({ crashEvents: [], logs: [], revisions: [] });
@@ -233,6 +239,7 @@ export class WorkloadDetailComponent {
     this.history.set([]);
     this.ctx.set({ crashEvents: [], logs: [], revisions: [] });
     this.warnings1h.set(0);
+    this.openIssues.set([]);
     this.resources.set([]);
     this.deployment.set(null);
     this.scaleValue.set(null);
@@ -254,9 +261,11 @@ export class WorkloadDetailComponent {
       history: this.svc.getWorkloadScoreHistory(id, 60),
       ctx:     this.svc.getCrashContext(id),
       k8s:     this.svc.getWorkloadK8sEvents(id, { since: hourAgoIso(), limit: 500 }).pipe(catchError(() => of([] as K8sEvent[]))),
+      issues:  this.issueSvc.forWorkload(id, 'open').pipe(catchError(() => of([] as Issue[]))),
     }).subscribe({
-      next: ({ detail, history, ctx, k8s }) => {
+      next: ({ detail, history, ctx, k8s, issues }) => {
         this.warnings1h.set(warningsLastHour(k8s));
+        this.openIssues.set(issues);
         const w = detail.workload;
         this.detail.set({ ...detail, instances: detail.instances ?? [], workload: { ...w, images: w.images ?? [], containers: w.containers ?? [] } });
         this.history.set(history ?? []);

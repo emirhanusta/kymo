@@ -6,7 +6,7 @@ import { debounceTime, distinctUntilChanged, catchError } from 'rxjs/operators';
 
 import { ContainerService } from '../../../core/services/container.service';
 import { WorkloadStateService } from '../../../core/services/workload-state.service';
-import { IssuesService } from '../../../core/services/issues.service';
+import { statusReason } from '../../../shared/utils/issues';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import { reloadOnSourceAndRefresh } from '../../../core/utils/page-reload';
 import { Container, WorkloadSummary } from '../../../core/models/container.model';
@@ -66,7 +66,7 @@ export class WorkloadListComponent {
   private route      = inject(ActivatedRoute);
   private router     = inject(Router);
   protected state    = inject(WorkloadStateService);
-  protected issues   = inject(IssuesService);
+  readonly statusReason = statusReason;
   protected sourceSvc = inject(SourceStateService);
 
   readonly kindChips     = KIND_CHIPS;

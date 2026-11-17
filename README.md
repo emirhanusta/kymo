@@ -116,6 +116,77 @@ cluster-wide). API: `GET /api/v1/k8s-events[?source&namespace&type&reason&worklo
 (`pod-template-hash`, `controller-revision-hash`, or the Job name);
 `GET /api/v1/workloads/:id/revisions` lists rollouts newest first.
 
+## Issues and notifications
+
+**Issues:** every `issues.evaluate_interval` (default 30s) KYMO evaluates all
+workloads of the *registered* clusters (removed clusters and, unless
+`issues.include_system: true`, system workloads are ignored) and keeps one
+persistent issue per workload and type:
+
+| type | severity | opens when |
+| --- | --- | --- |
+| `crash_loop` | critical | workload is crashing (not explained by OOM), title "Crash loop · exit N" |
+| `oom` | critical | at least one OOM kill in the last 24h, "OOMKilled ×N in 24h" |
+| `degraded` | warning | fewer pods running than active for `issues.degraded_after` (3m) |
+| `job_failed` | critical | a CronJob's latest finished run failed |
+| `cant_schedule`, `image_pull`, `evicted`, `volume_mount` | critical | Warning Kubernetes events from the last 30 min (FailedScheduling, ErrImagePull/ImagePullBackOff, Evicted, FailedMount/FailedAttachVolume) |
+| `probe_failing` | warning | Unhealthy events from the last 30 min |
+
+An issue resolves once its condition has been gone for `issues.resolve_after`
+(5m). If the problem returns within `issues.reopen_window` (15m) the *same*
+issue reopens (counted in `flaps`, no second "opened" notification). Resolved
+issues are kept for 90 days. API: `GET /api/v1/issues[?status=open|resolved|all&source&severity&type&limit&before]`,
+`GET /api/v1/issues/summary`, `GET /api/v1/issues/:id`,
+`GET /api/v1/workloads/:id/issues[?status]`. For `status=resolved` the `before`
+cursor is compared with `resolved_at`, otherwise with `first_seen`.
+
+**Notifications:** channels (Slack incoming webhook, Discord webhook, generic
+webhook) receive *opened*, *resolved* and optional *reminder* messages. Each
+channel filters by minimum severity, cluster, namespace and issue type, and can
+attach the last 20 lines of the newest crash log (`include_logs`).
+Deliveries time out after 10s, are retried up to 3 times (1s, 5s back-off) and
+every attempt series is logged (30 days) - see the channel's delivery log in
+the UI or `GET /api/v1/notifications/deliveries`.
+
+- Create channels in the UI or with `POST /api/v1/notifications/channels`
+  (`name`, `type`, `url`, optional `secret`, `min_severity`, `sources`,
+  `namespaces`, `types`, `notify_resolved`, `include_logs`, `repeat_minutes`).
+  The URL (and webhook secret) is stored AES-GCM encrypted and never returned by
+  the API (only a hint such as `hooks.slack.com/…/abcd`), so the server needs
+  `KYMO_SECRET_KEY`; without it creating a channel returns 400.
+- Or declare channels under `notifications.channels` in `config.yaml` (see
+  `config.example.yaml`). They need no secret key and are locked in the UI, but
+  the URL is **plain text in the file** - keep it private. Changes apply live.
+- `POST /api/v1/notifications/channels/:id/test` sends a sample message and
+  returns `{ok, status_code, error}`.
+- **Slack:** Apps > Incoming Webhooks > add a webhook, copy
+  `https://hooks.slack.com/services/...`. **Discord:** channel settings >
+  Integrations > Webhooks, copy `https://discord.com/api/webhooks/...`.
+- URLs must be https (plain http only for `localhost` / `127.0.0.1`, for
+  testing).
+- Set `server.public_url` (e.g. `https://kymo.example.com`) to get an "Open in
+  KYMO" link to `<public_url>/workloads/<workload id>` in every message.
+  `notifications.enabled: false` silences all sending.
+
+**Generic webhook payload:** `POST` with JSON
+`{"event": "opened|resolved|reminder|test", "issue": {...}, "workload_url": "...", "crash_log_tail": "...", "sent_at": "..."}`
+and the header `X-KYMO-Event`. With a secret the body is signed:
+`X-KYMO-Signature: sha256=<hex HMAC-SHA256 of the raw body>`. Verify it, e.g.:
+
+```python
+import hmac, hashlib
+
+def valid(secret: bytes, body: bytes, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header)
+```
+
+```go
+mac := hmac.New(sha256.New, secret)
+mac.Write(body) // the raw request body
+ok := hmac.Equal([]byte("sha256="+hex.EncodeToString(mac.Sum(nil))), []byte(r.Header.Get("X-KYMO-Signature")))
+```
+
 > **Security note:** the API has no authentication and exposes management
 > actions (delete pod, scale, rollout restart). Run it on a trusted network or behind an
 > authenticating proxy, and be careful which kubeconfig context a source uses.

@@ -23,6 +23,8 @@ func (h *Handler) Meta(c *gin.Context) {
 		"secret_key_configured": h.sources != nil && h.sources.SecretConfigured(),
 		"config_file":           "",
 		"config_sync":           nil,
+		"public_url":            h.publicURL,
+		"notifications_enabled": h.notifEnabled,
 	}
 	if h.sources != nil {
 		meta["config_file"] = h.sources.ConfigFile()

@@ -25,7 +25,7 @@
     <!-- Header -->
     <app-page-header [title]="w.name" [crumbLabel]="isJobKind() ? 'Jobs' : 'Workloads'" [crumbLink]="isJobKind() ? '/jobs' : '/workloads'">
       <span subtitle class="flex items-center gap-x-3 gap-y-1 flex-wrap">
-        <app-status-badge [status]="w.status" [text]="issues.reasonOf(w)" />
+        <app-status-badge [status]="w.status" [text]="statusReason(w)" />
         <app-workload-badge [kind]="w.kind" />
         @if (w.is_system) {
           <span class="text-[11px] px-1.5 py-px border border-kymo-rule text-kymo-muted">SYS</span>
@@ -39,6 +39,7 @@
           <span aria-hidden="true">⚠</span> {{ warnings1h() }} warning{{ warnings1h() === 1 ? '' : 's' }} (1h)
         </span>
         }
+        <app-issue-chips [issues]="openIssues()" />
       </span>
     </app-page-header>
 

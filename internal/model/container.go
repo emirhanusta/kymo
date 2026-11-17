@@ -214,6 +214,9 @@ type LifecycleEvent struct {
 	// read queries (e.g. the recent-events feed). They are not persisted.
 	ContainerName string  `json:"container_name,omitempty" db:"-"`
 	Runtime       Runtime `json:"runtime,omitempty" db:"-"`
+	// WorkloadID is the owning workload of the container, populated by the
+	// recent-events feed.
+	WorkloadID string `json:"workload_id,omitempty" db:"-"`
 
 	// HasLogs is true when a crash-log snapshot exists for this termination.
 	// Populated by read queries; not persisted on the event row.

@@ -670,11 +670,15 @@ func (r *eventRepo) FindRecent(ctx context.Context, q repository.EventQuery) ([]
 		args = append(args, q.Before)
 		clauses = append(clauses, fmt.Sprintf("e.occurred_at < $%d", len(args)))
 	}
+	if !q.Since.IsZero() {
+		args = append(args, q.Since)
+		clauses = append(clauses, fmt.Sprintf("e.occurred_at >= $%d", len(args)))
+	}
 	if q.WorkloadID != "" {
 		args = append(args, q.WorkloadID)
 		clauses = append(clauses, fmt.Sprintf("c.workload_id = $%d", len(args)))
 	}
-	sql := `SELECT ` + eventCols + `, COALESCE(c.name, ''), COALESCE(c.runtime, '')
+	sql := `SELECT ` + eventCols + `, COALESCE(c.name, ''), COALESCE(c.runtime, ''), COALESCE(c.workload_id, '')
 FROM lifecycle_events e LEFT JOIN containers c ON c.id = e.container_id`
 	if len(clauses) > 0 {
 		sql += " WHERE " + strings.Join(clauses, " AND ")
@@ -691,8 +695,8 @@ FROM lifecycle_events e LEFT JOIN containers c ON c.id = e.container_id`
 }
 
 // scanEvents iterates rows and decodes each LifecycleEvent, including JSONB metadata.
-// When withContainer is true the rows carry two extra trailing columns:
-// container name and runtime.
+// When withContainer is true the rows carry three extra trailing columns:
+// container name, runtime and workload id.
 func scanEvents(rows pgx.Rows, withContainer bool) ([]*model.LifecycleEvent, error) {
 	var events []*model.LifecycleEvent
 	for rows.Next() {
@@ -705,7 +709,7 @@ func scanEvents(rows pgx.Rows, withContainer bool) ([]*model.LifecycleEvent, err
 			&e.NodeName, &metaBytes, &e.OccurredAt, &e.SourceName, &e.HasLogs,
 		}
 		if withContainer {
-			dest = append(dest, &e.ContainerName, &e.Runtime)
+			dest = append(dest, &e.ContainerName, &e.Runtime, &e.WorkloadID)
 		}
 		if err := rows.Scan(dest...); err != nil {
 			return nil, fmt.Errorf("scan event: %w", err)
