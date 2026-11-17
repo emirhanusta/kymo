@@ -62,13 +62,13 @@ func (r *cronJobRepo) FindByCronJob(ctx context.Context, sourceName, namespace, 
 }
 
 const findLatestPerCronJobSQL = `
-SELECT DISTINCT ON (namespace, cronjob_name)
+SELECT DISTINCT ON (source_name, namespace, cronjob_name)
        id, source_name, namespace, cronjob_name, job_name, pod_name,
        started_at, completed_at, duration_seconds, succeeded, exit_code, sampled_at
 FROM cronjob_executions
 WHERE ($1 = '' OR source_name = $1)
   AND ($2 = '' OR namespace = $2)
-ORDER BY namespace, cronjob_name, sampled_at DESC`
+ORDER BY source_name, namespace, cronjob_name, sampled_at DESC`
 
 // FindLatestPerCronJob returns the most recent execution for each CronJob.
 // Pass an empty sourceName to include all sources; pass an empty namespace to include all namespaces.

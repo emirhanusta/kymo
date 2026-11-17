@@ -131,4 +131,12 @@ frontend            Angular web UI
 ```bash
 make test    # go test -race ./...
 make lint    # golangci-lint
+make test-db # repository integration tests against a throwaway TimescaleDB (needs Docker)
 ```
+
+The integration tests in `internal/repository/timescale` skip unless
+`KYMO_TEST_DSN` is set, so plain `go test ./...` stays fast. `make test-db`
+starts a disposable `timescale/timescaledb` container on port 55433, runs the
+tests against it and always removes the container. To use your own server, set
+`KYMO_TEST_DSN` to a DSN whose user may `CREATE DATABASE`; each run creates and
+drops its own `kymo_test_<random>` database and never touches any other.
