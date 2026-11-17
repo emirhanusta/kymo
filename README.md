@@ -1,5 +1,7 @@
 # KYMO
 
+[![CI](https://github.com/emirhanusta/kymo/actions/workflows/ci.yml/badge.svg)](https://github.com/emirhanusta/kymo/actions/workflows/ci.yml)
+
 A recorder for container lifecycles. KYMO watches Kubernetes clusters
 (Kubernetes-only for now), records every start, crash, OOM kill and resource sample in
 TimescaleDB, and turns that history into a stability score per container —
