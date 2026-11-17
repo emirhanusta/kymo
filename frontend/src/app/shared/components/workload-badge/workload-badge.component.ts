@@ -12,8 +12,6 @@ const STYLES: Record<string, BadgeStyle> = {
   Job:         { label: 'JOB',  classes: 'border-kymo-rule text-kymo-muted' },
   CronJob:     { label: 'CRON', classes: 'border-kymo-amber/50 text-kymo-amber' },
   ReplicaSet:  { label: 'RS',   classes: 'border-kymo-rule text-kymo-muted' },
-  Compose:     { label: 'COMPOSE', classes: 'border-kymo-running/40 text-kymo-running' },
-  Container:   { label: 'CTR',  classes: 'border-kymo-rule text-kymo-muted' },
   Pod:         { label: 'POD',  classes: 'border-kymo-rule text-kymo-faint' },
 };
 

@@ -12,17 +12,8 @@ const (
 
 // Source types.
 const (
-	SourceTypeDocker     = "docker"
 	SourceTypeKubernetes = "kubernetes"
 )
-
-// WorkloadCompose is the workload kind assigned to Docker containers that
-// belong to a Docker Compose project (com.docker.compose.project label).
-const WorkloadCompose = "Compose"
-
-// WorkloadContainer is the workload kind assigned to standalone Docker
-// containers (no Compose label); the workload is named after the container.
-const WorkloadContainer = "Container"
 
 // SourceSpec fully describes a collector source, wherever it was declared.
 type SourceSpec struct {
@@ -31,9 +22,6 @@ type SourceSpec struct {
 	Origin   string
 	Enabled  bool
 	ReadOnly bool
-
-	// Docker
-	Socket string
 
 	// Kubernetes
 	KubeconfigPath string

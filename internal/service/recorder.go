@@ -138,7 +138,6 @@ type RecorderService interface {
 
 // SourceSettings are the non-secret connection settings of a source.
 type SourceSettings struct {
-	Socket              string `json:"socket,omitempty"`
 	KubeconfigPath      string `json:"kubeconfig_path,omitempty"`
 	KubeContext         string `json:"kube_context,omitempty"`
 	KubeconfigUploaded  bool   `json:"kubeconfig_uploaded"`
@@ -147,9 +146,9 @@ type SourceSettings struct {
 
 // SourceStatus holds the configuration and live status of a collector source.
 type SourceStatus struct {
-	// Name is the human-readable source identifier (e.g. "local-docker").
+	// Name is the human-readable source identifier (e.g. "prod-k8s").
 	Name string `json:"name"`
-	// Type is the runtime type: "docker" or "kubernetes".
+	// Type is the runtime type; only "kubernetes" is supported.
 	Type string `json:"type"`
 	// Origin is "config" (config.yaml, locked) or "user" (created via the API).
 	Origin string `json:"origin"`
@@ -844,7 +843,6 @@ func (s *recorderService) ListSources(ctx context.Context) ([]SourceStatus, erro
 			LastError:      h.lastError,
 			ConnectedAt:    h.connectedAt,
 			Settings: SourceSettings{
-				Socket:              e.spec.Socket,
 				KubeconfigPath:      e.spec.KubeconfigPath,
 				KubeContext:         e.spec.KubeContext,
 				KubeconfigUploaded:  len(e.spec.Kubeconfig) > 0 || len(e.spec.KubeconfigEnc) > 0,

@@ -22,14 +22,14 @@
     </select>
 
     <select
-      aria-label="Filter by source"
+      aria-label="Filter by cluster"
       class="k-input cursor-pointer max-w-[14rem]"
       [value]="source()"
       (change)="setSource($any($event.target).value)"
     >
-      <option value="">All sources</option>
+      <option value="">All clusters</option>
       @for (s of sourceSvc.sources(); track s.name) {
-        <option [value]="s.name" [selected]="s.name === source()">{{ s.name }} ({{ s.type === 'kubernetes' ? 'k8s' : 'docker' }})</option>
+        <option [value]="s.name" [selected]="s.name === source()">{{ s.name }}</option>
       }
     </select>
   </app-page-header>
@@ -43,7 +43,7 @@
   } @else if (events().length === 0 && !error()) {
     <div class="k-panel">
       @if (hasFilters()) {
-        <app-empty-state icon="search" message="No events match your filters" hint="Try another event type or source.">
+        <app-empty-state icon="search" message="No events match your filters" hint="Try another event type or cluster.">
           <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" (click)="clearFilters()">Clear filters</button>
         </app-empty-state>
       } @else {
@@ -60,7 +60,7 @@
             <th>Container</th>
             <th class="hidden sm:table-cell">Pod</th>
             @if (showSourceColumn()) {
-              <th class="hidden md:table-cell">Source</th>
+              <th class="hidden md:table-cell">Cluster</th>
             }
             <th class="hidden lg:table-cell">Details</th>
           </tr>
@@ -88,9 +88,6 @@
                   [title]="ev.container_name || ev.container_id"
                   (click)="$event.stopPropagation()"
                 >{{ name(ev) }}</a>
-                @if (ev.runtime) {
-                  <div class="text-[11px] text-kymo-faint uppercase tracking-[0.06em]">{{ ev.runtime === 'kubernetes' ? 'k8s' : 'docker' }}</div>
-                }
               </td>
               <td class="px-4 py-2 text-xs text-kymo-muted hidden sm:table-cell truncate max-w-[16rem]" [title]="pod(ev)">{{ pod(ev) || '—' }}</td>
               @if (showSourceColumn()) {

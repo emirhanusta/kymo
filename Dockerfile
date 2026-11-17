@@ -35,8 +35,7 @@ FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata
 
-# Run as a non-root user for security. To read the Docker socket the container
-# must be given the socket's group (see group_add in docker-compose.yml).
+# Run as a non-root user for security.
 RUN addgroup -S kymo && adduser -S kymo -G kymo
 USER kymo
 

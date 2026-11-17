@@ -1,0 +1,69 @@
+<div class="space-y-4">
+  <app-page-header title="Issues">
+    <ng-container subtitle>
+      @if (!state.loaded()) {
+        Loading…
+      } @else if (issues().length > 0) {
+        <span class="text-kymo-danger font-medium">{{ issues().length }} open issue{{ issues().length === 1 ? '' : 's' }}</span>
+      } @else {
+        No open issues
+      }
+    </ng-container>
+    <label class="flex items-center gap-1.5 text-xs text-kymo-muted cursor-pointer h-[1.875rem]">
+      <input type="checkbox" [checked]="system()" (change)="system.set($any($event.target).checked)" />
+      Show system
+    </label>
+  </app-page-header>
+
+  @if (state.error()) {
+    <app-error-state message="Failed to load issues" (retry)="state.load()" />
+  }
+
+  @if (!state.loaded()) {
+    <app-skeleton [rows]="4" />
+  } @else if (issues().length === 0 && !state.error()) {
+    <div class="k-panel">
+      <app-empty-state
+        icon="check"
+        tone="success"
+        message="No open issues"
+        hint="Nothing is crash looping, OOM-killed, degraded or failing right now. KYMO keeps recording — this list updates as soon as something breaks."
+      />
+    </div>
+    @if (hiddenSystem() > 0) {
+      <p class="text-xs text-kymo-faint">{{ hiddenSystem() }} issue{{ hiddenSystem() === 1 ? '' : 's' }} in system workloads hidden</p>
+    }
+  } @else {
+    @for (g of groups(); track g.severity) {
+      <section class="k-panel overflow-hidden" [attr.aria-label]="g.label + ' issues'">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center gap-2">
+          <span class="k-led" [class]="g.severity === 'critical' ? 'bg-kymo-danger animate-pulse' : 'bg-kymo-amber'" aria-hidden="true"></span>
+          <h2 class="k-label">{{ g.label }}</h2>
+          <span class="text-xs text-kymo-faint tabular-nums">{{ g.items.length }}</span>
+        </div>
+        <ul class="divide-y divide-kymo-rule">
+          @for (i of g.items; track i.id) {
+            <li>
+              <a [routerLink]="['/workloads', i.workloadId]" class="px-4 py-3 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
+                <span class="k-led flex-none" [class]="ledClass(i)" aria-hidden="true"></span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-xs font-medium" [class]="reasonClass(i)">
+                    {{ i.reason }}
+                    @if (i.detail) { <span class="font-normal text-kymo-muted"> · {{ i.detail }}</span> }
+                  </p>
+                  <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber mt-0.5" [title]="i.name">{{ i.name }}</p>
+                  <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace || '—' }} · {{ i.source }}@if (i.isSystem) { · system}</p>
+                </div>
+                <app-workload-badge class="flex-none hidden sm:inline-flex" [kind]="i.workloadKind" />
+                <span class="text-xs text-kymo-faint flex-none w-24 text-right tabular-nums" title="Since">since {{ i.since | timeago }}</span>
+              </a>
+            </li>
+          }
+        </ul>
+      </section>
+    }
+    @if (hiddenSystem() > 0) {
+      <p class="text-xs text-kymo-faint">{{ hiddenSystem() }} issue{{ hiddenSystem() === 1 ? '' : 's' }} in system workloads hidden</p>
+    }
+  }
+</div>

@@ -1102,7 +1102,7 @@ type podMetricsResponse struct {
 //
 // CPU conversion: the metrics-server reports nanocores or milliCPU strings
 // (e.g. "125m" = 125 milliCPU). MilliValue() / 10 gives CPUPercent where 100 %
-// represents one full CPU core (matching Docker's convention).
+// represents one full CPU core.
 //
 // Memory: Value() returns bytes directly.
 //

@@ -3,7 +3,6 @@ package httphandler
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
@@ -21,7 +19,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Docker management endpoints
+// Container lookup helpers
 // ---------------------------------------------------------------------------
 
 // lookupContainer loads the container named by the :id path parameter and
@@ -49,56 +47,7 @@ func sourceFor(c *gin.Context, container *model.Container) string {
 	return container.SourceName
 }
 
-// dockerAction runs a Docker-only management operation against the container
-// named by :id, rejecting Kubernetes containers with 400.
-func (h *Handler) dockerAction(
-	c *gin.Context, verb, okMessage string,
-	op func(ctx context.Context, sourceName, containerID string) error,
-) {
-	container := h.lookupContainer(c)
-	if container == nil {
-		return
-	}
-	if h.guardReadOnly(c, sourceFor(c, container)) {
-		return
-	}
-	if container.Runtime != model.RuntimeDocker {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"success": false,
-			"message": verb + " is only supported for Docker containers; use restart to recreate a Kubernetes pod",
-		})
-		return
-	}
-	if err := op(c.Request.Context(), sourceFor(c, container), container.ID); err != nil {
-		h.log.Error(verb+" container failed", zap.String("id", container.ID), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": okMessage})
-}
-
-// StartContainer starts a stopped Docker container.
-//
-//	POST /api/v1/containers/:id/start
-func (h *Handler) StartContainer(c *gin.Context) {
-	h.dockerAction(c, "start", "container started", h.mgmt.StartContainer)
-}
-
-// StopContainer stops a running Docker container.
-//
-//	POST /api/v1/containers/:id/stop
-func (h *Handler) StopContainer(c *gin.Context) {
-	h.dockerAction(c, "stop", "container stopped", h.mgmt.StopContainer)
-}
-
-// KillContainer force-kills a Docker container with SIGKILL.
-//
-//	DELETE /api/v1/containers/:id/kill
-func (h *Handler) KillContainer(c *gin.Context) {
-	h.dockerAction(c, "kill", "container killed", h.mgmt.KillContainer)
-}
-
-// RestartContainer restarts a Docker container or deletes a Kubernetes pod
+// RestartContainer deletes a Kubernetes pod
 // (its controller will recreate it). Runtime and source are taken from the
 // stored container record; ?source= overrides the source.
 //
@@ -114,13 +63,6 @@ func (h *Handler) RestartContainer(c *gin.Context) {
 	}
 
 	switch container.Runtime {
-	case model.RuntimeDocker:
-		if err := h.mgmt.RestartContainer(c.Request.Context(), source, container.ID); err != nil {
-			h.log.Error("restart container failed", zap.String("id", container.ID), zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"success": true, "message": "container restarted"})
 	case model.RuntimeKubernetes:
 		ns, pod, _, parseErr := parseK8sID(container.ID)
 		if parseErr != nil {
@@ -162,28 +104,6 @@ func (h *Handler) GetContainerLogs(c *gin.Context) {
 	source := sourceFor(c, container)
 
 	switch container.Runtime {
-	case model.RuntimeDocker:
-		reader, tty, err := h.mgmt.GetContainerLogs(c.Request.Context(), source, container.ID, tail, follow)
-		if err != nil {
-			h.log.Error("get container logs failed", zap.String("id", container.ID), zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if tty {
-			// TTY containers emit a raw stream; treat it like plain text.
-			if follow {
-				h.sseK8sLogs(c, reader)
-			} else {
-				h.plainK8sLogs(c, reader)
-			}
-			return
-		}
-		if follow {
-			h.sseDockerLogs(c, reader)
-		} else {
-			h.plainDockerLogs(c, reader)
-		}
-
 	case model.RuntimeKubernetes:
 		ns, pod, ctr, parseErr := parseK8sID(container.ID)
 		if parseErr != nil {
@@ -212,7 +132,7 @@ func (h *Handler) GetContainerLogs(c *gin.Context) {
 // ---------------------------------------------------------------------------
 
 // ListNamespaces returns the Kubernetes namespaces reachable via the given source.
-// Falls back to ["local"] when only Docker sources are configured.
+// Falls back to ["local"] when no Kubernetes source is registered.
 //
 // Query parameters:
 //   - source (optional): target collector source name.
@@ -463,38 +383,6 @@ func parseK8sID(id string) (namespace, pod, container string, err error) {
 	return parts[0], parts[1], parts[2], nil
 }
 
-// sseDockerLogs demultiplexes Docker's multiplexed log stream and sends each
-// line as an SSE data event. Blocks until the stream ends or client disconnects.
-func (h *Handler) sseDockerLogs(c *gin.Context, reader io.ReadCloser) {
-	defer reader.Close()
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("X-Accel-Buffering", "no")
-
-	pr, pw := io.Pipe()
-	go func() {
-		defer pw.Close()
-		stdcopy.StdCopy(pw, pw, reader) //nolint:errcheck
-	}()
-
-	flusher, _ := c.Writer.(http.Flusher)
-	scanner := bufio.NewScanner(pr)
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-
-	for scanner.Scan() {
-		select {
-		case <-c.Request.Context().Done():
-			pr.CloseWithError(fmt.Errorf("client disconnected"))
-			return
-		default:
-		}
-		fmt.Fprintf(c.Writer, "data: %s\n\n", scanner.Text())
-		if flusher != nil {
-			flusher.Flush()
-		}
-	}
-}
-
 // sseK8sLogs streams Kubernetes pod logs (plain text) as SSE.
 func (h *Handler) sseK8sLogs(c *gin.Context, reader io.ReadCloser) {
 	defer reader.Close()
@@ -517,14 +405,6 @@ func (h *Handler) sseK8sLogs(c *gin.Context, reader io.ReadCloser) {
 			flusher.Flush()
 		}
 	}
-}
-
-// plainDockerLogs demultiplexes Docker logs and returns them as plain text.
-func (h *Handler) plainDockerLogs(c *gin.Context, reader io.ReadCloser) {
-	defer reader.Close()
-	var buf bytes.Buffer
-	stdcopy.StdCopy(&buf, &buf, reader) //nolint:errcheck
-	c.Data(http.StatusOK, "text/plain; charset=utf-8", buf.Bytes())
 }
 
 // plainK8sLogs returns Kubernetes pod logs as plain text.

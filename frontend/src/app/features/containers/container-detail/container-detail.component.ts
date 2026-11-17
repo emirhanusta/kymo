@@ -25,7 +25,6 @@ import { StabilityGaugeComponent } from '../../../shared/components/stability-ga
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { LogViewerComponent } from '../../../shared/components/log-viewer/log-viewer.component';
 import { DeleteModalComponent } from '../../../shared/components/delete-modal/delete-modal.component';
-import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { ResourceChartsComponent } from '../../../shared/components/resource-charts/resource-charts.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
@@ -53,7 +52,7 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   imports: [
     RouterLink, DecimalPipe,
     MetricCardComponent, StatusBadgeComponent, WorkloadBadgeComponent, StabilityGaugeComponent,
-    TimeagoPipe, LogViewerComponent, DeleteModalComponent, ConfirmDialogComponent,
+    TimeagoPipe, LogViewerComponent, DeleteModalComponent,
     ResourceChartsComponent, EmptyStateComponent, ErrorStateComponent, PageHeaderComponent, ScoreClassPipe,
     ReadOnlyTagComponent,
   ],
@@ -93,8 +92,7 @@ export class ContainerDetailComponent {
   actionBusy      = signal(false);
   showLogViewer   = signal(false);
   showDeleteModal = signal(false);
-  confirmKill     = signal(false);
-  private modalOpen = computed(() => this.showLogViewer() || this.showDeleteModal() || this.confirmKill());
+  private modalOpen = computed(() => this.showLogViewer() || this.showDeleteModal());
 
   private mainSub?: Subscription;
   private resSub?: Subscription;
@@ -145,11 +143,8 @@ export class ContainerDetailComponent {
     ];
   });
 
-  /** Read-only sources: hide start/stop/restart/kill; logs and archive/ignore stay available. */
+  /** Read-only clusters: hide restart pod; logs and archive/ignore stay available. */
   readOnly = computed(() => this.sources.isReadOnly(this.container()?.source_name));
-
-  isDocker = computed(() => this.container()?.runtime === 'docker');
-  isK8s    = computed(() => this.container()?.runtime === 'kubernetes');
 
   podSiblings = computed(() => {
     const detail = this.podDetail();
@@ -163,20 +158,15 @@ export class ContainerDetailComponent {
     ['CronJob', 'Job'].includes(this.container()?.workload_kind ?? '')
   );
 
-  private status = computed(() => this.container()?.current_status ?? '');
-  canStart   = computed(() => ['stopped', 'unknown'].includes(this.status()));
-  canStop    = computed(() => ['running', 'paused', 'crashing'].includes(this.status()));
-  canRestart = computed(() => ['running', 'paused'].includes(this.status()));
-  canKill    = computed(() => ['running', 'paused', 'crashing'].includes(this.status()));
-
   /** Breadcrumb goes back to the owning workload when known, else the workload list. */
   backPath  = computed<string | unknown[]>(() => {
     const id = this.container()?.workload_id;
-    return id ? ['/workloads', id] : '/workloads';
+    return id ? ['/workloads', id] : this.isJobKind() ? '/jobs' : '/workloads';
   });
+  private isJobKind = computed(() => this.isCronJobOrJob());
   backLabel = computed(() => {
     const c = this.container();
-    return c?.workload_id && c.workload_name ? c.workload_name : 'Workloads';
+    return c?.workload_id && c.workload_name ? c.workload_name : this.isJobKind() ? 'Jobs' : 'Workloads';
   });
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
@@ -230,7 +220,6 @@ export class ContainerDetailComponent {
     this.podDetail.set(null);
     this.showLogViewer.set(false);
     this.showDeleteModal.set(false);
-    this.confirmKill.set(false);
   }
 
   retry(): void {
@@ -255,7 +244,7 @@ export class ContainerDetailComponent {
         this.loadError.set(null);
         this.loading.set(false);
         this.refreshSvc.markUpdated();
-        if (container?.runtime === 'kubernetes') this.loadPod(container);
+        this.loadPod(container);
       },
       error: (err: HttpErrorResponse) => {
         this.loading.set(false);
@@ -303,22 +292,8 @@ export class ContainerDetailComponent {
 
   // ── actions ───────────────────────────────────────────────────────────────
 
-  startContainer(): void {
-    this.runAction(() => this.svc.startContainer(this.id()), 'Container started', 'Failed to start container');
-  }
-
-  stopContainer(): void {
-    this.runAction(() => this.svc.stopContainer(this.id()), 'Container stopped', 'Failed to stop container');
-  }
-
   restartContainer(): void {
-    const label = this.isK8s() ? 'Pod deleted — Kubernetes will recreate it' : 'Container restarted';
-    this.runAction(() => this.svc.restartContainer(this.id()), label, 'Failed to restart container');
-  }
-
-  onKillConfirmed(): void {
-    this.confirmKill.set(false);
-    this.runAction(() => this.svc.killContainer(this.id()), 'Container killed', 'Failed to kill container');
+    this.runAction(() => this.svc.restartContainer(this.id()), 'Pod deleted — Kubernetes will recreate it', 'Failed to restart pod');
   }
 
   openLogs(): void { this.showLogViewer.set(true); }
@@ -330,7 +305,7 @@ export class ContainerDetailComponent {
     if (action === 'cancel') return;
 
     const id = this.id();
-    const back = this.backPath;
+    const back = this.backPath();
     const obs = action === 'soft'
       ? this.svc.softDeleteContainer(id)
       : this.svc.ignoreContainer(id);
@@ -339,7 +314,7 @@ export class ContainerDetailComponent {
     obs.subscribe({
       next: res => {
         this.toast.success(res?.message || successMsg);
-        this.router.navigate([back]);
+        this.router.navigateByUrl(this.router.createUrlTree(Array.isArray(back) ? back : [back]));
       },
       error: err => this.toast.apiError(err, 'Operation failed'),
     });

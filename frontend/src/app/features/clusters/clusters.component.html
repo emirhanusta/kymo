@@ -1,38 +1,38 @@
 <div class="space-y-4">
-  <app-page-header title="Sources">
+  <app-page-header title="Clusters">
     <ng-container subtitle>
       @if (!state.loaded()) {
         Loading…
       } @else if (counts().total > 0) {
-        {{ counts().total }} source{{ counts().total !== 1 ? 's' : '' }} · {{ counts().connected }} connected
+        {{ counts().total }} cluster{{ counts().total !== 1 ? 's' : '' }} · {{ counts().connected }} connected
         @if (counts().error > 0) {
           · <span class="text-kymo-danger">{{ counts().error }} failing</span>
         }
       } @else {
-        No sources
+        No clusters
       }
     </ng-container>
     @if (meta()?.config_file) {
-      <button type="button" class="k-btn" [disabled]="reloading()" (click)="reloadConfig()" title="Re-read config.yaml and apply its sources now">
+      <button type="button" class="k-btn" [disabled]="reloading()" (click)="reloadConfig()" title="Re-read config.yaml and apply its clusters now">
         {{ reloading() ? 'Reloading…' : 'Reload config.yaml' }}
       </button>
     }
     <button type="button" class="k-btn k-btn-primary" (click)="openAdd()">
       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M12 5v14M5 12h14" /></svg>
-      Add source
+      Add cluster
     </button>
   </app-page-header>
 
   @if (state.sourcesError()) {
-    <app-error-state message="Failed to load sources" (retry)="state.loadSources()" />
+    <app-error-state message="Failed to load clusters" (retry)="state.loadSources()" />
   }
 
   @if (!state.loaded()) {
     <app-skeleton [rows]="3" />
   } @else if (sources().length === 0 && !state.sourcesError()) {
     <div class="k-panel">
-      <app-empty-state icon="box" message="No sources yet" hint="Add a Docker engine or a Kubernetes cluster to start recording container lifecycles.">
-        <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" (click)="openAdd()">Add source</button>
+      <app-empty-state icon="box" message="No clusters yet" hint="Add a Kubernetes cluster to start recording workload and pod lifecycles.">
+        <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" (click)="openAdd()">Add cluster</button>
       </app-empty-state>
     </div>
   } @else if (sources().length > 0) {
@@ -40,9 +40,9 @@
       <table class="k-table">
         <thead>
           <tr>
-            <th>Source</th>
+            <th>Cluster</th>
             <th class="hidden md:table-cell">Connection</th>
-            <th class="!text-right">Containers</th>
+            <th class="!text-right">Pods</th>
             <th class="hidden lg:table-cell">Origin</th>
             <th><span class="sr-only">Actions</span></th>
           </tr>
@@ -55,7 +55,6 @@
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="k-led" [class]="dotClass(src)" aria-hidden="true"></span>
                   <span class="font-medium truncate max-w-[16rem]" [class]="src.enabled ? 'text-kymo-ink' : 'text-kymo-muted'" [title]="src.name">{{ src.name }}</span>
-                  <span class="k-label !text-[10px] px-1.5 border border-kymo-rule flex-none">{{ src.type === 'kubernetes' ? 'k8s' : 'docker' }}</span>
                   @if (src.read_only) {
                     <app-read-only-tag />
                   }
@@ -93,7 +92,7 @@
                     <span class="text-kymo-faint"> / </span>
                     <span class="text-kymo-ink">{{ src.container_count }}</span>
                   </a>
-                  <div class="text-[10px] text-kymo-faint">running / total containers</div>
+                  <div class="text-[10px] text-kymo-faint">running / total pods</div>
                 } @else {
                   <span class="text-xs text-kymo-faint tabular-nums">0</span>
                 }
@@ -133,7 +132,7 @@
                       class="k-btn k-btn-sm k-btn-icon text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50"
                       [disabled]="busyName() === src.name"
                       [attr.aria-label]="'Delete ' + src.name"
-                      title="Delete source"
+                      title="Delete cluster"
                       (click)="askDelete(src)"
                     >
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -149,23 +148,23 @@
       </table>
     </div>
     <p class="text-[11px] text-kymo-faint">
-      Sources from <span class="text-kymo-muted">config.yaml</span> are applied automatically when the file changes.
+      Clusters from <span class="text-kymo-muted">config.yaml</span> are applied automatically when the file changes.
       @if (meta()?.config_file; as file) {
         <span class="font-mono text-kymo-muted break-all">{{ file }}</span>
         @if (meta()?.config_sync?.reloaded_at; as at) {
           · last synced {{ at | timeago }}
         }
       }
-      Sources added in the UI are stored in the database and survive restarts.
+      Clusters added in the UI are stored in the database and survive restarts.
     </p>
     @if (meta()?.config_sync?.error; as err) {
-      <p class="text-[11px] text-kymo-danger break-words">config.yaml is invalid, keeping current sources: {{ err }}</p>
+      <p class="text-[11px] text-kymo-danger break-words">config.yaml is invalid, keeping current clusters: {{ err }}</p>
     }
   }
 </div>
 
 @if (wizard()) {
-  <app-source-wizard
+  <app-cluster-wizard
     [source]="editSource()"
     (closed)="wizard.set(null)"
     (saved)="onSaved()"
@@ -174,9 +173,9 @@
 
 @if (deleteTarget(); as src) {
   <app-confirm-dialog
-    [title]="'Delete source ' + src.name + '?'"
+    [title]="'Delete cluster ' + src.name + '?'"
     [message]="deleteMessage(src)"
-    [confirmLabel]="purge() ? 'Delete with history' : 'Delete source'"
+    [confirmLabel]="purge() ? 'Delete with history' : 'Delete cluster'"
     (confirmed)="confirmDelete()"
     (cancelled)="deleteTarget.set(null)"
   >
@@ -184,7 +183,7 @@
       <input type="checkbox" class="mt-0.5" [checked]="purge()" (change)="purge.set($any($event.target).checked)" />
       <span>
         Also delete recorded history
-        <span class="block text-kymo-faint mt-0.5">Permanently removes this source's containers, lifecycle events, scores and resource samples. This can't be undone.</span>
+        <span class="block text-kymo-faint mt-0.5">Permanently removes this cluster's workloads, lifecycle events, scores and resource samples. This can't be undone.</span>
       </span>
     </label>
   </app-confirm-dialog>

@@ -14,10 +14,12 @@ import { STATUS_DOT_CLASS, STATUS_TEXT_CLASS, StatusKey, normalizeStatus } from 
 })
 export class StatusBadgeComponent {
   @Input() status = '';
+  /** Overrides the label, e.g. a crash reason like "OOMKilled". */
+  @Input() text = '';
   @Input({ transform: booleanAttribute }) compact = false;
 
   get normalized(): StatusKey { return normalizeStatus(this.status); }
-  get label(): string { return this.status || 'unknown'; }
+  get label(): string { return this.text || this.status || 'unknown'; }
   get dotClass(): string { return STATUS_DOT_CLASS[this.normalized]; }
   get textClass(): string { return STATUS_TEXT_CLASS[this.normalized]; }
 }

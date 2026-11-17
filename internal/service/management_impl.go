@@ -4,12 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
 	"sync"
 	"time"
 
-	containertypes "github.com/docker/docker/api/types/container"
-	dockerclient "github.com/docker/docker/client"
 	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,32 +18,19 @@ import (
 )
 
 type managementService struct {
-	mu            sync.RWMutex
-	dockerClients map[string]*dockerclient.Client // keyed by source name
-	dockerOrder   []string                        // registration order (fallback choice)
-	k8sClients    map[string]kubernetes.Interface // keyed by source name
-	k8sOrder      []string
-	log           *zap.Logger
+	mu         sync.RWMutex
+	k8sClients map[string]kubernetes.Interface // keyed by source name
+	k8sOrder   []string
+	log        *zap.Logger
 }
 
 // NewManagementService constructs an empty ManagementService. Clients are
 // added with RegisterSource as sources are configured or created at runtime.
 func NewManagementService(log *zap.Logger) ManagementService {
 	return &managementService{
-		dockerClients: make(map[string]*dockerclient.Client),
-		k8sClients:    make(map[string]kubernetes.Interface),
-		log:           log,
+		k8sClients: make(map[string]kubernetes.Interface),
+		log:        log,
 	}
-}
-
-// NewDockerClient creates a Docker API client for socket ("" = DOCKER_HOST /
-// default socket) with API-version negotiation.
-func NewDockerClient(socket string) (*dockerclient.Client, error) {
-	opts := []dockerclient.Opt{dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation()}
-	if socket != "" {
-		opts = append(opts, dockerclient.WithHost(socket))
-	}
-	return dockerclient.NewClientWithOpts(opts...)
 }
 
 // RegisterSource builds and stores the management client for spec, replacing
@@ -54,15 +38,6 @@ func NewDockerClient(socket string) (*dockerclient.Client, error) {
 func (s *managementService) RegisterSource(spec model.SourceSpec) error {
 	s.UnregisterSource(spec.Name)
 	switch spec.Type {
-	case model.SourceTypeDocker:
-		cli, err := NewDockerClient(spec.Socket)
-		if err != nil {
-			return err
-		}
-		s.mu.Lock()
-		s.dockerClients[spec.Name] = cli
-		s.dockerOrder = append(s.dockerOrder, spec.Name)
-		s.mu.Unlock()
 	case model.SourceTypeKubernetes:
 		cli, _, err := kube.Clientset(spec.KubeconfigPath, spec.Kubeconfig, spec.KubeContext)
 		if err != nil {
@@ -82,11 +57,6 @@ func (s *managementService) RegisterSource(spec model.SourceSpec) error {
 func (s *managementService) UnregisterSource(name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if cli, ok := s.dockerClients[name]; ok {
-		_ = cli.Close()
-		delete(s.dockerClients, name)
-		s.dockerOrder = without(s.dockerOrder, name)
-	}
 	if _, ok := s.k8sClients[name]; ok {
 		delete(s.k8sClients, name)
 		s.k8sOrder = without(s.k8sOrder, name)
@@ -110,23 +80,6 @@ func (s *managementService) ResolveK8sSource(sourceName string) (string, error) 
 	return "", fmt.Errorf("kubernetes client not available")
 }
 
-// getDockerClient returns the Docker client for the given source name, or the
-// first registered one when sourceName is empty.
-func (s *managementService) getDockerClient(sourceName string) (*dockerclient.Client, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if sourceName != "" {
-		if cli, ok := s.dockerClients[sourceName]; ok {
-			return cli, nil
-		}
-		return nil, fmt.Errorf("no docker client configured for source %q", sourceName)
-	}
-	if len(s.dockerOrder) > 0 {
-		return s.dockerClients[s.dockerOrder[0]], nil
-	}
-	return nil, fmt.Errorf("docker client not available")
-}
-
 // getK8sClient returns the Kubernetes client for the given source name, or
 // the first registered cluster when sourceName is empty.
 func (s *managementService) getK8sClient(sourceName string) (kubernetes.Interface, error) {
@@ -137,61 +90,6 @@ func (s *managementService) getK8sClient(sourceName string) (kubernetes.Interfac
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.k8sClients[name], nil
-}
-
-// ---------------------------------------------------------------------------
-// Docker operations
-// ---------------------------------------------------------------------------
-
-func (s *managementService) StartContainer(ctx context.Context, sourceName, containerID string) error {
-	cli, err := s.getDockerClient(sourceName)
-	if err != nil {
-		return err
-	}
-	return cli.ContainerStart(ctx, containerID, containertypes.StartOptions{})
-}
-
-func (s *managementService) StopContainer(ctx context.Context, sourceName, containerID string) error {
-	cli, err := s.getDockerClient(sourceName)
-	if err != nil {
-		return err
-	}
-	return cli.ContainerStop(ctx, containerID, containertypes.StopOptions{})
-}
-
-func (s *managementService) RestartContainer(ctx context.Context, sourceName, containerID string) error {
-	cli, err := s.getDockerClient(sourceName)
-	if err != nil {
-		return err
-	}
-	return cli.ContainerRestart(ctx, containerID, containertypes.StopOptions{})
-}
-
-func (s *managementService) KillContainer(ctx context.Context, sourceName, containerID string) error {
-	cli, err := s.getDockerClient(sourceName)
-	if err != nil {
-		return err
-	}
-	return cli.ContainerKill(ctx, containerID, "SIGKILL")
-}
-
-func (s *managementService) GetContainerLogs(ctx context.Context, sourceName, containerID string, tail int, follow bool) (io.ReadCloser, bool, error) {
-	cli, err := s.getDockerClient(sourceName)
-	if err != nil {
-		return nil, false, err
-	}
-	// Containers created with a TTY produce a raw (non-multiplexed) stream.
-	tty := false
-	if info, err := cli.ContainerInspect(ctx, containerID); err == nil && info.Config != nil {
-		tty = info.Config.Tty
-	}
-	rc, err := cli.ContainerLogs(ctx, containerID, containertypes.LogsOptions{
-		ShowStdout: true,
-		ShowStderr: true,
-		Tail:       strconv.Itoa(tail),
-		Follow:     follow,
-	})
-	return rc, tty, err
 }
 
 // ---------------------------------------------------------------------------

@@ -1,21 +1,21 @@
 <div class="flex flex-col gap-6">
   <app-page-header title="Overview">
     <ng-container subtitle>
-      {{ sourceCards().length }} source{{ sourceCards().length !== 1 ? 's' : '' }}
-      @if (workloads().length > 0) {
-        · {{ workloads().length }} workload{{ workloads().length !== 1 ? 's' : '' }}
+      {{ clusterCards().length }} cluster{{ clusterCards().length !== 1 ? 's' : '' }}
+      @if (workloadCount() > 0) {
+        · {{ workloadCount() }} workload{{ workloadCount() !== 1 ? 's' : '' }}
       }
-      @if (attention().length > 0) {
-        · <span class="text-kymo-danger font-medium">{{ attention().length }} need{{ attention().length === 1 ? 's' : '' }} attention</span>
+      @if (issues().length > 0) {
+        · <span class="text-kymo-danger font-medium">{{ issues().length }} open issue{{ issues().length === 1 ? '' : 's' }}</span>
       }
     </ng-container>
   </app-page-header>
 
-  @if (error()) {
-    <app-error-state message="Failed to load overview data" (retry)="loadData()" />
+  @if (state.error()) {
+    <app-error-state message="Failed to load overview data" (retry)="state.load()" />
   }
 
-  @if (loading()) {
+  @if (!state.loaded()) {
     <app-skeleton variant="cards" [rows]="3" />
     <app-skeleton [rows]="5" />
   } @else {
@@ -23,20 +23,20 @@
     <!-- Summary strip -->
     <div class="k-panel grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-kymo-rule">
       <div class="px-4 py-3">
-        <div class="k-label">Sources</div>
-        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ sourceCards().length }}</div>
+        <div class="k-label">Clusters</div>
+        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ clusterCards().length }}</div>
       </div>
       <div class="px-4 py-3">
         <div class="k-label">Workloads</div>
-        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ workloads().length }}</div>
+        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ workloadCount() }}</div>
       </div>
-      <div class="px-4 py-3" title="Running of active pods and containers">
-        <div class="k-label">Running pods</div>
+      <div class="px-4 py-3" title="Ready of active pods">
+        <div class="k-label">Ready pods</div>
         <div class="mt-1 text-2xl font-medium tabular-nums" [class]="runningPods() > 0 ? 'text-kymo-running' : 'text-kymo-muted'">{{ runningPods() }}<span class="text-sm text-kymo-faint"> / {{ totalPods() }}</span></div>
       </div>
       <div class="px-4 py-3">
-        <div class="k-label">Need attention</div>
-        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="attention().length > 0 ? 'text-kymo-danger' : 'text-kymo-muted'">{{ attention().length }}</div>
+        <div class="k-label">Open issues</div>
+        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="issues().length > 0 ? 'text-kymo-danger' : 'text-kymo-muted'">{{ issues().length }}</div>
       </div>
       <div class="px-4 py-3">
         <div class="k-label">Avg stability</div>
@@ -44,35 +44,34 @@
       </div>
     </div>
 
-    <!-- Needs attention -->
-    <section class="k-panel overflow-hidden flex flex-col" aria-labelledby="dash-attn-title">
+    <!-- Top issues -->
+    <section class="k-panel overflow-hidden flex flex-col" aria-labelledby="dash-issues-title">
       <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between">
-        <h2 id="dash-attn-title" class="k-label flex items-center gap-2">
-          <span class="k-led" [class]="attention().length ? 'bg-kymo-danger animate-pulse' : 'bg-kymo-running'"></span>
-          Needs attention
-          <span class="normal-case tracking-normal text-kymo-faint">crashing or score below {{ attentionScore }}</span>
+        <h2 id="dash-issues-title" class="k-label flex items-center gap-2">
+          <span class="k-led" [class]="issues().length ? 'bg-kymo-danger animate-pulse' : 'bg-kymo-running'"></span>
+          Top issues
         </h2>
-        @if (attention().length > attentionShown().length) {
-          <span class="text-xs text-kymo-faint tabular-nums">worst {{ attentionShown().length }} of {{ attention().length }}</span>
+        @if (issues().length > topIssues().length) {
+          <a routerLink="/issues" class="text-xs text-kymo-amber hover:underline underline-offset-4 tabular-nums">all {{ issues().length }} →</a>
+        } @else if (issues().length > 0) {
+          <a routerLink="/issues" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4">Issues →</a>
         }
       </div>
-      @if (attention().length === 0) {
-        <app-empty-state icon="check" tone="success" [compact]="true" message="All systems nominal" hint="No crashing or unstable workloads." />
+      @if (issues().length === 0) {
+        <app-empty-state icon="check" tone="success" [compact]="true" message="No open issues" hint="Nothing is crash looping, OOM-killed, degraded or failing." />
       } @else {
         <ul class="divide-y divide-kymo-rule">
-          @for (w of attentionShown(); track w.id) {
+          @for (i of topIssues(); track i.id) {
             <li>
-              <a [routerLink]="['/workloads', w.id]" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
-                <span class="k-led flex-none" [class]="w.status === 'crashing' ? 'bg-kymo-danger' : 'bg-kymo-amber'" aria-hidden="true"></span>
-                <app-workload-badge class="flex-none" [kind]="w.kind" />
+              <a [routerLink]="['/workloads', i.workloadId]" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
+                <span class="k-led flex-none" [class]="i.severity === 'critical' ? 'bg-kymo-danger' : 'bg-kymo-amber'" aria-hidden="true"></span>
+                <app-workload-badge class="flex-none" [kind]="i.workloadKind" />
                 <div class="flex-1 min-w-0">
-                  <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="w.name">{{ w.name }}</p>
-                  <p class="text-[11px] text-kymo-faint truncate">{{ w.namespace ? w.namespace + ' · ' : '' }}{{ w.source_name }}</p>
+                  <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="i.name">{{ i.name }}</p>
+                  <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace ? i.namespace + ' · ' : '' }}{{ i.source }}</p>
                 </div>
-                <span class="text-xs tabular-nums flex-none hidden sm:inline" [class]="w.crash_count > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ w.crash_count }} crash{{ w.crash_count === 1 ? '' : 'es' }}</span>
-                <span class="text-xs tabular-nums flex-none hidden sm:inline" [class]="w.oom_count > 0 ? 'text-kymo-amber' : 'text-kymo-faint'">{{ w.oom_count }} OOM</span>
-                <span class="flex-none hidden md:inline"><app-status-badge [status]="w.status" /></span>
-                <span class="text-sm font-medium tabular-nums w-8 text-right flex-none" [class]="w.score | scoreClass" title="Stability score">{{ formatScore(w.score) }}</span>
+                <span class="text-xs flex-none" [class]="issueReasonClass(i)">{{ i.reason }}</span>
+                <span class="text-xs text-kymo-faint flex-none w-16 text-right tabular-nums hidden sm:inline">{{ i.since | timeago }}</span>
               </a>
             </li>
           }
@@ -80,17 +79,17 @@
       }
     </section>
 
-    <!-- Sources -->
-    @if (sourceCards().length > 0) {
+    <!-- Clusters -->
+    @if (clusterCards().length > 0) {
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full">
-        @for (card of sourceCards(); track card.name; let i = $index) {
+        @for (card of clusterCards(); track card.name; let i = $index) {
           <button
             type="button"
             class="k-paper text-left border flex flex-col transition-colors hover:border-kymo-amber focus:outline-none focus-visible:outline-1 focus-visible:outline-kymo-amber"
-            [class]="card.source?.status === 'error' || card.attention > 0 ? 'border-kymo-danger/60' : 'border-kymo-rule'"
+            [class]="card.source?.status === 'error' || card.issues > 0 ? 'border-kymo-danger/60' : 'border-kymo-rule'"
             [title]="'Show workloads of ' + card.name"
-            [attr.aria-label]="'Source ' + card.name + ', ' + card.workloads + ' workloads, ' + card.running + ' of ' + card.total + ' pods running. Show workloads'"
-            (click)="selectSource(card)"
+            [attr.aria-label]="'Cluster ' + card.name + ', ' + card.workloads + ' workloads, ' + card.running + ' of ' + card.total + ' pods ready, ' + card.issues + ' open issues. Show workloads'"
+            (click)="selectCluster(card)"
           >
             <div class="flex items-center gap-2 px-3 py-2 border-b border-kymo-rule bg-kymo-panel">
               <span class="k-label text-kymo-faint tabular-nums">{{ channelNo(i) }}</span>
@@ -100,7 +99,6 @@
                 <span class="k-led bg-kymo-unknown"></span>
               }
               <span class="text-sm font-medium text-kymo-ink truncate flex-1 min-w-0" [title]="card.name">{{ card.name }}</span>
-              <span class="k-label px-1.5 border border-kymo-rule flex-none">{{ card.type === 'kubernetes' ? 'k8s' : 'docker' }}</span>
             </div>
 
             <div class="px-3 py-3 space-y-3">
@@ -117,12 +115,12 @@
                   <div class="text-xl font-medium text-kymo-ink leading-tight">{{ card.workloads }}</div>
                 </div>
                 <div>
-                  <div class="k-label">Pods</div>
+                  <div class="k-label">Ready</div>
                   <div class="text-xl font-medium leading-tight" [class]="card.running > 0 ? 'text-kymo-running' : 'text-kymo-muted'">{{ card.running }}<span class="text-xs text-kymo-faint"> / {{ card.total }}</span></div>
                 </div>
                 <div>
-                  <div class="k-label">Attention</div>
-                  <div class="text-xl font-medium leading-tight" [class]="card.attention > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ card.attention }}</div>
+                  <div class="k-label">Issues</div>
+                  <div class="text-xl font-medium leading-tight" [class]="card.issues > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ card.issues }}</div>
                 </div>
               </div>
               <div>
@@ -138,10 +136,10 @@
           </button>
         }
       </div>
-    } @else if (!error()) {
+    } @else if (!state.error()) {
       <div class="k-panel">
-        <app-empty-state icon="box" message="No sources configured" hint="Add a Docker engine or Kubernetes cluster to start recording.">
-          <a routerLink="/sources" [queryParams]="{ add: 1 }" class="k-btn k-btn-primary k-btn-sm mt-4">Add a source</a>
+        <app-empty-state icon="box" message="No clusters configured" hint="Add a Kubernetes cluster to start recording.">
+          <a routerLink="/clusters" [queryParams]="{ add: 1 }" class="k-btn k-btn-primary k-btn-sm mt-4">Add a cluster</a>
         </app-empty-state>
       </div>
     }

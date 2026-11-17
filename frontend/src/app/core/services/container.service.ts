@@ -27,7 +27,6 @@ export class ContainerService {
       .set('limit', query.limit.toString())
       .set('sort', query.sort ?? 'last_seen_at')
       .set('order', query.order ?? 'desc');
-    if (query.runtime) params = params.set('runtime', query.runtime);
     if (query.source) params = params.set('source', query.source);
     if (query.q?.trim()) params = params.set('q', query.q.trim());
     if (query.status) params = params.set('status', query.status);
@@ -70,21 +69,9 @@ export class ContainerService {
 
   // --- Management ---
 
-  startContainer(id: string): Observable<ActionResult> {
-    return this.http.post<ActionResult>(`${this.base}/containers/${encodeURIComponent(id)}/start`, {});
-  }
-
-  stopContainer(id: string): Observable<ActionResult> {
-    return this.http.post<ActionResult>(`${this.base}/containers/${encodeURIComponent(id)}/stop`, {});
-  }
-
-  /** The backend resolves the container's own source; no `source` param needed. */
+  /** Deletes the pod (Kubernetes recreates it). The backend resolves the container's own cluster. */
   restartContainer(id: string): Observable<ActionResult> {
     return this.http.post<ActionResult>(`${this.base}/containers/${encodeURIComponent(id)}/restart`, {});
-  }
-
-  killContainer(id: string): Observable<ActionResult> {
-    return this.http.delete<ActionResult>(`${this.base}/containers/${encodeURIComponent(id)}/kill`);
   }
 
   getContainerLogs(id: string, tail = 200): Observable<string> {

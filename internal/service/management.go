@@ -1,5 +1,4 @@
-// Package service — management operations for Docker containers and Kubernetes
-// workloads. This file defines the ManagementService interface; the concrete
+// Package service — management operations for Kubernetes workloads. This file defines the ManagementService interface; the concrete
 // implementation lives in management_impl.go.
 package service
 
@@ -10,10 +9,9 @@ import (
 	"github.com/emirhanusta/kymo/internal/model"
 )
 
-// ManagementService exposes runtime-level control operations for containers
-// and Kubernetes deployments. All methods that target Docker accept a Docker
-// container ID; all methods that target Kubernetes accept the individual
-// components of a container ID (namespace / pod / container).
+// ManagementService exposes control operations for Kubernetes pods and
+// deployments. Methods accept the individual components of a container ID
+// (namespace / pod / container).
 type ManagementService interface {
 	// --- Client registry ---
 
@@ -24,20 +22,6 @@ type ManagementService interface {
 	// ResolveK8sSource returns the cluster a Kubernetes call targets when given
 	// sourceName ("" = first registered cluster).
 	ResolveK8sSource(sourceName string) (string, error)
-
-	// --- Docker operations ---
-	// sourceName selects which Docker daemon to target; pass "" to use the
-	// first configured daemon.
-
-	StartContainer(ctx context.Context, sourceName, containerID string) error
-	StopContainer(ctx context.Context, sourceName, containerID string) error
-	RestartContainer(ctx context.Context, sourceName, containerID string) error
-	KillContainer(ctx context.Context, sourceName, containerID string) error
-	// GetContainerLogs returns a ReadCloser over the Docker log stream.
-	// tail controls how many lines to return; follow keeps the stream open.
-	// tty reports whether the container was created with a TTY: when false the
-	// stream uses Docker's multiplexed format and must be demuxed with stdcopy.
-	GetContainerLogs(ctx context.Context, sourceName, containerID string, tail int, follow bool) (rc io.ReadCloser, tty bool, err error)
 
 	// --- Kubernetes operations ---
 	// sourceName selects which K8s cluster to target; pass "" to use the first
@@ -52,7 +36,7 @@ type ManagementService interface {
 
 	// ListNamespaces returns the Kubernetes namespaces reachable via the given source.
 	// Pass an empty sourceName to use any available K8s client.
-	// Returns ["local"] when only Docker sources are configured.
+	// Returns ["local"] when no Kubernetes source is registered.
 	ListNamespaces(ctx context.Context, sourceName string) ([]string, error)
 }
 

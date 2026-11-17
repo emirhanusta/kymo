@@ -17,7 +17,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/emirhanusta/kymo/internal/collector"
-	dockercollector "github.com/emirhanusta/kymo/internal/collector/docker"
 	k8scollector "github.com/emirhanusta/kymo/internal/collector/kubernetes"
 	"github.com/emirhanusta/kymo/internal/config"
 	httphandler "github.com/emirhanusta/kymo/internal/handler/http"
@@ -98,10 +97,7 @@ func main() {
 		if interval <= 0 {
 			interval = cfg.Collector.StatsPollInterval
 		}
-		if spec.Type == model.SourceTypeKubernetes {
-			return k8scollector.New(log, spec.Name, spec.KubeconfigPath, spec.Kubeconfig, spec.KubeContext, interval)
-		}
-		return dockercollector.New(log, spec.Name, spec.Socket, interval)
+		return k8scollector.New(log, spec.Name, spec.KubeconfigPath, spec.Kubeconfig, spec.KubeContext, interval)
 	}
 	sources := service.NewSourceManager(db.Sources(), box, svc, mgmt, factory, log)
 

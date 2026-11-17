@@ -12,12 +12,22 @@ export function formatRate(bytesPerSec: number | null | undefined): string {
   return b === '—' ? b : `${b}/s`;
 }
 
-/** Route to a container's detail page (Docker and Kubernetes alike). */
+/** Route to a container's detail page. */
 export function containerRoute(id: string, _runtime?: string | null): string[] {
   return ['/containers', id];
 }
 
-/** Shorten 64-char docker IDs for display fallbacks. */
+/** Shorten 64-char hex IDs for display fallbacks. */
 export function shortId(id: string): string {
   return /^[0-9a-f]{64}$/i.test(id) ? id.slice(0, 12) : id;
+}
+
+/** Seconds → "850ms", "6.2s", "1m 12s", "2h 3m". */
+export function formatDuration(seconds: number | null | undefined): string {
+  if (seconds == null || isNaN(seconds)) return '—';
+  if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
+  if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  if (m < 60) return `${m}m ${Math.round(seconds % 60)}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
 }

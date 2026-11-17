@@ -12,6 +12,7 @@ import { ContainerService } from '../../../core/services/container.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { RefreshService } from '../../../core/services/refresh.service';
 import { PageContextService } from '../../../core/services/page-context.service';
+import { IssuesService } from '../../../core/services/issues.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import {
   Container, CronJobExecution, DeploymentDetail, LifecycleEvent, ResourceSample,
@@ -46,7 +47,7 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   { key: '7d',  ms: 7 * 24 * HOUR },
 ];
 
-/** All containers of one pod (k8s) or one container (compose). */
+/** All containers of one pod. */
 interface InstanceGroup {
   key: string;
   name: string;
@@ -80,6 +81,7 @@ export class WorkloadDetailComponent {
   private refreshSvc = inject(RefreshService);
   private pageCtx    = inject(PageContextService);
   private sources    = inject(SourceStateService);
+  protected issues   = inject(IssuesService);
 
   readonly ranges = RANGES;
   readonly eventLabel  = eventLabel;
@@ -138,11 +140,11 @@ export class WorkloadDetailComponent {
 
   workload = computed(() => this.detail()?.workload ?? null);
   score    = computed(() => this.detail()?.score ?? null);
-  isK8s    = computed(() => this.workload()?.runtime === 'kubernetes');
   readOnly = computed(() => this.sources.isReadOnly(this.workload()?.source_name));
   isDeployment = computed(() => this.workload()?.kind === 'Deployment');
   isCronJob    = computed(() => this.workload()?.kind === 'CronJob');
   isJob        = computed(() => this.workload()?.kind === 'Job');
+  isJobKind    = computed(() => this.isCronJob() || this.isJob());
 
   /** Container name used to link a CronJob run to its container detail page. */
   runContainer = computed(() => this.workload()?.containers?.[0] ?? '');
@@ -188,10 +190,9 @@ export class WorkloadDetailComponent {
 
   groups = computed<InstanceGroup[]>(() => {
     const w = this.workload();
-    const k8s = w?.runtime === 'kubernetes';
     const map = new Map<string, Container[]>();
     for (const c of this.detail()?.instances ?? []) {
-      const key = k8s ? (podNameFromId(c.id) || c.id) : c.id;
+      const key = podNameFromId(c.id) || c.id;
       (map.get(key) ?? map.set(key, []).get(key)!).push(c);
     }
     const out: InstanceGroup[] = [];
@@ -199,7 +200,7 @@ export class WorkloadDetailComponent {
       const statuses = cs.map(c => c.current_status);
       out.push({
         key,
-        name: k8s ? key : cs[0].name,
+        name: key,
         node: cs.find(c => c.node_name)?.node_name ?? '',
         containers: cs,
         status: worstStatus(statuses),
@@ -215,7 +216,7 @@ export class WorkloadDetailComponent {
   currentGroups  = computed(() => this.groups().filter(g => g.current));
   previousGroups = computed(() => this.groups().filter(g => !g.current));
   /** Section vocabulary: a Job's pods are its run attempts. */
-  instanceLabel  = computed(() => (this.isJob() ? 'Run' : this.isK8s() ? 'Pod' : 'Container'));
+  instanceLabel  = computed(() => (this.isJob() ? 'Run' : 'Pod'));
 
   /** Aggregated network counters are not available: hide the chart when everything is zero. */
   noNetwork = computed(() =>

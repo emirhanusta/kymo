@@ -2,18 +2,19 @@ import {
   Component, ChangeDetectionStrategy, signal, computed, inject,
 } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
-import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
+import { of } from 'rxjs';
 
 import { ContainerService } from '../../core/services/container.service';
 import { RefreshService } from '../../core/services/refresh.service';
 import { SourceStateService } from '../../core/services/source-state.service';
+import { WorkloadStateService } from '../../core/services/workload-state.service';
+import { IssuesService } from '../../core/services/issues.service';
 import { reloadOnSourceAndRefresh } from '../../core/utils/page-reload';
 import { LifecycleEvent, SourceStatus, WorkloadSummary } from '../../core/models/container.model';
 import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import { ScoreClassPipe } from '../../shared/pipes/score-class.pipe';
 import { WorkloadBadgeComponent } from '../../shared/components/workload-badge/workload-badge.component';
-import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
 import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
@@ -21,23 +22,20 @@ import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.com
 import { averageScore, formatScore } from '../../shared/utils/score';
 import { containerRoute, shortId } from '../../shared/utils/format';
 import { sourceDotClass, sourceStatusLabel } from '../../shared/utils/source';
+import { isLongRunning } from '../../shared/utils/workload';
+import { Issue } from '../../shared/utils/issues';
 import { eventChipClass, eventTextClass, eventIcon, eventLabel, eventReason, showsExitCode } from '../../shared/utils/events';
 
-/** Workloads scoring below this are listed under "Needs attention". */
-const ATTENTION_SCORE = 70;
+const TOP_ISSUES = 5;
 
-const needsAttention = (w: WorkloadSummary) =>
-  w.status === 'crashing' || (w.score !== null && w.score < ATTENTION_SCORE);
-
-interface SourceCard {
+interface ClusterCard {
   name: string;
-  type: 'docker' | 'kubernetes';
   source: SourceStatus | null;
   workloads: number;
-  attention: number;
-  /** Running / total (active) pods or containers across the source's workloads. */
+  /** Ready / active pods across the cluster's workloads. */
   running: number;
   total: number;
+  issues: number;
   avgScore: number | null;
 }
 
@@ -45,7 +43,7 @@ interface SourceCard {
   selector: 'app-dashboard',
   standalone: true,
   imports: [
-    RouterLink, TimeagoPipe, ScoreClassPipe, StatusBadgeComponent, WorkloadBadgeComponent,
+    RouterLink, TimeagoPipe, ScoreClassPipe, WorkloadBadgeComponent,
     PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
   ],
   templateUrl: './dashboard.component.html',
@@ -57,15 +55,13 @@ export class DashboardComponent {
   private refreshSvc = inject(RefreshService);
   private sourceSvc  = inject(SourceStateService);
   private router     = inject(Router);
+  protected state    = inject(WorkloadStateService);
+  private issueSvc   = inject(IssuesService);
 
-  /** Spinner/skeleton only on the very first load; refreshes are silent. */
-  loading      = signal(true);
-  error        = signal(false);
   eventsError  = signal(false);
-  workloads    = signal<WorkloadSummary[]>([]);
   recentEvents = signal<LifecycleEvent[]>([]);
 
-  sources = this.sourceSvc.sources;
+  clusters = this.sourceSvc.sources;
 
   readonly formatScore = formatScore;
   readonly eventLabel  = eventLabel;
@@ -76,53 +72,53 @@ export class DashboardComponent {
   readonly showsExit   = showsExitCode;
   readonly dotClass    = sourceDotClass;
   readonly statusLabel = sourceStatusLabel;
-  readonly attentionScore = ATTENTION_SCORE;
 
-  /** Crashing workloads, or score below the threshold, worst first. */
-  attention = computed(() =>
-    this.workloads()
-      .filter(needsAttention)
-      .sort((a, b) =>
-        (Number(b.status === 'crashing') - Number(a.status === 'crashing')) ||
-        ((a.score ?? 100) - (b.score ?? 100)) || (b.crash_count - a.crash_count))
-  );
-  attentionShown = computed(() => this.attention().slice(0, 10));
+  /** The Overview always spans every cluster; system workloads are left out. */
+  private workloads = computed(() => this.state.workloads().filter(w => !w.is_system && isLongRunning(w)));
+
+  /** Open issues across all clusters, system workloads excluded. */
+  issues    = computed(() => this.issueSvc.forCluster('', false));
+  topIssues = computed(() => this.issues().slice(0, TOP_ISSUES));
 
   totalPods   = computed(() => this.workloads().reduce((n, w) => n + w.active_instances, 0));
   runningPods = computed(() => this.workloads().reduce((n, w) => n + w.running_instances, 0));
   overallAvgScore = computed(() => averageScore(this.workloads().map(w => w.score)));
+  workloadCount = computed(() => this.workloads().length);
 
-  sourceCards = computed<SourceCard[]>(() => {
+  clusterCards = computed<ClusterCard[]>(() => {
     const groups = new Map<string, WorkloadSummary[]>();
     for (const w of this.workloads()) {
       const key = w.source_name || 'default';
       (groups.get(key) ?? groups.set(key, []).get(key)!).push(w);
     }
+    const issueCount = new Map<string, number>();
+    for (const i of this.issues()) issueCount.set(i.source, (issueCount.get(i.source) ?? 0) + 1);
 
-    // Prefer the backend's source list (has connection status); fall back to what workloads report.
-    const known = this.sources();
-    const entries: { name: string; type: 'docker' | 'kubernetes'; source: SourceStatus | null }[] = known.length
-      ? known.map(s => ({ name: s.name, type: s.type, source: s }))
-      : [...groups.entries()].map(([name, ws]) => ({ name, type: ws[0]?.runtime ?? 'docker', source: null }));
+    // Prefer the backend's cluster list (has connection status); fall back to what workloads report.
+    const known = this.clusters();
+    const entries: { name: string; source: SourceStatus | null }[] = known.length
+      ? known.map(s => ({ name: s.name, source: s }))
+      : [...groups.keys()].map(name => ({ name, source: null }));
 
-    return entries.map(({ name, type, source }) => {
+    return entries.map(({ name, source }) => {
       const ws = groups.get(name) ?? [];
       return {
-        name, type, source,
+        name, source,
         workloads: ws.length,
-        attention: ws.filter(needsAttention).length,
         running: ws.reduce((n, w) => n + w.running_instances, 0),
         total: ws.reduce((n, w) => n + w.active_instances, 0),
+        issues: issueCount.get(name) ?? 0,
         avgScore: averageScore(ws.map(w => w.score)),
       };
     });
   });
 
   constructor() {
-    reloadOnSourceAndRefresh({ ignoreSource: true, load: () => this.loadData() });
+    // Workloads/issues come from the shared state; only the recent-events feed is loaded here.
+    reloadOnSourceAndRefresh({ ignoreSource: true, load: () => this.loadEvents() });
   }
 
-  /** Two-digit channel number for the source card header. */
+  /** Two-digit channel number for the cluster card header. */
   channelNo(i: number): string {
     return String(i + 1).padStart(2, '0');
   }
@@ -132,33 +128,24 @@ export class DashboardComponent {
   }
 
   eventRoute(ev: LifecycleEvent): string[] {
-    const runtime = ev.runtime ?? (ev.container_id.includes('/') ? 'kubernetes' : 'docker');
-    return containerRoute(ev.container_id, runtime);
+    return containerRoute(ev.container_id, ev.runtime);
   }
 
-  /** Select the source in the global selector and show its workloads. */
-  selectSource(card: SourceCard): void {
+  issueReasonClass(i: Issue): string {
+    return i.severity === 'critical' ? 'text-kymo-danger' : 'text-kymo-amber';
+  }
+
+  /** Select the cluster in the global selector and show its workloads. */
+  selectCluster(card: ClusterCard): void {
     this.sourceSvc.select(card.name);
     this.router.navigate(['/workloads']);
   }
 
-  loadData(): void {
-    forkJoin({
-      workloads: this.svc.getWorkloads(),
-      events: this.svc.getRecentEvents(20).pipe(catchError(() => of(null))),
-    }).subscribe({
-      next: ({ workloads, events }) => {
-        this.workloads.set(workloads ?? []);
-        this.eventsError.set(events === null);
-        if (events) this.recentEvents.set(events);
-        this.error.set(false);
-        this.loading.set(false);
-        this.refreshSvc.markUpdated();
-      },
-      error: () => {
-        this.error.set(true);
-        this.loading.set(false);
-      },
+  loadEvents(): void {
+    this.svc.getRecentEvents(20).pipe(catchError(() => of(null))).subscribe(events => {
+      this.eventsError.set(events === null);
+      if (events) this.recentEvents.set(events);
+      this.refreshSvc.markUpdated();
     });
   }
 }

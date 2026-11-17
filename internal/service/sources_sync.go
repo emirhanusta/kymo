@@ -84,7 +84,7 @@ func (m *SourceManager) ReloadConfig(ctx context.Context) (SyncResult, error) {
 }
 
 func sameSettings(a, b model.SourceSpec) bool {
-	return a.Type == b.Type && a.Socket == b.Socket && a.KubeconfigPath == b.KubeconfigPath &&
+	return a.Type == b.Type && a.KubeconfigPath == b.KubeconfigPath &&
 		a.KubeContext == b.KubeContext && a.PollInterval == b.PollInterval &&
 		a.ReadOnly == b.ReadOnly && a.Enabled == b.Enabled
 }
