@@ -71,6 +71,17 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/clusters/clusters.component').then(m => m.ClustersComponent),
       },
+      {
+        path: 'settings',
+        children: [
+          { path: '', pathMatch: 'full', redirectTo: 'notifications' },
+          {
+            path: 'notifications',
+            loadComponent: () =>
+              import('./features/settings/notifications/notifications.component').then(m => m.NotificationsComponent),
+          },
+        ],
+      },
 
       // ── legacy links ──────────────────────────────────────────────────────
       // The container list is gone: old filters map onto the workloads table (workload_kind→kind, workload→q).

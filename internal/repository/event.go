@@ -15,6 +15,8 @@ type EventQuery struct {
 	// Before returns only events that occurred strictly before this time
 	// (cursor for "load older").
 	Before time.Time
+	// Since returns only events that occurred at or after this time.
+	Since time.Time
 	// WorkloadID restricts the feed to the instances of one workload.
 	WorkloadID string
 }

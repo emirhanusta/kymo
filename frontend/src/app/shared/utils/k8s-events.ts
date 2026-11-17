@@ -5,11 +5,6 @@ export const isWarning = (e: K8sEvent): boolean => e.type === 'Warning';
 /** "Pod/api-7d9f" (Kind/name). */
 export const k8sObject = (e: K8sEvent): string => (e.kind ? `${e.kind}/${e.name}` : e.name);
 
-/** First non-empty line of a (possibly multi-line) event message. */
-export function firstLine(msg: string): string {
-  return (msg ?? '').split('\n').map(l => l.trim()).find(l => l) ?? '';
-}
-
 /** Total occurrences (aggregated rows carry `count`). */
 export const occurrences = (e: K8sEvent): number => Math.max(1, e.count || 1);
 

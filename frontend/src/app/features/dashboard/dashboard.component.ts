@@ -23,7 +23,7 @@ import { averageScore, formatScore } from '../../shared/utils/score';
 import { containerRoute, shortId } from '../../shared/utils/format';
 import { sourceDotClass, sourceStatusLabel } from '../../shared/utils/source';
 import { isLongRunning } from '../../shared/utils/workload';
-import { Issue } from '../../shared/utils/issues';
+import { severityLedClass, severityTextClass } from '../../shared/utils/issues';
 import { eventChipClass, eventTextClass, eventIcon, eventLabel, eventReason, showsExitCode } from '../../shared/utils/events';
 
 const TOP_ISSUES = 5;
@@ -78,9 +78,9 @@ export class DashboardComponent {
   private workloads = computed(() =>
     this.sourceSvc.globalScope(this.state.workloads(), w => w.source_name).filter(w => !w.is_system && isLongRunning(w)));
 
-  /** Open issues across all clusters, system workloads excluded. */
-  issues    = computed(() => this.issueSvc.forCluster('', false));
-  /** Issues are derived from live status, which is frozen for removed clusters. */
+  /** Open issues across all connected clusters (server-detected). */
+  issues    = computed(() => this.sourceSvc.globalScope(this.issueSvc.open(), i => i.source_name));
+  /** Issues are not tracked for removed clusters (their statuses are frozen). */
   historyMode = this.sourceSvc.historyMode;
   topIssues = computed(() => this.issues().slice(0, TOP_ISSUES));
 
@@ -96,7 +96,7 @@ export class DashboardComponent {
       (groups.get(key) ?? groups.set(key, []).get(key)!).push(w);
     }
     const issueCount = new Map<string, number>();
-    for (const i of this.issues()) issueCount.set(i.source, (issueCount.get(i.source) ?? 0) + 1);
+    for (const i of this.issues()) issueCount.set(i.source_name, (issueCount.get(i.source_name) ?? 0) + 1);
 
     // Prefer the backend's cluster list (has connection status); fall back to what workloads report.
     // A removed cluster in history mode is not in that list: show its own card.
@@ -136,9 +136,8 @@ export class DashboardComponent {
     return containerRoute(ev.container_id, ev.runtime);
   }
 
-  issueReasonClass(i: Issue): string {
-    return i.severity === 'critical' ? 'text-kymo-danger' : 'text-kymo-amber';
-  }
+  readonly issueLed  = severityLedClass;
+  readonly issueText = severityTextClass;
 
   /** Select the cluster in the global selector and show its workloads. */
   selectCluster(card: ClusterCard): void {

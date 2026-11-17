@@ -65,15 +65,15 @@
         <ul class="divide-y divide-kymo-rule">
           @for (i of topIssues(); track i.id) {
             <li>
-              <a [routerLink]="i.workloadId ? ['/workloads', i.workloadId] : ['/events']" [queryParams]="i.workloadId ? null : { view: 'k8s' }" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
-                <span class="k-led flex-none" [class]="i.severity === 'critical' ? 'bg-kymo-danger' : 'bg-kymo-amber'" aria-hidden="true"></span>
-                <app-workload-badge class="flex-none" [kind]="i.workloadKind" />
+              <a [routerLink]="['/workloads', i.workload_id]" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
+                <span class="k-led flex-none" [class]="issueLed(i.severity)" aria-hidden="true"></span>
+                <app-workload-badge class="flex-none" [kind]="i.kind" />
                 <div class="flex-1 min-w-0">
                   <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="i.name">{{ i.name }}</p>
-                  <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace ? i.namespace + ' · ' : '' }}{{ i.source }}</p>
+                  <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace ? i.namespace + ' · ' : '' }}{{ i.source_name }}</p>
                 </div>
-                <span class="text-xs flex-none" [class]="issueReasonClass(i)">{{ i.reason }}</span>
-                <span class="text-xs text-kymo-faint flex-none w-16 text-right tabular-nums hidden sm:inline">{{ i.since | timeago }}</span>
+                <span class="text-xs flex-none truncate max-w-[40%]" [class]="issueText(i.severity)" [title]="i.title">{{ i.title }}</span>
+                <span class="text-xs text-kymo-faint flex-none w-16 text-right tabular-nums hidden sm:inline">{{ i.first_seen | timeago }}</span>
               </a>
             </li>
           }

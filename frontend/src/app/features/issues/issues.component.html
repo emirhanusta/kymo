@@ -1,27 +1,23 @@
 <div class="space-y-4" [class.lg:pr-[27rem]]="peek.id()">
   <app-page-header title="Issues">
     <ng-container subtitle>
-      @if (!state.loaded()) {
+      @if (!svc.loaded()) {
         Loading…
       } @else if (sources.historyMode()) {
         Not tracked for removed clusters
-      } @else if (issues().length > 0) {
-        <span class="text-kymo-danger font-medium">{{ issues().length }} open issue{{ issues().length === 1 ? '' : 's' }}</span>
+      } @else if (open().length > 0) {
+        <span class="text-kymo-danger font-medium">{{ open().length }} open issue{{ open().length === 1 ? '' : 's' }}</span>
       } @else {
         No open issues
       }
     </ng-container>
-    <label class="flex items-center gap-1.5 text-xs text-kymo-muted cursor-pointer h-[1.875rem]">
-      <input type="checkbox" [checked]="system()" (change)="system.set($any($event.target).checked)" />
-      Show system
-    </label>
   </app-page-header>
 
-  @if (state.error()) {
-    <app-error-state message="Failed to load issues" (retry)="state.load()" />
+  @if (svc.error() || (tab() === 'resolved' && resolvedError())) {
+    <app-error-state message="Failed to load issues" (retry)="svc.load(); loadResolved(true)" />
   }
 
-  @if (!state.loaded()) {
+  @if (!svc.loaded()) {
     <app-skeleton [rows]="4" />
   } @else if (sources.historyMode()) {
     <div class="k-panel">
@@ -31,59 +27,129 @@
         hint="Statuses of a removed cluster are frozen at the moment it was removed, so nothing here is live. Browse its recorded history under Workloads, Jobs and Events."
       />
     </div>
-  } @else if (issues().length === 0 && !state.error()) {
-    <div class="k-panel">
-      <app-empty-state
-        icon="check"
-        tone="success"
-        message="No open issues"
-        hint="Nothing is crash looping, OOM-killed, degraded or failing right now. KYMO keeps recording — this list updates as soon as something breaks."
-      />
-    </div>
-    @if (hiddenSystem() > 0) {
-      <p class="text-xs text-kymo-faint">{{ hiddenSystem() }} issue{{ hiddenSystem() === 1 ? '' : 's' }} in system workloads hidden</p>
-    }
   } @else {
-    @for (g of groups(); track g.severity) {
-      <section class="k-panel overflow-hidden" [attr.aria-label]="g.label + ' issues'">
-        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center gap-2">
-          <span class="k-led" [class]="g.severity === 'critical' ? 'bg-kymo-danger animate-pulse' : 'bg-kymo-amber'" aria-hidden="true"></span>
-          <h2 class="k-label">{{ g.label }}</h2>
-          <span class="text-xs text-kymo-faint tabular-nums">{{ g.items.length }}</span>
+    <div class="flex border-b border-kymo-rule" role="tablist" aria-label="Issue status" (keydown)="onTabKey($event)">
+      <button type="button" role="tab" id="issues-tab-open" aria-controls="issues-panel" [attr.aria-selected]="tab() === 'open'"
+        [attr.tabindex]="tab() === 'open' ? 0 : -1"
+        class="px-4 h-9 text-xs font-medium whitespace-nowrap border-b-2 -mb-px transition-colors"
+        [class]="tab() === 'open' ? 'border-kymo-amber text-kymo-amber' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
+        (click)="setTab('open')">Open
+        @if (open().length) { <span class="ml-1.5 tabular-nums text-kymo-faint">{{ open().length }}</span> }
+      </button>
+      <button type="button" role="tab" id="issues-tab-resolved" aria-controls="issues-panel" [attr.aria-selected]="tab() === 'resolved'"
+        [attr.tabindex]="tab() === 'resolved' ? 0 : -1"
+        class="px-4 h-9 text-xs font-medium whitespace-nowrap border-b-2 -mb-px transition-colors"
+        [class]="tab() === 'resolved' ? 'border-kymo-amber text-kymo-amber' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
+        (click)="setTab('resolved')">Resolved</button>
+    </div>
+
+    <div id="issues-panel" role="tabpanel" [attr.aria-labelledby]="'issues-tab-' + tab()" class="space-y-4">
+    @if (tab() === 'open') {
+      @if (open().length === 0 && !svc.error()) {
+        <div class="k-panel">
+          <app-empty-state
+            icon="check"
+            tone="success"
+            message="No open issues"
+            hint="Nothing is crash looping, OOM-killed, degraded or failing right now. KYMO keeps watching — this list updates as soon as something breaks."
+          />
         </div>
-        <ul class="divide-y divide-kymo-rule">
-          @for (i of g.items; track i.id) {
-            <li class="px-4 py-3 hover:bg-kymo-raised transition-colors flex items-center gap-3 group outline-none focus-visible:bg-kymo-raised"
-                [class.cursor-pointer]="i.workloadId"
-                [attr.data-peek-id]="i.workloadId || null" [attr.tabindex]="i.workloadId ? 0 : null" [attr.aria-current]="peek.id() === i.workloadId ? 'true' : null"
-                      [class.bg-kymo-raised]="peek.id() === i.workloadId" [class.shadow-[inset_2px_0_0_var(--color-kymo-amber)]]="peek.id() === i.workloadId"
-                      (click)="i.workloadId && peek.rowClick($event, i.workloadId)" (keydown.enter)="i.workloadId && peek.rowKey($event, i.workloadId)" (keydown.space)="i.workloadId && peek.rowKey($event, i.workloadId)">
-              <span class="k-led flex-none" [class]="ledClass(i)" aria-hidden="true"></span>
-              <div class="flex-1 min-w-0">
-                <p class="text-xs font-medium" [class]="reasonClass(i)">
-                  {{ i.reason }}
-                  @if (i.detail) { <span class="font-normal text-kymo-muted"> · {{ i.detail }}</span> }
-                </p>
-                @if (i.also.length) {
-                  <p class="text-[11px] text-kymo-muted truncate" [title]="i.also.join(' · ')">also: {{ i.also.join(' · ') }}</p>
-                }
-                @if (i.workloadId) {
-                  <a [routerLink]="['/workloads', i.workloadId]" class="block text-xs text-kymo-ink truncate group-hover:text-kymo-amber hover:underline underline-offset-4 mt-0.5" [title]="i.name">{{ i.name }}</a>
-                } @else {
-                  <a routerLink="/events" [queryParams]="{ view: 'k8s' }" class="block text-xs text-kymo-ink truncate group-hover:text-kymo-amber hover:underline underline-offset-4 mt-0.5" [title]="i.name + ' (no workload) — open Kubernetes events'">{{ i.name }}</a>
-                }
-                <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace || '—' }} · {{ i.source }}@if (i.isSystem) { · system}</p>
-              </div>
-              <app-workload-badge class="flex-none hidden sm:inline-flex" [kind]="i.workloadKind" />
-              <span class="text-xs text-kymo-faint flex-none w-24 text-right tabular-nums" title="Since">since {{ i.since | timeago }}</span>
-            </li>
-          }
-        </ul>
-      </section>
+      } @else {
+        @for (g of groups(); track g.severity) {
+          <section class="k-panel overflow-hidden" [attr.aria-label]="g.label + ' issues'">
+            <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center gap-2">
+              <span class="k-led" [class]="g.severity === 'critical' ? 'bg-kymo-danger animate-pulse' : 'bg-kymo-amber'" aria-hidden="true"></span>
+              <h2 class="k-label">{{ g.label }}</h2>
+              <span class="text-xs text-kymo-faint tabular-nums">{{ g.items.length }}</span>
+            </div>
+            <ul class="divide-y divide-kymo-rule">
+              @for (i of g.items; track i.id) {
+                <li class="px-4 py-3 hover:bg-kymo-raised transition-colors flex items-center gap-3 group cursor-pointer outline-none focus-visible:bg-kymo-raised"
+                    [attr.data-peek-id]="i.workload_id" tabindex="0" [attr.aria-current]="peek.id() === i.workload_id ? 'true' : null"
+                    [class.bg-kymo-raised]="peek.id() === i.workload_id" [class.shadow-[inset_2px_0_0_var(--color-kymo-amber)]]="peek.id() === i.workload_id"
+                    (click)="peek.rowClick($event, i.workload_id)" (keydown.enter)="peek.rowKey($event, i.workload_id)" (keydown.space)="peek.rowKey($event, i.workload_id)">
+                  <span class="k-led flex-none" [class]="led(i.severity)" aria-hidden="true"></span>
+                  <div class="flex-1 min-w-0">
+                    <p class="text-xs font-medium flex items-center gap-2 flex-wrap" [class]="text(i.severity)">
+                      <span>{{ i.title }}</span>
+                      @if (i.flaps > 0) {
+                        <span class="text-[10px] font-normal px-1.5 py-px border border-kymo-amber/50 text-kymo-amber tabular-nums"
+                              title="Resolved and re-opened {{ i.flaps }} time{{ i.flaps === 1 ? '' : 's' }}">flapping ×{{ i.flaps }}</span>
+                      }
+                    </p>
+                    @if (i.detail) {
+                      <p class="text-[11px] text-kymo-muted truncate" [title]="i.detail">{{ i.detail }}</p>
+                    }
+                    <a [routerLink]="['/workloads', i.workload_id]" class="block text-xs text-kymo-ink truncate group-hover:text-kymo-amber hover:underline underline-offset-4 mt-0.5" [title]="i.name">{{ i.name }}</a>
+                    <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace || '—' }} · {{ i.source_name }}</p>
+                  </div>
+                  <app-workload-badge class="flex-none hidden sm:inline-flex" [kind]="i.kind" />
+                  <span class="text-xs text-kymo-faint flex-none w-24 text-right tabular-nums" [title]="i.first_seen">since {{ i.first_seen | timeago }}</span>
+                </li>
+              }
+            </ul>
+          </section>
+        }
+      }
+    } @else {
+      @if (!resolvedLoaded()) {
+        <app-skeleton [rows]="4" />
+      } @else if (resolved().length === 0 && !resolvedError()) {
+        <div class="k-panel">
+          <app-empty-state icon="clock" message="No resolved issues yet" hint="Issues that clear up on their own or after a fix are listed here." />
+        </div>
+      } @else if (resolved().length > 0) {
+        <div class="k-panel overflow-x-auto scrollbar-thin">
+          <table class="k-table">
+            <thead>
+              <tr>
+                <th>Issue</th>
+                <th>Workload</th>
+                <th class="hidden md:table-cell">Opened → resolved</th>
+                <th class="!text-right">Duration</th>
+                <th class="hidden sm:table-cell">Cluster</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (i of resolved(); track i.id) {
+                <tr class="hover:bg-kymo-raised transition-colors cursor-pointer outline-none focus-visible:bg-kymo-raised"
+                    [attr.data-peek-id]="i.workload_id" tabindex="0" [attr.aria-current]="peek.id() === i.workload_id ? 'true' : null"
+                    [class.bg-kymo-raised]="peek.id() === i.workload_id"
+                    (click)="peek.rowClick($event, i.workload_id)" (keydown.enter)="peek.rowKey($event, i.workload_id)" (keydown.space)="peek.rowKey($event, i.workload_id)">
+                  <td class="px-4 py-2.5">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="k-led" [class]="led(i.severity)" aria-hidden="true"></span>
+                      <span class="text-xs text-kymo-ink">{{ i.title }}</span>
+                      @if (i.flaps > 0) {
+                        <span class="text-[10px] px-1.5 py-px border border-kymo-amber/50 text-kymo-amber tabular-nums whitespace-nowrap">flapping ×{{ i.flaps }}</span>
+                      }
+                    </div>
+                  </td>
+                  <td class="px-4 py-2.5">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <app-workload-badge class="flex-none" [kind]="i.kind" />
+                      <a [routerLink]="['/workloads', i.workload_id]" class="text-xs text-kymo-ink truncate max-w-[16rem] hover:text-kymo-amber hover:underline underline-offset-4" [title]="i.name">{{ i.name }}</a>
+                    </div>
+                    <p class="text-[11px] text-kymo-faint mt-0.5">{{ i.namespace || '—' }}</p>
+                  </td>
+                  <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell">
+                    <span [title]="i.first_seen">{{ i.first_seen | timeago }}</span> → <span [title]="i.resolved_at ?? ''">{{ i.resolved_at | timeago }}</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-xs text-kymo-ink text-right tabular-nums whitespace-nowrap">{{ duration(i) }}</td>
+                  <td class="px-4 py-2.5 text-xs text-kymo-muted hidden sm:table-cell">{{ i.source_name }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+        @if (hasMore()) {
+          <div class="flex justify-center">
+            <button type="button" class="k-btn" [disabled]="loadingMore()" (click)="loadMore()">{{ loadingMore() ? 'Loading…' : 'Load older' }}</button>
+          </div>
+        }
+      }
     }
-    @if (hiddenSystem() > 0) {
-      <p class="text-xs text-kymo-faint">{{ hiddenSystem() }} issue{{ hiddenSystem() === 1 ? '' : 's' }} in system workloads hidden</p>
-    }
+    </div>
   }
 
   @if (peek.id(); as pid) {

@@ -15,6 +15,10 @@ server:
   # Directory with the built web UI (frontend/dist/frontend/browser).
   # Leave empty to serve the API only (use `make web-dev` during development).
   static_dir: ""
+  # Externally reachable URL of the web UI, e.g. "https://kymo.example.com".
+  # Notifications use it for the "Open in KYMO" link
+  # (<public_url>/workloads/<workload id>). Leave empty for no links.
+  public_url: ""
 
 database:
   dsn: "postgres://kymo:kymo@localhost:5432/kymo?sslmode=disable"
@@ -73,6 +77,44 @@ collector:
   #     kube_context: "dev"                      # default: current-context
   #     poll_interval: "30s"                     # needs metrics-server for CPU/memory
   #     read_only: true                          # recommended for production clusters
+
+# Server-side issues: KYMO evaluates every workload of the registered clusters
+# and keeps a persistent list of problems (crash loops, OOM kills, degraded
+# workloads, failed CronJobs, scheduling / image pull / volume / probe problems
+# from Kubernetes Warning events). Resolved issues are kept for 90 days.
+issues:
+  evaluate_interval: "30s"   # how often all workloads are evaluated
+  degraded_after: "3m"       # "Degraded" opens after this long partially ready
+  resolve_after: "5m"        # a problem must be gone this long before it resolves
+  reopen_window: "15m"       # returning within this window reopens the same issue (flap)
+  include_system: false      # also evaluate kube-system & co.
+
+# Notifications (Slack, Discord, generic webhook). Channels are usually added in
+# the UI (Settings), which stores their URL encrypted and therefore needs
+# KYMO_SECRET_KEY. Channels declared here need no key but are locked in the UI,
+# are reloaded live with this file, and keep the URL IN PLAIN TEXT in the file:
+# keep config.yaml private (or inject it from a secret). Edits to the channel
+# list apply without a restart; "enabled" below needs a restart.
+notifications:
+  enabled: true
+  channels: []
+  # channels:
+  #   - name: "ops-slack"
+  #     type: "slack"                     # slack | discord | webhook
+  #     url: "https://hooks.slack.com/services/T000/B000/XXXX"   # placeholder
+  #     enabled: true
+  #     min_severity: "critical"          # critical | warning (default critical)
+  #     sources: []                       # empty = all clusters
+  #     namespaces: []                    # empty = all namespaces
+  #     types: []                         # empty = all; crash_loop, oom, degraded, job_failed,
+  #                                       # cant_schedule, image_pull, evicted, volume_mount, probe_failing
+  #     notify_resolved: true
+  #     include_logs: true                # attach the newest crash log (last 20 lines)
+  #     repeat_minutes: 0                 # re-send open issues every N minutes (0 = never)
+  #   - name: "billing-webhook"
+  #     type: "webhook"
+  #     url: "https://example.com/kymo-hook"
+  #     secret: "hmac-secret"             # signs the body: X-KYMO-Signature: sha256=<hex>
 
 log:
   level: "info"      # debug | info | warn | error

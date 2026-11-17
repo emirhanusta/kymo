@@ -142,7 +142,7 @@
                       [attr.data-peek-id]="w.id" tabindex="0" [attr.aria-current]="peek.id() === w.id ? 'true' : null"
                       [class.bg-kymo-raised]="peek.id() === w.id" [class.shadow-[inset_2px_0_0_var(--color-kymo-amber)]]="peek.id() === w.id"
                       (click)="peek.rowClick($event, w.id)" (keydown.enter)="peek.rowKey($event, w.id)" (keydown.space)="peek.rowKey($event, w.id)">
-                    <td class="px-4 py-2.5 whitespace-nowrap"><app-status-badge [status]="w.status" [text]="issues.reasonOf(w)" /></td>
+                    <td class="px-4 py-2.5 whitespace-nowrap"><app-status-badge [status]="w.status" [text]="statusReason(w)" /></td>
                     <td class="px-4 py-2.5 max-w-[18rem]">
                       <a
                         [routerLink]="['/workloads', w.id]"

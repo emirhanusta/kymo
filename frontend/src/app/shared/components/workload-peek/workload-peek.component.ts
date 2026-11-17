@@ -7,6 +7,9 @@ import { ContainerService } from '../../../core/services/container.service';
 import { RefreshService } from '../../../core/services/refresh.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import { IssuesService } from '../../../core/services/issues.service';
+import { Issue } from '../../../core/models/issue.model';
+import { IssueChipsComponent } from '../issue-chips/issue-chips.component';
+import { statusReason } from '../../utils/issues';
 import { CrashContext } from '../../../core/services/container.service';
 import { K8sEvent, LifecycleEvent, WorkloadDetail } from '../../../core/models/container.model';
 import { DialogDirective } from '../../directives/dialog.directive';
@@ -32,7 +35,7 @@ import { normalizeStatus } from '../../utils/status';
   standalone: true,
   imports: [
     RouterLink, DialogDirective, StatusBadgeComponent, WorkloadBadgeComponent, LastCrashCardComponent,
-    MiniTimelineComponent, SkeletonComponent, ScoreClassPipe, LogViewerComponent,
+    MiniTimelineComponent, SkeletonComponent, ScoreClassPipe, LogViewerComponent, IssueChipsComponent,
   ],
   template: `
     <div class="fixed inset-0 bg-kymo-deep/70 z-[39] lg:hidden" (click)="closed.emit()" aria-hidden="true"></div>
@@ -44,7 +47,7 @@ import { normalizeStatus } from '../../utils/status';
           <h2 id="peek-title" class="text-sm font-semibold text-kymo-ink truncate" [title]="w()?.name ?? ''">{{ w()?.name ?? 'Loading…' }}</h2>
           @if (w(); as wl) {
             <div class="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs">
-              <app-status-badge [status]="wl.status" [text]="issues.reasonOf(wl)" />
+              <app-status-badge [status]="wl.status" [text]="statusReason(wl)" />
               <app-workload-badge [kind]="wl.kind" />
               @if (warnings1h() > 0) {
                 <span class="inline-flex items-center gap-1 text-[11px] px-1.5 py-px border border-kymo-amber/50 text-kymo-amber tabular-nums"
@@ -54,6 +57,9 @@ import { normalizeStatus } from '../../utils/status';
               }
               <span class="text-kymo-faint truncate">{{ wl.namespace || '—' }} · {{ wl.source_name }}</span>
             </div>
+            @if (openIssues().length) {
+              <div class="flex items-center gap-1.5 flex-wrap mt-1.5"><app-issue-chips [issues]="openIssues()" /></div>
+            }
           }
         </div>
         <button type="button" data-autofocus class="p-1.5 text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised transition-colors flex-none" (click)="closed.emit()" aria-label="Close panel (Esc)" title="Close (Esc)">
@@ -127,7 +133,8 @@ export class WorkloadPeekComponent {
 
   private svc     = inject(ContainerService);
   private refresh = inject(RefreshService);
-  protected issues = inject(IssuesService);
+  private issueSvc = inject(IssuesService);
+  readonly statusReason = statusReason;
   protected sources = inject(SourceStateService);
 
   readonly score = formatScore;
@@ -137,6 +144,7 @@ export class WorkloadPeekComponent {
   events = signal<LifecycleEvent[]>([]);
   error  = signal(false);
   warnings1h = signal(0);
+  openIssues = signal<Issue[]>([]);
 
   w = computed(() => {
     const d = this.detail();
@@ -179,7 +187,7 @@ export class WorkloadPeekComponent {
   constructor() {
     effect(() => {
       this.id();
-      untracked(() => { this.detail.set(null); this.ctx.set({ crashEvents: [], logs: [], revisions: [] }); this.events.set([]); this.warnings1h.set(0); this.load(); });
+      untracked(() => { this.detail.set(null); this.ctx.set({ crashEvents: [], logs: [], revisions: [] }); this.events.set([]); this.warnings1h.set(0); this.openIssues.set([]); this.load(); });
     });
     const rs = this.refresh.refresh$.subscribe(() => this.load(true));
     inject(DestroyRef).onDestroy(() => { this.sub?.unsubscribe(); rs.unsubscribe(); });
@@ -194,9 +202,11 @@ export class WorkloadPeekComponent {
       ctx: this.svc.getCrashContext(id),
       events: this.svc.getWorkloadEvents(id, { limit: 100 }).pipe(catchError(() => of([] as LifecycleEvent[]))),
       k8s: this.svc.getWorkloadK8sEvents(id, { since: hourAgoIso(), limit: 500 }).pipe(catchError(() => of([] as K8sEvent[]))),
+      issues: this.issueSvc.forWorkload(id, 'open').pipe(catchError(() => of([] as Issue[]))),
     }).subscribe({
-      next: ({ detail, ctx, events, k8s }) => {
+      next: ({ detail, ctx, events, k8s, issues }) => {
         this.warnings1h.set(warningsLastHour(k8s));
+        this.openIssues.set(issues);
         this.detail.set(detail);
         this.ctx.set(ctx);
         this.events.set(events ?? []);

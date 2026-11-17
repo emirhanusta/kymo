@@ -168,6 +168,14 @@ func TestPendingPodContainersAreRecorded(t *testing.T) {
 	if ev.Container.ID != "shop/bigmem-1/bigmem" || ev.Container.CurrentStatus != model.StatusUnknown || ev.Container.Image != "busybox:1.36" {
 		t.Fatalf("unexpected container: %+v", ev.Container)
 	}
+
+	// Deleting the still-pending pod must mark the container stopped, otherwise
+	// the workload keeps counting it as an active instance forever.
+	go c.onPodDelete(context.Background(), pod)
+	ev = <-c.Events()
+	if ev.Container == nil || !ev.UpdateOnly || ev.Container.ID != "shop/bigmem-1/bigmem" || ev.Container.CurrentStatus != model.StatusStopped {
+		t.Fatalf("want an update-only stopped event, got %+v", ev)
+	}
 }
 
 func TestCrashLoopBackOffIsCrashing(t *testing.T) {

@@ -28,12 +28,20 @@ type Handler struct {
 	sources *service.SourceManager
 	db      Pinger
 	log     *zap.Logger
+
+	issues       repository.IssueRepository
+	notif        NotificationAPI
+	publicURL    string
+	notifEnabled bool
 }
 
 // New creates a Handler, registers all API routes on r, and returns the Handler.
 // db may be nil, in which case /healthz does not check the database.
-func New(svc service.RecorderService, mgmt service.ManagementService, sources *service.SourceManager, db Pinger, log *zap.Logger, r *gin.Engine) *Handler {
+func New(svc service.RecorderService, mgmt service.ManagementService, sources *service.SourceManager, db Pinger, log *zap.Logger, r *gin.Engine, opts ...Option) *Handler {
 	h := &Handler{svc: svc, mgmt: mgmt, sources: sources, db: db, log: log}
+	for _, o := range opts {
+		o(h)
+	}
 	h.registerRoutes(r)
 	return h
 }
@@ -108,6 +116,20 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		v1.GET("/k8s-events", h.ListK8sEvents)
 		v1.GET("/k8s-events/reasons", h.GetK8sEventReasons)
 		v1.GET("/workloads/:id/score/history", h.GetWorkloadScoreHistory)
+
+		// Issues (server-side derived problems)
+		v1.GET("/issues", h.ListIssues)
+		v1.GET("/issues/summary", h.IssueSummary)
+		v1.GET("/issues/:id", h.GetIssue)
+		v1.GET("/workloads/:id/issues", h.GetWorkloadIssues)
+
+		// Notification channels
+		v1.GET("/notifications/channels", h.ListChannels)
+		v1.POST("/notifications/channels", h.CreateChannel)
+		v1.PUT("/notifications/channels/:id", h.UpdateChannel)
+		v1.DELETE("/notifications/channels/:id", h.DeleteChannel)
+		v1.POST("/notifications/channels/:id/test", h.TestChannel)
+		v1.GET("/notifications/deliveries", h.ListDeliveries)
 
 		// Recent events endpoint (cross-container)
 		v1.GET("/events/recent", h.GetRecentEvents)
