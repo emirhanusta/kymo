@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -77,6 +78,7 @@ func main() {
 		db.CronJobs(),
 		db.Workloads(),
 		db.CrashLogs(),
+		db.K8sEvents(),
 		service.ScoringConfig{
 			Interval: cfg.Collector.ScoringInterval,
 			Window:   cfg.Collector.ScoringWindow,
@@ -103,6 +105,11 @@ func main() {
 				Enabled:   cfg.Collector.CrashLogs.Enabled,
 				TailLines: cfg.Collector.CrashLogs.TailLines,
 				MaxBytes:  cfg.Collector.CrashLogs.MaxBytes,
+			},
+			K8sEvents: k8scollector.K8sEventOptions{
+				Enabled:           cfg.Collector.K8sEvents.Enabled,
+				NormalReasons:     cfg.Collector.K8sEvents.NormalReasons,
+				ExcludeNamespaces: cfg.Collector.K8sEvents.ExcludeNamespaces,
 			},
 		})
 	}
@@ -239,8 +246,8 @@ func restartOnlyChanges(old, fresh *config.Config) string {
 		changed = append(changed, "secret_key")
 	}
 	oc, fc := old.Collector, fresh.Collector
-	if oc.StatsPollInterval != fc.StatsPollInterval || oc.ScoringInterval != fc.ScoringInterval || oc.ScoringWindow != fc.ScoringWindow || oc.CrashLogs != fc.CrashLogs {
-		changed = append(changed, "collector (poll/scoring/crash_logs)")
+	if oc.StatsPollInterval != fc.StatsPollInterval || oc.ScoringInterval != fc.ScoringInterval || oc.ScoringWindow != fc.ScoringWindow || oc.CrashLogs != fc.CrashLogs || !slices.Equal(oc.K8sEvents.NormalReasons, fc.K8sEvents.NormalReasons) || !slices.Equal(oc.K8sEvents.ExcludeNamespaces, fc.K8sEvents.ExcludeNamespaces) || oc.K8sEvents.Enabled != fc.K8sEvents.Enabled {
+		changed = append(changed, "collector (poll/scoring/crash_logs/k8s_events)")
 	}
 	return strings.Join(changed, ", ")
 }

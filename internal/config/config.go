@@ -112,6 +112,27 @@ type CollectorConfig struct {
 	// CrashLogs controls capturing the tail of a container's logs when it
 	// crashes or is OOM-killed.
 	CrashLogs CrashLogsConfig `mapstructure:"crash_logs"`
+
+	// K8sEvents controls persisting Kubernetes Events (which expire in the
+	// cluster after about an hour).
+	K8sEvents K8sEventsConfig `mapstructure:"k8s_events"`
+}
+
+// DefaultK8sEventNormalReasons are the Normal-type event reasons kept by default.
+var DefaultK8sEventNormalReasons = []string{
+	"ScalingReplicaSet", "SuccessfulCreate", "SuccessfulDelete", "Killing", "SawCompletedJob",
+	"SuccessfulRescale", "Preempted", "Rebooted", "NodeNotReady", "RegisteredNode", "RemovingNode", "Evicted",
+}
+
+// K8sEventsConfig configures Kubernetes Event persistence. Warning events are
+// always kept; Normal events only when their reason is in NormalReasons.
+type K8sEventsConfig struct {
+	// Enabled turns event collection on or off (default true).
+	Enabled bool `mapstructure:"enabled"`
+	// NormalReasons lists the Normal-event reasons to keep.
+	NormalReasons []string `mapstructure:"normal_reasons"`
+	// ExcludeNamespaces drops events from these namespaces.
+	ExcludeNamespaces []string `mapstructure:"exclude_namespaces"`
 }
 
 // Crash-log capture limits.
@@ -220,6 +241,10 @@ func load(path string) (*Config, error) {
 	v.SetDefault("collector.crash_logs.enabled", true)
 	v.SetDefault("collector.crash_logs.tail_lines", DefaultCrashLogTailLines)
 	v.SetDefault("collector.crash_logs.max_bytes", DefaultCrashLogMaxBytes)
+
+	v.SetDefault("collector.k8s_events.enabled", true)
+	v.SetDefault("collector.k8s_events.normal_reasons", DefaultK8sEventNormalReasons)
+	v.SetDefault("collector.k8s_events.exclude_namespaces", []string{})
 
 	v.SetDefault("secret_key", "")
 	v.SetDefault("log.level", "info")

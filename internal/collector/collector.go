@@ -31,6 +31,9 @@ const (
 	// the runtime for this source (SyncIDs). Containers stored for the source that
 	// are absent from the set and still marked active are marked stopped.
 	CollectorEventSync CollectorEventKind = "sync"
+	// CollectorEventK8sEvent carries a K8sEvent payload (a Kubernetes Event).
+	// Container is nil for this kind.
+	CollectorEventK8sEvent CollectorEventKind = "k8sevent"
 )
 
 // CollectorEvent is the unit of data emitted by a Collector onto its Events channel.
@@ -60,6 +63,9 @@ type CollectorEvent struct {
 
 	// CrashLog holds the log snapshot when Kind == CollectorEventCrashLog; nil otherwise.
 	CrashLog *model.CrashLog
+
+	// K8sEvent holds the Kubernetes Event when Kind == CollectorEventK8sEvent; nil otherwise.
+	K8sEvent *model.K8sEvent
 
 	// UpdateOnly, for CollectorEventState, means the state should only be applied
 	// to an existing container row; unknown containers are not inserted.

@@ -4,8 +4,8 @@ import {
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { DecimalPipe, DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Subscription, forkJoin } from 'rxjs';
-import { distinctUntilChanged, map } from 'rxjs/operators';
+import { Subscription, forkJoin, of } from 'rxjs';
+import { catchError, distinctUntilChanged, map } from 'rxjs/operators';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ContainerService, CrashContext } from '../../../core/services/container.service';
@@ -15,7 +15,7 @@ import { PageContextService } from '../../../core/services/page-context.service'
 import { IssuesService } from '../../../core/services/issues.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import {
-  CronJobExecution, DeploymentDetail, ResourceSample, WorkloadDetail, WorkloadScore,
+  CronJobExecution, DeploymentDetail, K8sEvent, ResourceSample, WorkloadDetail, WorkloadScore,
 } from '../../../core/models/container.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
@@ -31,6 +31,7 @@ import { EmptyStateComponent } from '../../../shared/components/empty-state/empt
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { ScoreClassPipe } from '../../../shared/pipes/score-class.pipe';
+import { hourAgoIso, warningsLastHour } from '../../../shared/utils/k8s-events';
 import { readStorage, writeStorage } from '../../../shared/utils/storage';
 import { scoreHex } from '../../../shared/utils/score';
 
@@ -90,6 +91,8 @@ export class WorkloadDetailComponent {
   loadError = signal<'not-found' | 'error' | null>(null);
   detail    = signal<WorkloadDetail | null>(null);
   history   = signal<WorkloadScore[]>([]);
+  /** Kubernetes Warning events (incl. repeats) of the last hour. */
+  warnings1h = signal(0);
 
   /** Newest crash/OOM events, crash-log snapshots and revisions (Last crash card, timeline markers, pods). */
   ctx = signal<CrashContext>({ crashEvents: [], logs: [], revisions: [] });
@@ -229,6 +232,7 @@ export class WorkloadDetailComponent {
     this.detail.set(null);
     this.history.set([]);
     this.ctx.set({ crashEvents: [], logs: [], revisions: [] });
+    this.warnings1h.set(0);
     this.resources.set([]);
     this.deployment.set(null);
     this.scaleValue.set(null);
@@ -249,8 +253,10 @@ export class WorkloadDetailComponent {
       detail:  this.svc.getWorkload(id),
       history: this.svc.getWorkloadScoreHistory(id, 60),
       ctx:     this.svc.getCrashContext(id),
+      k8s:     this.svc.getWorkloadK8sEvents(id, { since: hourAgoIso(), limit: 500 }).pipe(catchError(() => of([] as K8sEvent[]))),
     }).subscribe({
-      next: ({ detail, history, ctx }) => {
+      next: ({ detail, history, ctx, k8s }) => {
+        this.warnings1h.set(warningsLastHour(k8s));
         const w = detail.workload;
         this.detail.set({ ...detail, instances: detail.instances ?? [], workload: { ...w, images: w.images ?? [], containers: w.containers ?? [] } });
         this.history.set(history ?? []);

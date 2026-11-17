@@ -8,7 +8,7 @@ import { RefreshService } from '../../../core/services/refresh.service';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import { IssuesService } from '../../../core/services/issues.service';
 import { CrashContext } from '../../../core/services/container.service';
-import { LifecycleEvent, WorkloadDetail } from '../../../core/models/container.model';
+import { K8sEvent, LifecycleEvent, WorkloadDetail } from '../../../core/models/container.model';
 import { DialogDirective } from '../../directives/dialog.directive';
 import { StatusBadgeComponent } from '../status-badge/status-badge.component';
 import { WorkloadBadgeComponent } from '../workload-badge/workload-badge.component';
@@ -17,6 +17,7 @@ import { MiniTimelineComponent } from '../mini-timeline/mini-timeline.component'
 import { LogViewerComponent } from '../log-viewer/log-viewer.component';
 import { SkeletonComponent } from '../skeleton/skeleton.component';
 import { ScoreClassPipe } from '../../pipes/score-class.pipe';
+import { hourAgoIso, warningsLastHour } from '../../utils/k8s-events';
 import { formatScore } from '../../utils/score';
 import { podNameFromId } from '../../utils/source';
 import { normalizeStatus } from '../../utils/status';
@@ -45,6 +46,12 @@ import { normalizeStatus } from '../../utils/status';
             <div class="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs">
               <app-status-badge [status]="wl.status" [text]="issues.reasonOf(wl)" />
               <app-workload-badge [kind]="wl.kind" />
+              @if (warnings1h() > 0) {
+                <span class="inline-flex items-center gap-1 text-[11px] px-1.5 py-px border border-kymo-amber/50 text-kymo-amber tabular-nums"
+                      title="Kubernetes Warning events in the last hour (including repeats)">
+                  <span aria-hidden="true">⚠</span> {{ warnings1h() }} warning{{ warnings1h() === 1 ? '' : 's' }} (1h)
+                </span>
+              }
               <span class="text-kymo-faint truncate">{{ wl.namespace || '—' }} · {{ wl.source_name }}</span>
             </div>
           }
@@ -129,6 +136,7 @@ export class WorkloadPeekComponent {
   ctx    = signal<CrashContext>({ crashEvents: [], logs: [], revisions: [] });
   events = signal<LifecycleEvent[]>([]);
   error  = signal(false);
+  warnings1h = signal(0);
 
   w = computed(() => {
     const d = this.detail();
@@ -171,7 +179,7 @@ export class WorkloadPeekComponent {
   constructor() {
     effect(() => {
       this.id();
-      untracked(() => { this.detail.set(null); this.ctx.set({ crashEvents: [], logs: [], revisions: [] }); this.events.set([]); this.load(); });
+      untracked(() => { this.detail.set(null); this.ctx.set({ crashEvents: [], logs: [], revisions: [] }); this.events.set([]); this.warnings1h.set(0); this.load(); });
     });
     const rs = this.refresh.refresh$.subscribe(() => this.load(true));
     inject(DestroyRef).onDestroy(() => { this.sub?.unsubscribe(); rs.unsubscribe(); });
@@ -185,8 +193,10 @@ export class WorkloadPeekComponent {
       detail: this.svc.getWorkload(id),
       ctx: this.svc.getCrashContext(id),
       events: this.svc.getWorkloadEvents(id, { limit: 100 }).pipe(catchError(() => of([] as LifecycleEvent[]))),
+      k8s: this.svc.getWorkloadK8sEvents(id, { since: hourAgoIso(), limit: 500 }).pipe(catchError(() => of([] as K8sEvent[]))),
     }).subscribe({
-      next: ({ detail, ctx, events }) => {
+      next: ({ detail, ctx, events, k8s }) => {
+        this.warnings1h.set(warningsLastHour(k8s));
         this.detail.set(detail);
         this.ctx.set(ctx);
         this.events.set(events ?? []);

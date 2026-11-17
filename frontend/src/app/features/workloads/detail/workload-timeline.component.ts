@@ -1,11 +1,12 @@
 import { Component, ChangeDetectionStrategy, input, signal, computed, inject, effect, untracked, DestroyRef } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { DatePipe } from '@angular/common';
 import { Subscription } from 'rxjs';
 
 import { ContainerService } from '../../../core/services/container.service';
 import { RefreshService } from '../../../core/services/refresh.service';
 import { ToastService } from '../../../core/services/toast.service';
-import { LifecycleEvent, Revision } from '../../../core/models/container.model';
+import { K8sEvent, LifecycleEvent, Revision } from '../../../core/models/container.model';
 import { CrashLogInlineComponent } from '../../../shared/components/crash-log-inline/crash-log-inline.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
@@ -13,6 +14,7 @@ import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import {
   eventContainerName, eventDotClass, eventLabel, eventReason, eventTextClass, hasCrashLogs, isPodReplaced, showsExitCode,
 } from '../../../shared/utils/events';
+import { isWarning, k8sObject, occurrences, spansTime } from '../../../shared/utils/k8s-events';
 import { podNameFromId } from '../../../shared/utils/source';
 import { TimelineFilter, TimelineRow, buildTimeline, shortRev } from '../../../shared/utils/timeline';
 
@@ -21,13 +23,16 @@ const FILTERS: { key: TimelineFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'problems', label: 'Problems' },
   { key: 'rollouts', label: 'Rollouts' },
+  { key: 'k8s', label: 'K8s events' },
 ];
+/** Cap for the Kubernetes events fetched alongside the loaded lifecycle pages. */
+const K8S_LIMIT = 500;
 
 /** Timeline tab: workload events (paged) merged with rollout markers from the revisions, newest first. */
 @Component({
   selector: 'app-workload-timeline',
   standalone: true,
-  imports: [RouterLink, CrashLogInlineComponent, EmptyStateComponent, ErrorStateComponent, TimeagoPipe],
+  imports: [RouterLink, DatePipe, CrashLogInlineComponent, EmptyStateComponent, ErrorStateComponent, TimeagoPipe],
   template: `
     <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
       <div class="flex border border-kymo-rule" role="group" aria-label="Filter timeline">
@@ -47,7 +52,7 @@ const FILTERS: { key: TimelineFilter; label: string }[] = [
       <div class="h-48 bg-kymo-panel border border-kymo-rule animate-pulse" aria-busy="true" aria-label="Loading timeline"></div>
     } @else if (rows().length === 0) {
       <div class="k-panel">
-        @if (events().length || revisions().length) {
+        @if (events().length || revisions().length || k8s().length) {
           <app-empty-state icon="events" [compact]="true" message="Nothing matches this filter"
             [hint]="hasMore() ? 'Older events are not loaded yet — load more below.' : 'Try another filter.'" />
         } @else {
@@ -69,6 +74,27 @@ const FILTERS: { key: TimelineFilter; label: string }[] = [
                 <p class="text-xs text-kymo-muted mt-0.5 break-words">
                   @if (r.rollout.imageChange) { image {{ r.rollout.imageChange }}, }{{ r.rollout.revision.pods }} pod{{ r.rollout.revision.pods === 1 ? '' : 's' }}
                 </p>
+              </div>
+            </li>
+          } @else if (r.kind === 'k8s') {
+            @let k = r.k8s;
+            @let warn = isWarn(k);
+            <li class="flex items-start gap-3 px-4 py-2.5" [class.opacity-70]="!warn">
+              <span class="w-3 mt-px flex-none text-center text-xs leading-4" [class]="warn ? 'text-kymo-amber' : 'text-kymo-faint'" aria-hidden="true">{{ warn ? '⚠' : '·' }}</span>
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="sr-only">{{ k.type }} Kubernetes event:</span>
+                  <span class="text-xs font-medium" [class]="warn ? 'text-kymo-amber' : 'text-kymo-muted'">{{ k.reason }}</span>
+                  @if (times(k) > 1) { <span class="text-xs tabular-nums" [class]="warn ? 'text-kymo-amber' : 'text-kymo-muted'">×{{ times(k) }}</span> }
+                  <span class="text-[10px] uppercase tracking-wide text-kymo-faint border border-kymo-rule px-1">k8s</span>
+                  <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="k.last_seen">{{ r.at | timeago }}</span>
+                </div>
+                <p class="text-[11px] text-kymo-muted truncate" [title]="object(k)">
+                  {{ object(k) }}@if (spans(k)) { · <span class="tabular-nums">{{ k.first_seen | date:'HH:mm:ss' }} → {{ k.last_seen | date:'HH:mm:ss' }}</span> }
+                </p>
+                @if (k.message) {
+                  <p class="text-xs text-kymo-muted mt-0.5 break-words line-clamp-3" [title]="k.message">{{ k.message }}</p>
+                }
               </div>
             </li>
           } @else {
@@ -127,6 +153,10 @@ export class WorkloadTimelineComponent {
   readonly showsExit = showsExitCode;
   readonly podReplaced = isPodReplaced;
   readonly crashLogs = hasCrashLogs;
+  readonly isWarn = isWarning;
+  readonly object = k8sObject;
+  readonly times = occurrences;
+  readonly spans = spansTime;
   readonly short = shortRev;
   readonly pod = (ev: LifecycleEvent) => podNameFromId(ev.container_id);
   readonly container = eventContainerName;
@@ -134,22 +164,25 @@ export class WorkloadTimelineComponent {
   filter      = signal<TimelineFilter>('all');
   events      = signal<LifecycleEvent[]>([]);
   hasMore     = signal(false);
+  /** Kubernetes events for the time window covered by the loaded lifecycle pages. */
+  k8s         = signal<K8sEvent[]>([]);
   loading     = signal(true);
   loadingMore = signal(false);
   error       = signal(false);
 
-  rows = computed<TimelineRow[]>(() => buildTimeline(this.events(), this.revisions(), this.filter(), this.hasMore()));
+  rows = computed<TimelineRow[]>(() => buildTimeline(this.events(), this.revisions(), this.filter(), this.hasMore(), this.k8s()));
 
   private sub?: Subscription;
   private moreSub?: Subscription;
+  private k8sSub?: Subscription;
 
   constructor() {
     effect(() => {
       this.workloadId();
-      untracked(() => { this.events.set([]); this.hasMore.set(false); this.loading.set(true); this.load(false); });
+      untracked(() => { this.events.set([]); this.k8s.set([]); this.hasMore.set(false); this.loading.set(true); this.load(false); });
     });
     const rs = this.refresh.refresh$.subscribe(() => this.load(true));
-    inject(DestroyRef).onDestroy(() => { rs.unsubscribe(); this.sub?.unsubscribe(); this.moreSub?.unsubscribe(); });
+    inject(DestroyRef).onDestroy(() => { rs.unsubscribe(); this.sub?.unsubscribe(); this.moreSub?.unsubscribe(); this.k8sSub?.unsubscribe(); });
   }
 
   /** First load replaces; silent refreshes merge so already-loaded older pages stay. */
@@ -169,6 +202,7 @@ export class WorkloadTimelineComponent {
         }
         this.error.set(false);
         this.loading.set(false);
+        this.loadK8s();
       },
       error: () => {
         this.loading.set(false);
@@ -189,8 +223,24 @@ export class WorkloadTimelineComponent {
         this.events.update(l => [...l, ...(older ?? []).filter(e => !have.has(e.id))]);
         this.hasMore.set((older ?? []).length >= PAGE);
         this.loadingMore.set(false);
+        this.loadK8s();
       },
       error: err => { this.loadingMore.set(false); this.toast.apiError(err, 'Failed to load older events'); },
+    });
+  }
+
+  /**
+   * Kubernetes events for the same window as the loaded lifecycle pages: from the oldest loaded event up to now,
+   * or everything once the lifecycle history is exhausted. Failures keep what is shown (the feature is additive).
+   */
+  private loadK8s(): void {
+    const evs = this.events();
+    const oldest = evs.reduce<string | null>((a, e) => (!a || e.occurred_at < a ? e.occurred_at : a), null);
+    const since = this.hasMore() && oldest ? oldest : undefined;
+    this.k8sSub?.unsubscribe();
+    this.k8sSub = this.svc.getWorkloadK8sEvents(this.workloadId(), { since, limit: K8S_LIMIT }).subscribe({
+      next: list => this.k8s.set(list),
+      error: () => {},
     });
   }
 }

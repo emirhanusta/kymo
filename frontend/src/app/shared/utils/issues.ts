@@ -1,10 +1,13 @@
-import { LifecycleEvent, WorkloadSummary } from '../../core/models/container.model';
+import { K8sEvent, LifecycleEvent, WorkloadSummary } from '../../core/models/container.model';
 import { JobRow } from './jobs';
 import { podBelongsTo, isJobKind } from './workload';
 import { podNameFromId } from './source';
+import { firstLine, occurrences } from './k8s-events';
 
 export type IssueSeverity = 'critical' | 'warning';
-export type IssueKind = 'oom' | 'crashloop' | 'degraded' | 'job-failed';
+export type IssueKind =
+  | 'oom' | 'crashloop' | 'degraded' | 'job-failed'
+  | 'scheduling' | 'image-pull' | 'evicted' | 'volume' | 'probe';
 
 export interface Issue {
   id: string;
@@ -14,6 +17,9 @@ export interface Issue {
   reason: string;
   /** Secondary facts, e.g. "1/3 pods ready". */
   detail: string;
+  /** Further problems of the same workload that lost out on severity (e.g. "Probe failing ×4"). */
+  also: string[];
+  /** '' for Kubernetes-event issues whose object belongs to no known workload (shown as `Kind/name`, no link). */
   workloadId: string;
   name: string;
   workloadKind: string;
@@ -122,6 +128,8 @@ export function deriveIssues(
   workloads: WorkloadSummary[],
   jobs: JobRow[],
   info: ReadonlyMap<string, WorkloadEventInfo>,
+  k8sWarnings: K8sEvent[] = [],
+  now = Date.now(),
 ): Issue[] {
   const out: Issue[] = [];
 
@@ -140,7 +148,7 @@ export function deriveIssues(
 
     if (oom > 0) {
       out.push({
-        ...base, id: `${w.id}#oom`, severity: 'critical', kind: 'oom', since,
+        ...base, id: `${w.id}#oom`, also: [], severity: 'critical', kind: 'oom', since,
         reason: `OOMKilled ×${oom} in 24h`,
         detail: crashing ? 'crash looping' : degraded ? ready : '',
       });
@@ -148,13 +156,13 @@ export function deriveIssues(
       // Crashing with lifetime OOMs but none in the 24h window: still reported as an OOM kill (matches statusReason).
       const wasOom = w.oom_count > 0;
       out.push({
-        ...base, id: `${w.id}#crash`, severity: 'critical', kind: wasOom ? 'oom' : 'crashloop', since,
+        ...base, id: `${w.id}#crash`, also: [], severity: 'critical', kind: wasOom ? 'oom' : 'crashloop', since,
         reason: wasOom ? 'OOMKilled' : ev?.lastExit != null ? `Crash loop · exit ${ev.lastExit}` : 'Crash loop',
         detail: degraded ? ready : '',
       });
     } else if (degraded) {
       out.push({
-        ...base, id: `${w.id}#degraded`, severity: 'warning', kind: 'degraded', since,
+        ...base, id: `${w.id}#degraded`, also: [], severity: 'warning', kind: 'degraded', since,
         reason: `Degraded (${w.running_instances}/${w.active_instances} ready)`, detail: '',
       });
     }
@@ -164,7 +172,7 @@ export function deriveIssues(
     if (j.w.kind !== 'CronJob' || j.health !== 'failing' || !j.lastFinished) continue;
     const code = j.lastFinished.exitCode;
     out.push({
-      id: `${j.w.id}#job`, severity: 'critical', kind: 'job-failed',
+      id: `${j.w.id}#job`, severity: 'critical', kind: 'job-failed', also: [],
       reason: code != null ? `Last run failed (exit ${code})` : 'Last run failed',
       detail: j.finished ? `${j.ok}/${j.finished} recent runs succeeded` : '',
       workloadId: j.w.id, name: j.w.name, workloadKind: j.w.kind, namespace: j.w.namespace ?? '',
@@ -173,8 +181,9 @@ export function deriveIssues(
     });
   }
 
+  const all = mergeK8sIssues(out, deriveK8sIssues(k8sWarnings, workloads, now));
   const rank = (i: Issue) => (i.severity === 'critical' ? 0 : 1);
-  return out.sort((a, b) => rank(a) - rank(b) || new Date(b.since).getTime() - new Date(a.since).getTime());
+  return all.sort((a, b) => rank(a) - rank(b) || new Date(b.since).getTime() - new Date(a.since).getTime());
 }
 
 /** Most specific status text for a workload: OOMKilled › CrashLoop · exit N › Crashing › plain status. */
@@ -185,4 +194,113 @@ export function statusReason(w: WorkloadSummary, info?: WorkloadEventInfo | null
     return 'Crashing';
   }
   return w.status ? w.status.charAt(0).toUpperCase() + w.status.slice(1) : 'Unknown';
+}
+
+
+// ── Issues from Kubernetes Warning events ───────────────────────────────────────────────────────────────────────
+
+/** Only Warning events seen this recently count as "open". */
+export const K8S_ISSUE_WINDOW_MS = 30 * 60_000;
+
+interface K8sProblem { kind: IssueKind; severity: IssueSeverity; reason: string; since: string; }
+
+/** Display/priority order of the problem kinds (most actionable first). */
+const K8S_PRIORITY: IssueKind[] = ['scheduling', 'image-pull', 'evicted', 'volume', 'probe'];
+
+/**
+ * Maps one Warning event to a problem kind, or null when it is not one we report.
+ *  - FailedScheduling → scheduling; Evicted → evicted; FailedMount / FailedAttachVolume → volume; Unhealthy → probe.
+ *  - ErrImagePull / ImagePullBackOff → image-pull. `Failed` and `BackOff` only when the message is about pulling an
+ *    image (plain `Failed` also covers unrelated container errors; `BackOff` otherwise is the crash-loop issue).
+ */
+export function classifyK8sWarning(e: K8sEvent): IssueKind | null {
+  const msg = e.message ?? '';
+  switch (e.reason) {
+    case 'FailedScheduling': return 'scheduling';
+    case 'ErrImagePull':
+    case 'ImagePullBackOff': return 'image-pull';
+    case 'Failed': return /pull|image/i.test(msg) ? 'image-pull' : null;
+    case 'BackOff': return /pull/i.test(msg) ? 'image-pull' : null;
+    case 'Evicted': return 'evicted';
+    case 'FailedMount':
+    case 'FailedAttachVolume': return 'volume';
+    case 'Unhealthy': return 'probe';
+    default: return null;
+  }
+}
+
+function k8sProblemText(kind: IssueKind, evs: K8sEvent[]): { severity: IssueSeverity; reason: string } {
+  const n = evs.reduce((sum, e) => sum + occurrences(e), 0);
+  switch (kind) {
+    case 'scheduling': {
+      const newest = evs.reduce((a, e) => (e.last_seen > a.last_seen ? e : a));
+      const msg = firstLine(newest.message);
+      return { severity: 'critical', reason: msg ? `Can't schedule — ${msg}` : "Can't schedule" };
+    }
+    case 'image-pull': return { severity: 'critical', reason: 'Image pull failing' };
+    case 'evicted':    return { severity: 'critical', reason: `Evicted ×${n}` };
+    case 'volume':     return { severity: 'critical', reason: 'Volume mount failing' };
+    default:           return { severity: 'warning',  reason: `Probe failing ×${n}` };
+  }
+}
+
+/**
+ * One issue per workload (or per `Kind/name` object when the event has no known workload) from Warning events whose
+ * `last_seen` is inside the window. Within a group the worst severity is the headline (ties: priority order above);
+ * the other problems become `also`.
+ */
+export function deriveK8sIssues(events: K8sEvent[], workloads: WorkloadSummary[], now = Date.now()): Issue[] {
+  const byId = new Map(workloads.map(w => [w.id, w]));
+  const groups = new Map<string, { w: WorkloadSummary | null; ev: K8sEvent; byKind: Map<IssueKind, K8sEvent[]> }>();
+
+  for (const e of events) {
+    if (e.type !== 'Warning' || now - new Date(e.last_seen).getTime() > K8S_ISSUE_WINDOW_MS) continue;
+    const kind = classifyK8sWarning(e);
+    if (!kind) continue;
+    const w = e.workload_id ? byId.get(e.workload_id) ?? null : null;
+    const key = w ? w.id : `${e.source_name}\u0000${e.namespace}\u0000${e.kind}/${e.name}`;
+    const g = groups.get(key) ?? groups.set(key, { w, ev: e, byKind: new Map() }).get(key)!;
+    (g.byKind.get(kind) ?? g.byKind.set(kind, []).get(kind)!).push(e);
+  }
+
+  const out: Issue[] = [];
+  for (const [key, g] of groups) {
+    const problems: K8sProblem[] = K8S_PRIORITY.filter(k => g.byKind.has(k)).map(kind => {
+      const evs = g.byKind.get(kind)!;
+      const since = evs.reduce((a, e) => (e.first_seen < a ? e.first_seen : a), evs[0].first_seen);
+      return { kind, since, ...k8sProblemText(kind, evs) };
+    });
+    // Stable: equal severities keep priority order.
+    problems.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === 'critical' ? -1 : 1));
+    const [main, ...rest] = problems;
+    const w = g.w;
+    out.push({
+      id: w ? `${w.id}#k8s` : `k8s:${key}`,
+      severity: main.severity, kind: main.kind, reason: main.reason, detail: '', also: rest.map(p => p.reason),
+      workloadId: w ? w.id : '',
+      name: w ? w.name : g.ev.kind ? `${g.ev.kind}/${g.ev.name}` : g.ev.name,
+      workloadKind: w ? w.kind : g.ev.kind,
+      namespace: w ? w.namespace ?? '' : g.ev.namespace,
+      source: w ? w.source_name : g.ev.source_name,
+      isSystem: w ? w.is_system : false,
+      since: main.since,
+    });
+  }
+  return out;
+}
+
+/** Folds Kubernetes-derived issues into the status-derived ones: one issue per workload, worst severity wins. */
+export function mergeK8sIssues(base: Issue[], k8s: Issue[]): Issue[] {
+  const byWorkload = new Map(base.map(i => [i.workloadId, i]));
+  const out = [...base];
+  for (const k of k8s) {
+    const cur = k.workloadId ? byWorkload.get(k.workloadId) : undefined;
+    if (!cur) { out.push(k); continue; }
+    const idx = out.indexOf(cur);
+    // Critical k8s problems outrank a warning (e.g. degraded); otherwise the existing headline stays.
+    out[idx] = k.severity === 'critical' && cur.severity === 'warning'
+      ? { ...k, id: cur.id, also: [cur.reason, ...k.also], detail: cur.detail }
+      : { ...cur, also: [...cur.also, k.reason, ...k.also] };
+  }
+  return out;
 }

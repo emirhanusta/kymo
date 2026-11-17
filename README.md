@@ -99,6 +99,19 @@ sensitive data — set `enabled: false` to disable. The source's kubeconfig need
 `get` on `pods/log`. API: `GET /api/v1/workloads/:id/crash-logs`,
 `GET /api/v1/containers/:id/crash-logs[?occurred_at=...]`.
 
+**Kubernetes Events:** events expire in the cluster after about an hour, so
+KYMO persists them (90 days) and links each to its workload where it can (Pod,
+ReplicaSet, Deployment, StatefulSet, DaemonSet, Job, CronJob). `Warning` events
+are always kept; `Normal` events only for the reasons in
+`collector.k8s_events.normal_reasons` (default: ScalingReplicaSet,
+SuccessfulCreate, SuccessfulDelete, Killing, SawCompletedJob, SuccessfulRescale,
+Preempted, Rebooted, NodeNotReady, RegisteredNode, RemovingNode, Evicted).
+`collector.k8s_events.enabled` (default `true`) and
+`collector.k8s_events.exclude_namespaces` (default none) control the rest. The
+source's kubeconfig needs `list` and `watch` on `events` (core API group,
+cluster-wide). API: `GET /api/v1/k8s-events[?source&namespace&type&reason&workload_id&q&since&before&limit]`,
+`GET /api/v1/workloads/:id/k8s-events`, `GET /api/v1/k8s-events/reasons[?source&since]`.
+
 **Revisions:** each container records its pod's revision
 (`pod-template-hash`, `controller-revision-hash`, or the Job name);
 `GET /api/v1/workloads/:id/revisions` lists rollouts newest first.

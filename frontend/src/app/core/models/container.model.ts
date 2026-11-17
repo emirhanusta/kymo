@@ -174,6 +174,8 @@ export interface RemovedSource {
   workloads: number;
   containers: number;
   cronjob_runs: number;
+  /** Recorded Kubernetes events (absent on older backends). */
+  k8s_events?: number;
   first_seen_at: string;
   last_seen_at: string;
 }
@@ -357,4 +359,54 @@ export interface WorkloadEventsQuery {
   limit?: number;
   before?: string;
   type?: LifecycleEventType | '';
+}
+
+/** A persisted Kubernetes Event (repeats are aggregated into one row with `count`). */
+export interface K8sEvent {
+  id: number;
+  source_name: string;
+  uid: string;
+  namespace: string;
+  kind: string;
+  name: string;
+  /** Owning workload; "" when unknown. */
+  workload_id: string;
+  type: 'Normal' | 'Warning';
+  reason: string;
+  message: string;
+  count: number;
+  first_seen: string;
+  last_seen: string;
+  component: string;
+}
+
+export type K8sEventType = 'Normal' | 'Warning';
+
+/** GET /k8s-events. Newest `last_seen` first; `before` is a `last_seen` cursor. */
+export interface K8sEventsQuery {
+  source?: string;
+  namespace?: string;
+  type?: K8sEventType | '';
+  reason?: string;
+  workload_id?: string;
+  q?: string;
+  /** RFC3339; only events seen at or after this. */
+  since?: string;
+  before?: string;
+  /** Default 100, max 500. */
+  limit?: number;
+}
+
+/** GET /workloads/:id/k8s-events. */
+export interface WorkloadK8sEventsQuery {
+  since?: string;
+  before?: string;
+  limit?: number;
+}
+
+/** GET /k8s-events/reasons. */
+export interface K8sReasonCount {
+  reason: string;
+  type: K8sEventType;
+  count: number;
 }

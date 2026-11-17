@@ -104,6 +104,9 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		v1.GET("/workloads/:id/resources", h.GetWorkloadResources)
 		v1.GET("/workloads/:id/crash-logs", h.GetWorkloadCrashLogs)
 		v1.GET("/workloads/:id/revisions", h.GetWorkloadRevisions)
+		v1.GET("/workloads/:id/k8s-events", h.GetWorkloadK8sEvents)
+		v1.GET("/k8s-events", h.ListK8sEvents)
+		v1.GET("/k8s-events/reasons", h.GetK8sEventReasons)
 		v1.GET("/workloads/:id/score/history", h.GetWorkloadScoreHistory)
 
 		// Recent events endpoint (cross-container)

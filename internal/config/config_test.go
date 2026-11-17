@@ -97,3 +97,14 @@ func TestCrashLogsNormalized(t *testing.T) {
 		t.Fatalf("normalized = %+v", got)
 	}
 }
+
+func TestK8sEventsDefaults(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := cfg.Collector.K8sEvents
+	if !k.Enabled || len(k.NormalReasons) != len(DefaultK8sEventNormalReasons) || len(k.ExcludeNamespaces) != 0 {
+		t.Fatalf("defaults: %+v", k)
+	}
+}

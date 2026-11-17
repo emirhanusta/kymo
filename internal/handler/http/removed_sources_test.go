@@ -49,7 +49,7 @@ func (nopCollector) Stats(context.Context, string) (*model.ResourceSample, error
 func removedRouter(t *testing.T, hist map[string]model.SourceHistory) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
-	rec := service.NewRecorderService(&histRepo{history: hist}, nil, nil, nil, nil, nil, nil,
+	rec := service.NewRecorderService(&histRepo{history: hist}, nil, nil, nil, nil, nil, nil, nil,
 		service.ScoringConfig{Interval: time.Hour}, zap.NewNop())
 	rec.AttachSource(model.SourceSpec{Name: "live", Type: model.SourceTypeKubernetes}, nopCollector{}, nil)
 	box, _ := secret.New("")

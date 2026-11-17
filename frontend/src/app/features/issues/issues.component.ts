@@ -44,7 +44,7 @@ export class IssuesComponent {
     ]).filter(g => g.items.length > 0);
   });
 
-  readonly peek = new PeekController(() => this.groups().flatMap(g => g.items.map(i => i.workloadId)));
+  readonly peek = new PeekController(() => this.groups().flatMap(g => g.items.map(i => i.workloadId).filter(Boolean)));
 
   ledClass(i: Issue): string {
     return i.severity === 'critical' ? 'bg-kymo-danger' : 'bg-kymo-amber';

@@ -5,9 +5,9 @@ import { catchError, map, switchMap } from 'rxjs/operators';
 import { ContainerService } from './container.service';
 import { RefreshService } from './refresh.service';
 import { SourceStateService } from './source-state.service';
-import { LifecycleEvent, WorkloadSummary } from '../models/container.model';
+import { K8sEvent, LifecycleEvent, WorkloadSummary } from '../models/container.model';
 import { JobInfo, JobRow, buildJobRow } from '../../shared/utils/jobs';
-import { unmatchedContainerIds } from '../../shared/utils/issues';
+import { K8S_ISSUE_WINDOW_MS, unmatchedContainerIds } from '../../shared/utils/issues';
 
 const RUN_LIMIT = 20;
 /** Cap on one-off GET /containers/:id lookups for events that cannot be attributed by pod name. */
@@ -28,6 +28,8 @@ export class WorkloadStateService {
   readonly jobInfos  = signal<JobInfo[]>([]);
   /** Recent OOM + crash events, newest first. */
   readonly events    = signal<LifecycleEvent[]>([]);
+  /** Warning Kubernetes events of the last 30 minutes (all clusters), the input of the k8s-derived issues. */
+  readonly k8sWarnings = signal<K8sEvent[]>([]);
   /** container id → exact workload id (null = unknown), for events pod-name matching could not place. */
   readonly containerWorkloads = signal<ReadonlyMap<string, string | null>>(new Map());
 
@@ -62,6 +64,10 @@ export class WorkloadStateService {
       workloads: this.svc.getWorkloads({ system: true }),
       oom:   this.svc.queryRecentEvents({ type: 'oom', limit: 100 }).pipe(catchError(() => of(null))),
       crash: this.svc.queryRecentEvents({ type: 'crash', limit: 100 }).pipe(catchError(() => of(null))),
+      // One request per refresh; older backends without /k8s-events simply yield no extra issues.
+      k8s: this.svc.queryK8sEvents({
+        type: 'Warning', since: new Date(Date.now() - K8S_ISSUE_WINDOW_MS).toISOString(), limit: 500,
+      }).pipe(catchError(() => of(null))),
     }).pipe(
       switchMap(base => {
         const ws = (base.workloads ?? []).map(w => ({ ...w, images: w.images ?? [], containers: w.containers ?? [] }));
@@ -89,6 +95,7 @@ export class WorkloadStateService {
         this.workloads.set(ws);
         this.jobInfos.set(infos);
         this.events.set(events);
+        if (base.k8s) this.k8sWarnings.set(base.k8s);
         this.error.set(false);
         this.loaded.set(true);
         this.refresh.markUpdated();
