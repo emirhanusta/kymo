@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -103,6 +104,19 @@ type RecorderService interface {
 	// ordered by occurred_at descending. q.Limit is clamped to [1, 200].
 	GetRecentEvents(ctx context.Context, q repository.EventQuery) ([]*model.LifecycleEvent, error)
 
+	// --- Workloads ---
+
+	// ListWorkloads returns one summary per workload (all instances aggregated).
+	ListWorkloads(ctx context.Context, f repository.WorkloadFilter) ([]*model.WorkloadSummary, error)
+	// GetWorkload returns a workload summary, or (nil, nil) when unknown.
+	GetWorkload(ctx context.Context, id string) (*model.WorkloadSummary, error)
+	// GetWorkloadScore returns the latest workload score, or (nil, nil).
+	GetWorkloadScore(ctx context.Context, id string) (*model.WorkloadScore, error)
+	// GetWorkloadScoreHistory returns the n most recent workload scores, newest first.
+	GetWorkloadScoreHistory(ctx context.Context, id string, n int) ([]*model.WorkloadScore, error)
+	// GetWorkloadResources returns usage summed over all instances, bucketed.
+	GetWorkloadResources(ctx context.Context, id string, from, to time.Time) ([]*model.ResourceSample, error)
+
 	// --- Source registry ---
 
 	// AttachSource registers a source and its collector. c may be nil when the
@@ -187,6 +201,7 @@ type recorderService struct {
 	resources  repository.ResourceRepository
 	scores     repository.ScoreRepository
 	cronJobs   repository.CronJobRepository
+	workloads  repository.WorkloadRepository
 	scorer     stability.StabilityScorer
 	scoring    ScoringConfig
 	log        *zap.Logger
@@ -244,6 +259,7 @@ func NewRecorderService(
 	resources repository.ResourceRepository,
 	scores repository.ScoreRepository,
 	cronJobs repository.CronJobRepository,
+	workloads repository.WorkloadRepository,
 	scoring ScoringConfig,
 	log *zap.Logger,
 ) RecorderService {
@@ -259,6 +275,7 @@ func NewRecorderService(
 		resources:  resources,
 		scores:     scores,
 		cronJobs:   cronJobs,
+		workloads:  workloads,
 		scorer:     stability.NewScorer(events, resources, scores, log),
 		scoring:    scoring,
 		log:        log,
@@ -316,8 +333,6 @@ func (s *recorderService) Run(ctx context.Context) error {
 
 // AttachSource registers (or replaces) a source; see RecorderService.
 func (s *recorderService) AttachSource(spec model.SourceSpec, c collector.Collector, initErr error) {
-	s.DetachSource(spec.Name)
-
 	e := &sourceEntry{spec: spec, collector: c, initErr: initErr}
 	switch {
 	case !spec.Enabled:
@@ -332,10 +347,23 @@ func (s *recorderService) AttachSource(spec model.SourceSpec, c collector.Collec
 		e.health = sourceHealth{status: SourceConnecting}
 	}
 
+	// Swap the new entry in first so the source stays listed (as connecting)
+	// while a replaced collector shuts down, which can take a while for a
+	// Kubernetes source still delivering its initial pod list.
 	s.mu.Lock()
+	old := s.entries[spec.Name]
 	s.entries[spec.Name] = e
-	s.order = append(s.order, spec.Name)
-	if s.runCtx != nil {
+	if old == nil {
+		s.order = append(s.order, spec.Name)
+	}
+	s.mu.Unlock()
+
+	if old != nil {
+		s.stopEntry(old)
+	}
+
+	s.mu.Lock()
+	if s.runCtx != nil && s.entries[spec.Name] == e {
 		s.startEntry(e)
 	}
 	s.mu.Unlock()
@@ -676,28 +704,93 @@ func (s *recorderService) scoringLoop(ctx context.Context) {
 }
 
 func (s *recorderService) scoreAllContainers(ctx context.Context) {
-	containers, err := s.containers.FindAll(ctx, repository.ContainerFilter{})
+	now := time.Now().UTC()
+	windowStart := now.Add(-s.scoring.Window)
+
+	// Containers not seen during the window (e.g. pods replaced long ago) have
+	// nothing new to score; skipping them keeps the pass proportional to the
+	// live estate rather than to all history.
+	containers, err := s.containers.FindAll(ctx, repository.ContainerFilter{SeenSince: windowStart})
 	if err != nil {
 		s.log.Error("scoring loop: failed to list containers", zap.Error(err))
 		return
 	}
 
-	now := time.Now().UTC()
+	type workloadAcc struct {
+		source  string
+		members []stability.Analysis
+	}
+	byWorkload := make(map[string]*workloadAcc)
+
 	for _, c := range containers {
 		if ctx.Err() != nil {
 			return
 		}
-		from := now.Add(-s.scoring.Window)
+		from := windowStart
 		if c.FirstSeenAt.After(from) {
 			from = c.FirstSeenAt
 		}
-		if _, err := s.scorer.Score(ctx, c, from, now); err != nil {
+		_, analysis, err := s.scorer.Evaluate(ctx, c, from, now)
+		if err != nil {
 			s.log.Error("scoring loop: failed to score container",
 				zap.String("container_id", c.ID),
 				zap.Error(err))
+			continue
+		}
+		if c.WorkloadID == "" {
+			continue
+		}
+		acc := byWorkload[c.WorkloadID]
+		if acc == nil {
+			acc = &workloadAcc{source: c.SourceName}
+			byWorkload[c.WorkloadID] = acc
+		}
+		acc.members = append(acc.members, analysis)
+	}
+
+	for id, acc := range byWorkload {
+		score := stability.ComputeWorkload(id, acc.source, acc.members, stability.DefaultWeights())
+		if err := s.workloads.SaveScore(ctx, score); err != nil {
+			s.log.Error("scoring loop: failed to save workload score", zap.String("workload_id", id), zap.Error(err))
 		}
 	}
-	s.log.Debug("scoring pass complete", zap.Int("containers", len(containers)))
+	s.log.Debug("scoring pass complete",
+		zap.Int("containers", len(containers)), zap.Int("workloads", len(byWorkload)))
+}
+
+// ---------------------------------------------------------------------------
+// Workloads
+// ---------------------------------------------------------------------------
+
+func (s *recorderService) ListWorkloads(ctx context.Context, f repository.WorkloadFilter) ([]*model.WorkloadSummary, error) {
+	return s.workloads.List(ctx, f)
+}
+
+func (s *recorderService) GetWorkload(ctx context.Context, id string) (*model.WorkloadSummary, error) {
+	w, err := s.workloads.Get(ctx, id)
+	if errors.Is(err, repository.ErrNotFound) {
+		return nil, nil
+	}
+	return w, err
+}
+
+func (s *recorderService) GetWorkloadScore(ctx context.Context, id string) (*model.WorkloadScore, error) {
+	return s.workloads.LatestScore(ctx, id)
+}
+
+func (s *recorderService) GetWorkloadScoreHistory(ctx context.Context, id string, n int) ([]*model.WorkloadScore, error) {
+	if n <= 0 || n > 1440 {
+		n = 60
+	}
+	return s.workloads.ScoreHistory(ctx, id, n)
+}
+
+func (s *recorderService) GetWorkloadResources(ctx context.Context, id string, from, to time.Time) ([]*model.ResourceSample, error) {
+	bucket := 30 * time.Second
+	if span := to.Sub(from); span > rawResourceRange {
+		bucket = (span / maxResourcePoints).Truncate(time.Second)
+	}
+	return s.workloads.Resources(ctx, id, from, to, bucket)
 }
 
 func (s *recorderService) GetContainer(ctx context.Context, id string) (*model.Container, error) {

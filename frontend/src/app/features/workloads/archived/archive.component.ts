@@ -4,19 +4,19 @@ import {
 import { DatePipe } from '@angular/common';
 import { forkJoin, Observable } from 'rxjs';
 
-import { ContainerService } from '../../core/services/container.service';
-import { ToastService } from '../../core/services/toast.service';
-import { RefreshService } from '../../core/services/refresh.service';
-import { SourceStateService } from '../../core/services/source-state.service';
-import { reloadOnSourceAndRefresh } from '../../core/utils/page-reload';
-import { ActionResult, Container } from '../../core/models/container.model';
-import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
-import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
-import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
-import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
-import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
-import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
-import { ConfirmDialogComponent } from '../../shared/components/confirm-dialog/confirm-dialog.component';
+import { ContainerService } from '../../../core/services/container.service';
+import { ToastService } from '../../../core/services/toast.service';
+import { RefreshService } from '../../../core/services/refresh.service';
+import { SourceStateService } from '../../../core/services/source-state.service';
+import { reloadOnSourceAndRefresh } from '../../../core/utils/page-reload';
+import { ActionResult, Container } from '../../../core/models/container.model';
+import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
+import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
+import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
+import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
+import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
+import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.component';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 
 interface PendingConfirm {
   title: string;

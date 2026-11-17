@@ -169,8 +169,15 @@ export class ContainerDetailComponent {
   canRestart = computed(() => ['running', 'paused'].includes(this.status()));
   canKill    = computed(() => ['running', 'paused', 'crashing'].includes(this.status()));
 
-  readonly backPath = '/containers';
-  readonly backLabel = 'Containers';
+  /** Breadcrumb goes back to the owning workload when known, else the workload list. */
+  backPath  = computed<string | unknown[]>(() => {
+    const id = this.container()?.workload_id;
+    return id ? ['/workloads', id] : '/workloads';
+  });
+  backLabel = computed(() => {
+    const c = this.container();
+    return c?.workload_id && c.workload_name ? c.workload_name : 'Workloads';
+  });
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
 

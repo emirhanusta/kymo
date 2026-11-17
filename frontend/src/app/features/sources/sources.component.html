@@ -12,6 +12,11 @@
         No sources
       }
     </ng-container>
+    @if (meta()?.config_file) {
+      <button type="button" class="k-btn" [disabled]="reloading()" (click)="reloadConfig()" title="Re-read config.yaml and apply its sources now">
+        {{ reloading() ? 'Reloading…' : 'Reload config.yaml' }}
+      </button>
+    }
     <button type="button" class="k-btn k-btn-primary" (click)="openAdd()">
       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M12 5v14M5 12h14" /></svg>
       Add source
@@ -79,16 +84,16 @@
               <td class="px-4 py-3 align-top text-right whitespace-nowrap">
                 @if (src.container_count > 0) {
                   <a
-                    routerLink="/containers"
+                    routerLink="/workloads"
                     class="text-xs tabular-nums hover:text-kymo-amber"
-                    [title]="'Show containers of ' + src.name"
+                    [title]="'Show workloads of ' + src.name"
                     (click)="state.select(src.name)"
                   >
                     <span class="text-kymo-running">{{ src.running_count }}</span>
                     <span class="text-kymo-faint"> / </span>
                     <span class="text-kymo-ink">{{ src.container_count }}</span>
                   </a>
-                  <div class="text-[10px] text-kymo-faint">running / total</div>
+                  <div class="text-[10px] text-kymo-faint">running / total containers</div>
                 } @else {
                   <span class="text-xs text-kymo-faint tabular-nums">0</span>
                 }
@@ -144,8 +149,18 @@
       </table>
     </div>
     <p class="text-[11px] text-kymo-faint">
-      Sources from <span class="text-kymo-muted">config.yaml</span> are read at startup and can't be changed here. Sources added in the UI are stored in the database and survive restarts.
+      Sources from <span class="text-kymo-muted">config.yaml</span> are applied automatically when the file changes.
+      @if (meta()?.config_file; as file) {
+        <span class="font-mono text-kymo-muted break-all">{{ file }}</span>
+        @if (meta()?.config_sync?.reloaded_at; as at) {
+          · last synced {{ at | timeago }}
+        }
+      }
+      Sources added in the UI are stored in the database and survive restarts.
     </p>
+    @if (meta()?.config_sync?.error; as err) {
+      <p class="text-[11px] text-kymo-danger break-words">config.yaml is invalid, keeping current sources: {{ err }}</p>
+    }
   }
 </div>
 

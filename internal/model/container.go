@@ -133,6 +133,10 @@ type Container struct {
 	// False for Docker containers.
 	IsSystem bool `json:"is_system" db:"is_system"`
 
+	// WorkloadID is model.WorkloadID(SourceName, Namespace, WorkloadKind,
+	// WorkloadName); empty for containers that belong to no workload.
+	WorkloadID string `json:"workload_id,omitempty" db:"workload_id"`
+
 	// Score is the most recently computed stability score (0–100), populated by
 	// read queries via a lateral join. Nil when no score has been computed yet.
 	// It is never written through the containers table.

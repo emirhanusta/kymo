@@ -16,8 +16,8 @@
         aria-controls="kymo-palette-list"
         [attr.aria-expanded]="items().length > 0"
         [attr.aria-activedescendant]="items().length ? optionId(active()) : null"
-        aria-label="Search pages and containers"
-        placeholder="jump to page or container…"
+        aria-label="Search pages, workloads and containers"
+        placeholder="jump to page, workload or container…"
         autocomplete="off"
         spellcheck="false"
         class="flex-1 h-11 bg-transparent text-sm text-kymo-ink placeholder:text-kymo-faint outline-none focus-visible:outline-none"
@@ -36,7 +36,10 @@
         @if (i === 0 && item.kind === 'page') {
           <li role="presentation" class="k-label px-3 pt-2 pb-1">Pages</li>
         }
-        @if (item.kind === 'container' && (i === 0 || items()[i - 1].kind === 'page')) {
+        @if (item.kind === 'workload' && (i === 0 || items()[i - 1].kind === 'page')) {
+          <li role="presentation" class="k-label px-3 pt-3 pb-1 border-t border-kymo-rule mt-1 first:border-t-0 first:mt-0">Workloads</li>
+        }
+        @if (item.kind === 'container' && (i === 0 || items()[i - 1].kind !== 'container')) {
           <li role="presentation" class="k-label px-3 pt-3 pb-1 border-t border-kymo-rule mt-1 first:border-t-0 first:mt-0">Containers</li>
         }
         <li
@@ -54,6 +57,12 @@
             <span class="text-kymo-faint w-3" aria-hidden="true">#</span>
             <span class="flex-1 text-kymo-ink">{{ item.label }}</span>
             <span class="text-kymo-faint">{{ item.path }}</span>
+          } @else if (item.kind === 'workload') {
+            <app-status-badge [status]="item.workload.status" compact />
+            <app-workload-badge [kind]="item.workload.kind" />
+            <span class="flex-1 min-w-0 truncate" [class]="i === active() ? 'text-kymo-amber' : 'text-kymo-ink'">{{ item.workload.name }}</span>
+            <span class="text-kymo-muted truncate max-w-[30%]">{{ item.workload.source_name }}</span>
+            <span class="w-8 text-right tabular-nums font-medium" [class]="item.workload.score | scoreClass">{{ formatScore(item.workload.score) }}</span>
           } @else {
             <app-status-badge [status]="item.container.current_status" compact />
             <span class="flex-1 min-w-0 truncate" [class]="i === active() ? 'text-kymo-amber' : 'text-kymo-ink'">{{ item.container.name }}</span>
@@ -62,8 +71,8 @@
           }
         </li>
       }
-      @if (query().trim() && !searching() && containers().length === 0) {
-        <li role="presentation" class="px-3 py-3 text-xs text-kymo-faint">no containers match “{{ query() }}”</li>
+      @if (query().trim() && !searching() && containers().length === 0 && workloads().length === 0) {
+        <li role="presentation" class="px-3 py-3 text-xs text-kymo-faint">no workloads or containers match “{{ query() }}”</li>
       }
     </ul>
 

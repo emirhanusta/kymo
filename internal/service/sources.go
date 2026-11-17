@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	containertypes "github.com/docker/docker/api/types/container"
@@ -86,6 +87,12 @@ type SourceManager struct {
 	mgmt     ManagementService
 	factory  CollectorFactory
 	log      *zap.Logger
+
+	syncMu      sync.Mutex
+	configSpecs map[string]model.SourceSpec // config-origin sources currently applied
+	configFile  string
+	loadSpecs   func() ([]model.SourceSpec, error)
+	lastSync    *ConfigSync
 }
 
 // NewSourceManager wires a SourceManager.
@@ -100,10 +107,14 @@ func (m *SourceManager) SecretConfigured() bool { return m.box.Configured() }
 // Bootstrap attaches config.yaml sources, then database sources. A database
 // source whose name collides with a config source is skipped.
 func (m *SourceManager) Bootstrap(ctx context.Context, configSpecs []model.SourceSpec) error {
+	m.syncMu.Lock()
+	m.configSpecs = make(map[string]model.SourceSpec, len(configSpecs))
 	for _, spec := range configSpecs {
 		spec.Origin = model.SourceOriginConfig
+		m.configSpecs[spec.Name] = spec
 		m.attach(spec, nil)
 	}
+	m.syncMu.Unlock()
 	stored, err := m.repo.List(ctx)
 	if err != nil {
 		return err

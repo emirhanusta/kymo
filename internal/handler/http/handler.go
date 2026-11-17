@@ -50,6 +50,7 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		v1.GET("/sources", h.ListSources)
 		v1.POST("/sources", h.CreateSource)
 		v1.POST("/sources/test", h.TestSource)
+		v1.POST("/sources/reload", h.ReloadSources)
 		v1.POST("/sources/contexts", h.SourceContexts)
 		v1.PUT("/sources/:name", h.UpdateSource)
 		v1.DELETE("/sources/:name", h.DeleteSource)
@@ -95,6 +96,13 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		// CronJob tracking endpoints (Kubernetes)
 		v1.GET("/cronjobs", h.ListCronJobs)
 		v1.GET("/cronjobs/:namespace/:name/executions", h.GetCronJobExecutions)
+
+		// Workloads (all instances of a Deployment / StatefulSet / … aggregated)
+		v1.GET("/workloads", h.ListWorkloads)
+		v1.GET("/workloads/:id", h.GetWorkload)
+		v1.GET("/workloads/:id/events", h.GetWorkloadEvents)
+		v1.GET("/workloads/:id/resources", h.GetWorkloadResources)
+		v1.GET("/workloads/:id/score/history", h.GetWorkloadScoreHistory)
 
 		// Recent events endpoint (cross-container)
 		v1.GET("/events/recent", h.GetRecentEvents)

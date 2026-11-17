@@ -58,6 +58,7 @@
             <th>Time</th>
             <th>Event</th>
             <th>Container</th>
+            <th class="hidden sm:table-cell">Pod</th>
             @if (showSourceColumn()) {
               <th class="hidden md:table-cell">Source</th>
             }
@@ -91,6 +92,7 @@
                   <div class="text-[11px] text-kymo-faint uppercase tracking-[0.06em]">{{ ev.runtime === 'kubernetes' ? 'k8s' : 'docker' }}</div>
                 }
               </td>
+              <td class="px-4 py-2 text-xs text-kymo-muted hidden sm:table-cell truncate max-w-[16rem]" [title]="pod(ev)">{{ pod(ev) || '—' }}</td>
               @if (showSourceColumn()) {
                 <td class="px-4 py-2 text-xs text-kymo-muted hidden md:table-cell truncate max-w-[10rem]">{{ ev.source_name || '—' }}</td>
               }

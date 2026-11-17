@@ -2,6 +2,12 @@
 # Every key can also be set via environment variables prefixed with KYMO_
 # (nested keys joined by "_"), e.g. KYMO_DATABASE_DSN, KYMO_SERVER_ADDRESS.
 # config.yaml is read from the working directory or /etc/kymo/.
+#
+# Live reload: edits to collector.sources are applied automatically while KYMO
+# runs (or via the "Reload config.yaml" button / POST /api/v1/sources/reload).
+# An invalid file is rejected and the current sources keep running. Every other
+# setting (server, database, log, secret_key, poll/scoring intervals) needs a
+# restart.
 
 server:
   address: ":8080"
@@ -25,8 +31,10 @@ collector:
   stats_poll_interval: "15s"   # default resource sampling interval
   scoring_interval: "60s"      # how often stability scores are recomputed
   scoring_window: "24h"        # look-back window for scoring
-  # Sources declared here are locked in the UI. Sources can also be added,
-  # edited and removed at runtime from the Sources page (stored in the database).
+  # Sources declared here are locked in the UI and reloaded live when this file
+  # changes (added, changed and removed sources are applied without a restart).
+  # Sources can also be added, edited and removed at runtime from the Sources
+  # page (stored in the database); a name used here must not clash with them.
   sources:
     - name: "local-docker"
       type: "docker"

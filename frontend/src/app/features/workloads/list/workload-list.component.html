@@ -1,0 +1,170 @@
+<div class="space-y-4">
+  <app-page-header title="Workloads" subtitle="Everything KYMO records, grouped by workload: Deployments, StatefulSets, DaemonSets, CronJobs, Jobs, Compose projects and standalone containers" />
+
+  <!-- Toolbar -->
+  <div class="flex items-center justify-between gap-3 flex-wrap">
+    <p class="text-xs text-kymo-muted" aria-live="polite">
+      @if (loading()) {
+        Loading…
+      } @else if (filtered().length > 0) {
+        {{ filtered().length }} workload{{ filtered().length === 1 ? '' : 's' }}{{ hasFilters() ? ' match' : '' }}
+      } @else {
+        No workloads
+      }
+    </p>
+    <div class="flex items-center gap-2 flex-wrap">
+      <select aria-label="Filter by namespace" class="k-input cursor-pointer" [value]="namespace()" (change)="setNamespace($any($event.target).value)">
+        <option value="" [selected]="!namespace()">All namespaces</option>
+        @for (ns of namespaces(); track ns) {
+          <option [value]="ns" [selected]="ns === namespace()">{{ ns }}</option>
+        }
+      </select>
+      <select aria-label="Filter by status" class="k-input cursor-pointer" [value]="status()" (change)="setStatus($any($event.target).value)">
+        @for (o of statusOptions; track o.value) {
+          <option [value]="o.value" [selected]="o.value === status()">{{ o.label }}</option>
+        }
+      </select>
+      <label class="flex items-center gap-1.5 text-xs text-kymo-muted cursor-pointer h-[1.875rem]">
+        <input type="checkbox" [checked]="system()" (change)="setSystem($any($event.target).checked)" />
+        Show system
+      </label>
+      <div class="relative">
+        <input
+          appSearchHotkey
+          type="search"
+          placeholder="Search workloads…"
+          aria-label="Search workloads"
+          class="k-input pr-8 w-52 sm:w-60"
+          [value]="searchText()"
+          (input)="onSearch($any($event.target).value)"
+          (keydown.escape)="onSearch('')"
+        />
+        <kbd class="k-kbd hidden sm:inline-flex absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">/</kbd>
+      </div>
+    </div>
+  </div>
+
+  <!-- Kind chips -->
+  <div class="flex border border-kymo-rule w-fit max-w-full overflow-x-auto scrollbar-none" role="group" aria-label="Filter by kind">
+    @for (k of kindChips; track k.value) {
+      <button
+        type="button"
+        class="px-3 h-7 text-xs whitespace-nowrap transition-colors border-r border-kymo-rule last:border-r-0 flex items-center gap-1.5"
+        [class]="kind() === k.value ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+        [attr.aria-pressed]="kind() === k.value"
+        (click)="setKind(k.value)"
+      >
+        {{ k.label }}
+        @if (!loading()) {
+          <span class="tabular-nums" [class]="kind() === k.value ? 'opacity-70' : 'text-kymo-faint'">{{ kindCounts().get(k.value) ?? 0 }}</span>
+        }
+      </button>
+    }
+  </div>
+
+  @if (error()) {
+    <app-error-state message="Failed to load workloads" (retry)="loading.set(true); error.set(false); load()" />
+  }
+
+  @if (loading()) {
+    <app-skeleton [rows]="8" />
+  } @else if (filtered().length === 0 && !error()) {
+    <div class="k-panel">
+      @if (hasFilters()) {
+        <app-empty-state icon="search" message="No workloads match your filters" hint="Try another kind, namespace, status or search term.">
+          <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" (click)="clearFilters()">Clear filters</button>
+        </app-empty-state>
+      } @else {
+        <app-empty-state icon="box" message="No workloads recorded yet" hint="Workloads appear here once a source is connected and the collector has seen its pods or containers.">
+          <a routerLink="/sources" class="mt-4 text-xs text-kymo-amber hover:underline underline-offset-4">Manage sources →</a>
+        </app-empty-state>
+      }
+    </div>
+  } @else if (filtered().length > 0) {
+    <div class="k-panel overflow-hidden">
+      <div class="overflow-auto max-h-[calc(100vh-19rem)] scrollbar-thin">
+        <table class="k-table border-separate border-spacing-0">
+          <thead class="sticky top-0 z-10">
+            <tr>
+              <th [attr.aria-sort]="ariaSort('name')">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'name'" (click)="setSort('name')">Workload <span class="text-kymo-amber">{{ sortIndicator('name') }}</span></button>
+              </th>
+              <th [attr.aria-sort]="ariaSort('kind')" class="hidden sm:table-cell">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'kind'" (click)="setSort('kind')">Kind <span class="text-kymo-amber">{{ sortIndicator('kind') }}</span></button>
+              </th>
+              <th [attr.aria-sort]="ariaSort('instances')" class="text-right">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'instances'" (click)="setSort('instances')" title="Running / active pods or containers (total ever recorded)">Pods <span class="text-kymo-amber">{{ sortIndicator('instances') }}</span></button>
+              </th>
+              <th [attr.aria-sort]="ariaSort('starts')" class="text-right hidden lg:table-cell">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'starts'" (click)="setSort('starts')" title="Lifetime restarts (first boots excluded)">Restarts <span class="text-kymo-amber">{{ sortIndicator('starts') }}</span></button>
+              </th>
+              <th [attr.aria-sort]="ariaSort('crashes')" class="text-right hidden md:table-cell">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'crashes'" (click)="setSort('crashes')">Crashes <span class="text-kymo-amber">{{ sortIndicator('crashes') }}</span></button>
+              </th>
+              <th [attr.aria-sort]="ariaSort('ooms')" class="text-right hidden md:table-cell">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'ooms'" (click)="setSort('ooms')">OOM <span class="text-kymo-amber">{{ sortIndicator('ooms') }}</span></button>
+              </th>
+              <th [attr.aria-sort]="ariaSort('score')" class="text-right">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'score'" (click)="setSort('score')">Score <span class="text-kymo-amber">{{ sortIndicator('score') }}</span></button>
+              </th>
+              <th class="hidden xl:table-cell">Image</th>
+              <th [attr.aria-sort]="ariaSort('last_seen')" class="text-right">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-amber]="sortField() === 'last_seen'" (click)="setSort('last_seen')">Last seen <span class="text-kymo-amber">{{ sortIndicator('last_seen') }}</span></button>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (w of paged(); track w.id) {
+              <tr class="hover:bg-kymo-raised transition-colors group">
+                <td class="px-4 py-2.5 max-w-[18rem]">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <span class="k-led" [class]="dotClass(w.status)" [title]="w.status" role="img" [attr.aria-label]="'Status ' + w.status"></span>
+                    <div class="min-w-0">
+                      <a
+                        [routerLink]="['/workloads', w.id]"
+                        class="block text-kymo-ink font-medium truncate group-hover:text-kymo-amber hover:underline underline-offset-4"
+                        [title]="w.name"
+                      >{{ w.name }}</a>
+                      <div class="text-[11px] text-kymo-faint truncate">
+                        {{ w.namespace || '—' }} · {{ w.source_name }}@if (w.is_system) { · system}
+                      </div>
+                    </div>
+                  </div>
+                </td>
+                <td class="px-4 py-2.5 hidden sm:table-cell"><app-workload-badge [kind]="w.kind" /></td>
+                <td class="px-4 py-2.5 text-right text-xs tabular-nums whitespace-nowrap" [title]="w.running_instances + ' running of ' + w.active_instances + ' active, ' + w.instances + ' ever recorded'">
+                  <span [class]="w.running_instances === w.active_instances && w.active_instances > 0 ? 'text-kymo-running' : w.running_instances === 0 ? 'text-kymo-muted' : 'text-kymo-amber'">{{ w.running_instances }}/{{ w.active_instances }}</span>
+                  <span class="text-kymo-faint"> ({{ w.instances }})</span>
+                </td>
+                <td class="px-4 py-2.5 text-right text-xs tabular-nums hidden lg:table-cell text-kymo-muted">{{ w.restart_count }}</td>
+                <td class="px-4 py-2.5 text-right text-xs tabular-nums hidden md:table-cell" [class]="w.crash_count > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ w.crash_count }}</td>
+                <td class="px-4 py-2.5 text-right text-xs tabular-nums hidden md:table-cell" [class]="w.oom_count > 0 ? 'text-kymo-amber' : 'text-kymo-faint'">{{ w.oom_count }}</td>
+                <td class="px-4 py-2.5 text-right">
+                  <span class="text-base font-semibold tabular-nums" [class]="w.score | scoreClass">{{ formatScore(w.score) }}</span>
+                </td>
+                <td class="px-4 py-2.5 text-xs text-kymo-muted hidden xl:table-cell" [title]="w.images.join('\n')">
+                  <div class="flex items-center gap-1.5">
+                    <span class="truncate max-w-[14rem]">{{ firstImage(w) || '—' }}</span>
+                    @if (w.images.length > 1) {
+                      <span class="text-kymo-faint flex-none">+{{ w.images.length - 1 }}</span>
+                    }
+                  </div>
+                </td>
+                <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap">{{ w.last_seen_at | timeago }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+    @if (sorted().length > pageSize) {
+      <app-pagination [page]="page()" [totalPages]="totalPages()" [total]="sorted().length" [limit]="pageSize" (pageChange)="page.set($event)" />
+    }
+  }
+
+  <p class="text-xs">
+    <a routerLink="/workloads/archived" class="text-kymo-faint hover:text-kymo-amber hover:underline underline-offset-4">
+      Archived &amp; ignored@if (archivedCount() !== null) { ({{ archivedCount() }}) }
+    </a>
+  </p>
+</div>

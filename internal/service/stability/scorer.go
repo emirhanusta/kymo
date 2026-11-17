@@ -24,6 +24,23 @@ type StabilityScorer interface {
 	// containers are not penalised for history that predates them.
 	// The returned score is also written to the ScoreRepository.
 	Score(ctx context.Context, c *model.Container, windowStart, windowEnd time.Time) (*model.StabilityScore, error)
+
+	// Evaluate is Score that also returns the raw analysis, so callers can
+	// aggregate several containers (e.g. all instances of a workload).
+	Evaluate(ctx context.Context, c *model.Container, windowStart, windowEnd time.Time) (*model.StabilityScore, Analysis, error)
+}
+
+// Analysis is the raw, uncapped input of a container's score.
+type Analysis struct {
+	Restarts int
+	Crashes  int
+	OOMs     int
+	// VolatilityPenalty and AvailabilityPenalty are already in penalty points.
+	VolatilityPenalty   float64
+	AvailabilityPenalty float64
+	// Active is true when the container is running or crashing (i.e. it is
+	// supposed to be up), which is when availability counts.
+	Active bool
 }
 
 // Weights controls how much each failure mode affects the final score.
@@ -102,33 +119,35 @@ func NewScorerWithWeights(
 //	score = max(0, 100 − restartPenalty − crashPenalty − oomPenalty
 //	                    − volatilityPenalty − availabilityPenalty)
 func (s *scorer) Score(ctx context.Context, c *model.Container, windowStart, windowEnd time.Time) (*model.StabilityScore, error) {
+	score, _, err := s.Evaluate(ctx, c, windowStart, windowEnd)
+	return score, err
+}
+
+func (s *scorer) Evaluate(ctx context.Context, c *model.Container, windowStart, windowEnd time.Time) (*model.StabilityScore, Analysis, error) {
 	lifecycleEvents, err := s.events.FindByContainerIDSince(ctx, c.ID, windowStart)
 	if err != nil {
-		return nil, err
+		return nil, Analysis{}, err
 	}
 
 	samples, err := s.resources.FindByContainerID(ctx, c.ID, windowStart, windowEnd, 0)
 	if err != nil {
-		return nil, err
+		return nil, Analysis{}, err
 	}
 
-	result := Compute(c, lifecycleEvents, samples, windowStart, windowEnd, s.weights)
+	a := Analyze(c, lifecycleEvents, samples, windowStart, windowEnd, s.weights)
+	result := scoreFrom(c, a, s.weights)
 
 	saved, err := s.scores.Save(ctx, result)
 	if err != nil {
 		s.log.Warn("failed to persist stability score", zap.String("container_id", c.ID), zap.Error(err))
-		return result, nil
+		return result, a, nil
 	}
 
-	return saved, nil
+	return saved, a, nil
 }
 
 // Compute is the pure scoring function used by Score. It is exported so the
 // algorithm can be unit-tested without a database.
-//
-// Restarts: every start event in the window except the very first start of a
-// container that was first seen inside the window (its initial boot).
-// Crashes: crash events and die events with a non-zero exit code.
 func Compute(
 	c *model.Container,
 	events []*model.LifecycleEvent,
@@ -136,7 +155,23 @@ func Compute(
 	windowStart, windowEnd time.Time,
 	w Weights,
 ) *model.StabilityScore {
-	var starts, crashes, ooms int
+	return scoreFrom(c, Analyze(c, events, samples, windowStart, windowEnd, w), w)
+}
+
+// Analyze extracts the raw scoring inputs for one container.
+//
+// Restarts: every start event in the window except the very first start of a
+// container that was first seen inside the window (its initial boot).
+// Crashes: crash events and die events with a non-zero exit code.
+func Analyze(
+	c *model.Container,
+	events []*model.LifecycleEvent,
+	samples []*model.ResourceSample,
+	windowStart, windowEnd time.Time,
+	w Weights,
+) Analysis {
+	var a Analysis
+	starts := 0
 	for _, e := range events {
 		if e.OccurredAt.Before(windowStart) || e.OccurredAt.After(windowEnd) {
 			continue
@@ -146,32 +181,38 @@ func Compute(
 			starts++
 		case model.EventTypeCrash, model.EventTypeDie:
 			if e.ExitCode != 0 {
-				crashes++
+				a.Crashes++
 			}
 		case model.EventTypeOOM:
-			ooms++
+			a.OOMs++
 		}
 	}
-	restarts := starts
-	if restarts > 0 && !c.FirstSeenAt.Before(windowStart) {
-		restarts-- // the initial boot is not a restart
+	a.Restarts = starts
+	if a.Restarts > 0 && !c.FirstSeenAt.Before(windowStart) {
+		a.Restarts-- // the initial boot is not a restart
 	}
-
-	restartPenalty := math.Min(float64(restarts)*w.RestartPenaltyPerEvent, 30.0)
-	crashPenalty := math.Min(float64(crashes)*w.CrashPenaltyPerEvent, 30.0)
-	oomPenalty := math.Min(float64(ooms)*w.OOMPenaltyPerEvent, 25.0)
-	volatilityPenalty := computeVolatilityPenalty(samples, w)
+	a.VolatilityPenalty = computeVolatilityPenalty(samples, w)
 
 	// Availability only makes sense for containers that are supposed to be up.
 	// A cleanly stopped container (or one we have no samples for, e.g. a
 	// cluster without metrics-server) is not penalised.
-	availabilityPenalty := 0.0
-	if c.CurrentStatus == model.StatusRunning || c.CurrentStatus == model.StatusCrashing {
-		availabilityPenalty = computeAvailabilityPenalty(samples, windowStart, windowEnd, w)
+	a.Active = c.CurrentStatus == model.StatusRunning || c.CurrentStatus == model.StatusCrashing
+	if a.Active {
+		a.AvailabilityPenalty = computeAvailabilityPenalty(samples, windowStart, windowEnd, w)
 	}
+	return a
+}
 
-	total := restartPenalty + crashPenalty + oomPenalty + volatilityPenalty + availabilityPenalty
+// penalties turns raw counts into capped penalty points.
+func penalties(restarts, crashes, ooms int, w Weights) (float64, float64, float64) {
+	return math.Min(float64(restarts)*w.RestartPenaltyPerEvent, 30.0),
+		math.Min(float64(crashes)*w.CrashPenaltyPerEvent, 30.0),
+		math.Min(float64(ooms)*w.OOMPenaltyPerEvent, 25.0)
+}
 
+func scoreFrom(c *model.Container, a Analysis, w Weights) *model.StabilityScore {
+	restartPenalty, crashPenalty, oomPenalty := penalties(a.Restarts, a.Crashes, a.OOMs, w)
+	total := restartPenalty + crashPenalty + oomPenalty + a.VolatilityPenalty + a.AvailabilityPenalty
 	return &model.StabilityScore{
 		ContainerID:         c.ID,
 		SourceName:          c.SourceName,
@@ -179,8 +220,51 @@ func Compute(
 		RestartPenalty:      restartPenalty,
 		CrashPenalty:        crashPenalty,
 		OOMPenalty:          oomPenalty,
-		VolatilityPenalty:   volatilityPenalty,
-		AvailabilityPenalty: availabilityPenalty,
+		VolatilityPenalty:   a.VolatilityPenalty,
+		AvailabilityPenalty: a.AvailabilityPenalty,
+		CalculatedAt:        time.Now().UTC(),
+	}
+}
+
+// ComputeWorkload combines the analyses of every instance of a workload:
+//   - restarts, crashes and OOM kills are summed across instances (a rollout's
+//     fresh pods are not restarts, because each pod's first boot is excluded),
+//     then capped like a single container's;
+//   - volatility is the worst instance's;
+//   - availability is the best active instance's — the workload is available
+//     while at least one replica reports — and 0 when nothing is active.
+func ComputeWorkload(workloadID, source string, members []Analysis, w Weights) *model.WorkloadScore {
+	var (
+		restarts, crashes, ooms int
+		volatility              float64
+		availability            = math.Inf(1)
+	)
+	for _, m := range members {
+		restarts += m.Restarts
+		crashes += m.Crashes
+		ooms += m.OOMs
+		volatility = math.Max(volatility, m.VolatilityPenalty)
+		if m.Active {
+			availability = math.Min(availability, m.AvailabilityPenalty)
+		}
+	}
+	if math.IsInf(availability, 1) {
+		availability = 0
+	}
+	restartPenalty, crashPenalty, oomPenalty := penalties(restarts, crashes, ooms, w)
+	total := restartPenalty + crashPenalty + oomPenalty + volatility + availability
+	return &model.WorkloadScore{
+		WorkloadID:          workloadID,
+		SourceName:          source,
+		Score:               math.Max(0, 100.0-total),
+		RestartPenalty:      restartPenalty,
+		CrashPenalty:        crashPenalty,
+		OOMPenalty:          oomPenalty,
+		VolatilityPenalty:   volatility,
+		AvailabilityPenalty: availability,
+		Restarts:            restarts,
+		Crashes:             crashes,
+		OOMs:                ooms,
 		CalculatedAt:        time.Now().UTC(),
 	}
 }

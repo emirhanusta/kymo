@@ -17,6 +17,8 @@ export interface Container {
   node_name?: string;
   workload_kind?: string;
   workload_name?: string;
+  /** `source:namespace:kind:name` of the aggregating workload (when known). */
+  workload_id?: string;
   is_system: boolean;
   start_count: number;
   crash_count: number;
@@ -177,6 +179,25 @@ export interface KubeContextList {
 export interface ServerMeta {
   version: string;
   secret_key_configured: boolean;
+  /** Path of the config file in use, or "" when none. */
+  config_file: string;
+  /** Last automatic/manual config.yaml sync (null before the first one). */
+  config_sync: ConfigSync | null;
+}
+
+export interface SyncResult {
+  added: string[];
+  removed: string[];
+  updated: string[];
+  unchanged: string[];
+  conflicts: string[];
+  reloaded_at: string;
+}
+
+export interface ConfigSync {
+  reloaded_at: string;
+  result: SyncResult | null;
+  error?: string;
 }
 
 /** Lifecycle event types accepted by GET /events/recent?type=. */
@@ -205,13 +226,6 @@ export interface CronJobExecution {
   sampled_at: string;
 }
 
-export interface CronJobSummary {
-  namespace: string;
-  cronjob_name: string;
-  source_name: string;
-  last_execution?: CronJobExecution;
-}
-
 export interface PodDetail {
   pod_name: string;
   namespace: string;
@@ -233,4 +247,70 @@ export interface DeploymentPod {
 export interface DeploymentDetail {
   deployment: DeploymentInfo | null;
   pods: DeploymentPod[];
+}
+
+// --- Workloads (aggregated over every recorded instance) ---
+
+export type WorkloadStatus = 'running' | 'crashing' | 'stopped' | 'unknown';
+
+export interface WorkloadSummary {
+  id: string;
+  source_name: string;
+  runtime: 'docker' | 'kubernetes';
+  namespace?: string;
+  kind: string;
+  name: string;
+  is_system: boolean;
+  containers: string[];
+  images: string[];
+  instances: number;
+  active_instances: number;
+  running_instances: number;
+  status: WorkloadStatus;
+  start_count: number;
+  /** Lifetime restarts: starts minus each container's first boot. */
+  restart_count: number;
+  crash_count: number;
+  oom_count: number;
+  first_seen_at: string;
+  last_seen_at: string;
+  score: number | null;
+}
+
+export interface WorkloadScore {
+  id: number;
+  workload_id: string;
+  source_name: string;
+  score: number;
+  restart_penalty: number;
+  crash_penalty: number;
+  oom_penalty: number;
+  volatility_penalty: number;
+  availability_penalty: number;
+  /** Counts inside the scoring window (24h). */
+  restarts: number;
+  crashes: number;
+  ooms: number;
+  calculated_at: string;
+}
+
+export interface WorkloadDetail {
+  workload: WorkloadSummary;
+  score: WorkloadScore | null;
+  instances: Container[];
+}
+
+export interface WorkloadQuery {
+  source?: string;
+  namespace?: string;
+  kind?: string;
+  q?: string;
+  status?: string;
+  system?: boolean;
+}
+
+export interface WorkloadEventsQuery {
+  limit?: number;
+  before?: string;
+  type?: LifecycleEventType | '';
 }

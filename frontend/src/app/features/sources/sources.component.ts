@@ -6,7 +6,7 @@ import { SourceService, sourceToInput } from '../../core/services/source.service
 import { SourceStateService } from '../../core/services/source-state.service';
 import { ToastService } from '../../core/services/toast.service';
 import { RefreshService } from '../../core/services/refresh.service';
-import { SourceStatus } from '../../core/models/container.model';
+import { ServerMeta, SourceStatus, SyncResult } from '../../core/models/container.model';
 import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
 import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
@@ -48,6 +48,8 @@ export class SourcesComponent {
   deleteTarget = signal<SourceStatus | null>(null);
   purge        = signal(false);
   busyName     = signal<string | null>(null);
+  meta         = signal<ServerMeta | null>(null);
+  reloading    = signal(false);
 
   sources = computed(() =>
     [...this.state.sources()].sort((a, b) =>
@@ -69,6 +71,7 @@ export class SourcesComponent {
 
   constructor() {
     this.state.loadSources();
+    this.loadMeta();
 
     // The source list is this page's data: feed the top bar's "updated" label.
     effect(() => {
@@ -85,6 +88,41 @@ export class SourcesComponent {
         this.router.navigate([], { relativeTo: this.route, queryParams: { add: null }, queryParamsHandling: 'merge', replaceUrl: true });
       }
     });
+  }
+
+  private loadMeta(): void {
+    this.api.getMeta().subscribe({ next: m => this.meta.set(m), error: () => {} });
+  }
+
+  reloadConfig(): void {
+    if (this.reloading()) return;
+    this.reloading.set(true);
+    this.api.reloadConfig().subscribe({
+      next: res => {
+        this.reloading.set(false);
+        if (res.conflicts.length > 0) {
+          this.toast.error(`Name already used by a source added in the UI: ${res.conflicts.join(', ')} (config entry ignored)`);
+        } else {
+          this.toast.success(this.syncSummary(res));
+        }
+        this.state.loadSources();
+        this.loadMeta();
+      },
+      error: err => {
+        this.reloading.set(false);
+        this.toast.apiError(err, 'Failed to reload config.yaml');
+        this.loadMeta();
+      },
+    });
+  }
+
+  private syncSummary(r: SyncResult): string {
+    const parts = [
+      r.added.length ? `${r.added.length} added` : '',
+      r.updated.length ? `${r.updated.length} updated` : '',
+      r.removed.length ? `${r.removed.length} removed` : '',
+    ].filter(Boolean);
+    return parts.length ? parts.join(' · ') : 'No changes';
   }
 
   openAdd(): void { this.wizard.set('new'); }

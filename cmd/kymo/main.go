@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -75,6 +76,7 @@ func main() {
 		db.Resources(),
 		db.Scores(),
 		db.CronJobs(),
+		db.Workloads(),
 		service.ScoringConfig{
 			Interval: cfg.Collector.ScoringInterval,
 			Window:   cfg.Collector.ScoringWindow,
@@ -103,17 +105,18 @@ func main() {
 	}
 	sources := service.NewSourceManager(db.Sources(), box, svc, mgmt, factory, log)
 
-	configSpecs := make([]model.SourceSpec, 0, len(cfg.Collector.Sources))
-	for _, src := range cfg.Collector.Sources {
-		configSpecs = append(configSpecs, model.SourceSpec{
-			Name:           src.Name,
-			Type:           src.Type,
-			Enabled:        true,
-			ReadOnly:       src.ReadOnly,
-			Socket:         src.Socket,
-			KubeconfigPath: src.KubeconfigPath,
-			KubeContext:    src.KubeContext,
-			PollInterval:   src.PollInterval,
+	configSpecs := config.SourceSpecs(cfg)
+	if cfg.File != "" {
+		running := cfg
+		sources.SetConfigReloader(cfg.File, func() ([]model.SourceSpec, error) {
+			fresh, err := running.Reload()
+			if err != nil {
+				return nil, err
+			}
+			if note := restartOnlyChanges(running, fresh); note != "" {
+				log.Info("config.yaml: these settings changed and need a restart to apply", zap.String("settings", note))
+			}
+			return config.SourceSpecs(fresh), nil
 		})
 	}
 	bootCtx, bootCancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -183,6 +186,22 @@ func main() {
 		}
 	}()
 
+	// Apply config.yaml source changes live.
+	reload := func() {
+		res, err := sources.ReloadConfig(rootCtx)
+		if err != nil {
+			log.Error("config.yaml reload failed; keeping current sources", zap.Error(err))
+			return
+		}
+		log.Info("config.yaml sources reloaded",
+			zap.Strings("added", res.Added), zap.Strings("removed", res.Removed),
+			zap.Strings("updated", res.Updated), zap.Strings("unchanged", res.Unchanged),
+			zap.Strings("conflicts", res.Conflicts))
+	}
+	if err := config.Watch(rootCtx, cfg.File, 500*time.Millisecond, reload); err != nil {
+		log.Warn("cannot watch config file; use POST /api/v1/sources/reload", zap.String("file", cfg.File), zap.Error(err))
+	}
+
 	// Run the recorder event loop in the background.
 	go func() {
 		if err := svc.Run(rootCtx); err != nil && !errors.Is(err, context.Canceled) {
@@ -198,6 +217,29 @@ func main() {
 	}
 
 	log.Info("kymo stopped cleanly")
+}
+
+// restartOnlyChanges lists the top-level settings that differ between the
+// running config and a freshly loaded one. Only collector.sources is applied live.
+func restartOnlyChanges(old, fresh *config.Config) string {
+	var changed []string
+	if old.Server != fresh.Server {
+		changed = append(changed, "server")
+	}
+	if old.Database != fresh.Database {
+		changed = append(changed, "database")
+	}
+	if old.Log != fresh.Log {
+		changed = append(changed, "log")
+	}
+	if old.SecretKey != fresh.SecretKey {
+		changed = append(changed, "secret_key")
+	}
+	oc, fc := old.Collector, fresh.Collector
+	if oc.StatsPollInterval != fc.StatsPollInterval || oc.ScoringInterval != fc.ScoringInterval || oc.ScoringWindow != fc.ScoringWindow {
+		changed = append(changed, "collector (poll/scoring)")
+	}
+	return strings.Join(changed, ", ")
 }
 
 // buildLogger constructs a zap.Logger from the provided LogConfig.

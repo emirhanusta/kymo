@@ -150,6 +150,8 @@ export class ResourceChartsComponent {
   /** Visible window (epoch ms). Falls back to the sample extent. */
   from = input<number | null>(null);
   to   = input<number | null>(null);
+  /** Hide the network panel entirely (e.g. aggregated series without network counters). */
+  hideNetwork = input(false);
 
   private cpuCanvas = viewChild<ElementRef<HTMLCanvasElement>>('cpuCanvas');
   private memCanvas = viewChild<ElementRef<HTMLCanvasElement>>('memCanvas');

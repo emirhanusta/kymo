@@ -24,6 +24,10 @@ type ContainerFilter struct {
 	WorkloadKind string
 	// Workload restricts results to an exact workload name.
 	Workload string
+	// WorkloadID restricts results to the instances of one workload.
+	WorkloadID string
+	// SeenSince restricts results to containers seen at or after this time.
+	SeenSince time.Time
 }
 
 // ContainerRepository defines the persistence operations for Container records.
