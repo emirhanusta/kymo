@@ -1,5 +1,5 @@
 # Local configuration (may contain kubeconfig paths / credentials)
-config.yaml
+/config.yaml
 
 # Build output
 bin/
