@@ -12,3 +12,6 @@ frontend/node_modules/
 .vscode/
 *.swp
 .DS_Store
+
+# Local environment (KYMO_SECRET_KEY, DOCKER_GID)
+.env

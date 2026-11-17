@@ -113,3 +113,30 @@ func TestComputeVolatilityPenalty(t *testing.T) {
 		t.Errorf("very spiky CPU should hit the cap, got %v", p)
 	}
 }
+
+func TestComputeWorkload(t *testing.T) {
+	w := DefaultWeights()
+	members := []Analysis{
+		{Restarts: 2, Crashes: 2, Active: false, VolatilityPenalty: 3},            // old pod, replaced
+		{Restarts: 1, Crashes: 1, OOMs: 1, Active: true, AvailabilityPenalty: 8},  // crashing replica
+		{Restarts: 0, Active: true, AvailabilityPenalty: 0, VolatilityPenalty: 1}, // healthy replica
+	}
+	got := ComputeWorkload("src:ns:Deployment:api", "src", members, w)
+	if got.Restarts != 3 || got.Crashes != 3 || got.OOMs != 1 {
+		t.Fatalf("counts not summed: %+v", got)
+	}
+	if got.AvailabilityPenalty != 0 {
+		t.Errorf("one healthy replica keeps the workload available, got %v", got.AvailabilityPenalty)
+	}
+	if got.VolatilityPenalty != 3 {
+		t.Errorf("volatility should be the worst instance's, got %v", got.VolatilityPenalty)
+	}
+	want := 100 - (3*w.RestartPenaltyPerEvent + 3*w.CrashPenaltyPerEvent + w.OOMPenaltyPerEvent + 3)
+	if got.Score != want {
+		t.Errorf("score = %v, want %v", got.Score, want)
+	}
+
+	if empty := ComputeWorkload("x", "s", nil, w); empty.Score != 100 || empty.AvailabilityPenalty != 0 {
+		t.Errorf("no instances should score 100: %+v", empty)
+	}
+}

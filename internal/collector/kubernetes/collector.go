@@ -93,11 +93,21 @@ type Collector struct {
 
 	// workloadCache caches WorkloadInfo by pod key (namespace/pod-name) to avoid
 	// repeated API calls on pod-update events.
+	// Guarded by mu.
 	workloadCache map[string]WorkloadInfo
 
+	// owners caches ReplicaSet→Deployment and Job→CronJob resolution
+	// (internally synchronised).
+	owners *ownerResolver
+
 	events chan collector.CollectorEvent
-	wg     sync.WaitGroup
-	cancel context.CancelFunc
+	// eventsMu guards closed: emit holds it for reading while sending, Stop takes
+	// it for writing before closing events, so no send can hit a closed channel
+	// even if an informer handler is still running.
+	eventsMu sync.RWMutex
+	closed   bool
+	wg       sync.WaitGroup
+	cancel   context.CancelFunc
 }
 
 // New creates a new Kubernetes Collector.
@@ -119,6 +129,7 @@ func New(log *zap.Logger, sourceName, kubeconfigPath string, kubeconfigData []by
 		pollInterval:   pollInterval,
 		pods:           make(map[string]*podRecord),
 		workloadCache:  make(map[string]WorkloadInfo),
+		owners:         newOwnerResolver(),
 		events:         make(chan collector.CollectorEvent, 256),
 	}
 }
@@ -223,7 +234,18 @@ func (c *Collector) Stop() error {
 		c.cancel()
 	}
 	c.wg.Wait()
-	close(c.events)
+	// Wait for informer goroutines (and their event handlers) to exit. Without
+	// this, handlers delivering the initial pod list can still be running when
+	// the source is restarted at runtime (e.g. config reload).
+	if c.factory != nil {
+		c.factory.Shutdown()
+	}
+	c.eventsMu.Lock()
+	if !c.closed {
+		c.closed = true
+		close(c.events)
+	}
+	c.eventsMu.Unlock()
 	return nil
 }
 
@@ -332,22 +354,12 @@ func (c *Collector) onPodAdd(ctx context.Context, obj interface{}, isInInitialLi
 	c.mu.Unlock()
 
 	// Detect workload without holding the mutex (API calls are made inside).
-	wl := DetectWorkload(ctx, c.clientset, pod)
+	wl := c.owners.detect(ctx, c.clientset, pod)
 
 	// Store the detected workload info in the cache.
 	c.mu.Lock()
 	c.workloadCache[pk] = wl
 	c.mu.Unlock()
-
-	// DaemonSet and StatefulSet pods are not tracked — remove any state we
-	// speculatively created above and return without emitting any events.
-	if wl.Kind == model.WorkloadDaemonSet || wl.Kind == model.WorkloadStatefulSet {
-		c.mu.Lock()
-		delete(c.pods, pk)
-		delete(c.workloadCache, pk)
-		c.mu.Unlock()
-		return
-	}
 
 	if isInInitialList {
 		// Startup seeding: record each container's current state without
@@ -445,19 +457,10 @@ func (c *Collector) onPodUpdate(ctx context.Context, oldObj, newObj interface{})
 	// If the workload info is not yet cached (e.g. we missed the add event),
 	// detect it now and cache it for future updates.
 	if !wlCached {
-		wl = DetectWorkload(ctx, c.clientset, newPod)
+		wl = c.owners.detect(ctx, c.clientset, newPod)
 		c.mu.Lock()
 		c.workloadCache[pk] = wl
 		c.mu.Unlock()
-	}
-
-	// DaemonSet and StatefulSet pods are not tracked.
-	if wl.Kind == model.WorkloadDaemonSet || wl.Kind == model.WorkloadStatefulSet {
-		c.mu.Lock()
-		delete(c.pods, pk)
-		delete(c.workloadCache, pk)
-		c.mu.Unlock()
-		return
 	}
 
 	for _, newCS := range newPod.Status.ContainerStatuses {
@@ -477,8 +480,9 @@ func (c *Collector) onPodUpdate(ctx context.Context, oldObj, newObj interface{})
 }
 
 // onPodDelete is called by the informer when a Pod is removed from the cluster.
-// It emits EventTypeStop for every container that was last seen as Running,
-// then removes the pod record from the state map.
+// It emits EventTypeStop for every container that was last seen as Running and
+// an UpdateOnly state event (status stopped) for all other containers, then
+// removes the pod record from the state map.
 func (c *Collector) onPodDelete(ctx context.Context, obj interface{}) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
@@ -507,15 +511,30 @@ func (c *Collector) onPodDelete(ctx context.Context, obj interface{}) {
 		return
 	}
 
-	for containerName, snap := range rec.containers {
-		if snap.state.Running == nil {
-			continue // already stopped/crashed; avoid double-emitting
-		}
+	// The workload may be missing from the cache (e.g. update raced with add);
+	// resolve it so the emitted containers carry correct workload fields.
+	if wl.Kind == "" {
+		wl = c.owners.detect(ctx, c.clientset, pod)
+	}
 
+	for containerName, snap := range rec.containers {
 		ct := buildContainerModel(c.sourceName, pod, containerName, snap.image, snap, wl)
 		ct.CurrentStatus = model.StatusStopped
 
-		c.emitLifecycle(ctx, ct, model.EventTypeStop, 0, rec.nodeName, nil, now)
+		if snap.state.Running != nil {
+			c.emitLifecycle(ctx, ct, model.EventTypeStop, 0, rec.nodeName, nil, now)
+			continue
+		}
+
+		// Not running (Waiting / CrashLoopBackOff / Terminated): no lifecycle
+		// event, but the stored status must not stay "crashing"/"unknown"
+		// forever once the pod is gone.
+		c.emit(ctx, collector.CollectorEvent{
+			Kind:       collector.CollectorEventState,
+			SourceName: c.sourceName,
+			Container:  ct,
+			UpdateOnly: true,
+		})
 	}
 }
 
@@ -671,7 +690,19 @@ func (c *Collector) handleTermination(
 
 	exitCode := int(t.ExitCode)
 	evtType := model.EventTypeDie
-	if exitCode != 0 {
+	// A container killed because its pod is being deleted (rollout, scale-down,
+	// eviction, node drain) exits non-zero after SIGTERM/SIGKILL, but that is a
+	// planned stop, not a crash. Counting it would add fake crashes to every
+	// deploy. OOM kills are still reported above.
+	terminating := pod.DeletionTimestamp != nil && t.Reason != "OOMKilled"
+	switch {
+	case terminating:
+		evtType = model.EventTypeStop
+		if meta == nil {
+			meta = map[string]any{}
+		}
+		meta["pod_terminating"] = true
+	case exitCode != 0:
 		evtType = model.EventTypeCrash
 		c.mu.Lock()
 		snap.crashCount++
@@ -684,6 +715,9 @@ func (c *Collector) handleTermination(
 	snap.restartCount = cs.RestartCount
 	ct := buildContainerModel(c.sourceName, pod, cs.Name, cs.Image, snap, wl)
 	c.mu.Unlock()
+	if terminating {
+		ct.CurrentStatus = model.StatusStopped
+	}
 
 	c.emitLifecycle(ctx, ct, evtType, exitCode, pod.Spec.NodeName, meta, finishedAt)
 
@@ -934,6 +968,11 @@ func (c *Collector) emitLifecycle(
 
 // emit sends an event onto the events channel, dropping it if ctx is cancelled.
 func (c *Collector) emit(ctx context.Context, event collector.CollectorEvent) {
+	c.eventsMu.RLock()
+	defer c.eventsMu.RUnlock()
+	if c.closed {
+		return
+	}
 	select {
 	case c.events <- event:
 	case <-ctx.Done():

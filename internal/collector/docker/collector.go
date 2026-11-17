@@ -353,7 +353,7 @@ func (c *Collector) handleContainerEvent(ctx context.Context, msg events.Message
 			Image:       attrs["image"],
 			FirstSeenAt: eventTime,
 		}
-		ct.WorkloadKind, ct.WorkloadName = composeWorkload(attrs)
+		ct.WorkloadKind, ct.WorkloadName = composeWorkload(attrs, ct.Name)
 		// Only persist in the running set for "start"; other events for unknown
 		// containers may arrive out of order (e.g. after a collector restart).
 		if msg.Action == events.ActionStart {
@@ -363,6 +363,9 @@ func (c *Collector) handleContainerEvent(ctx context.Context, msg events.Message
 		// Refresh name/image in case they were not populated at seed time.
 		if n := strings.TrimPrefix(attrs["name"], "/"); n != "" && ct.Name == "" {
 			ct.Name = n
+			if ct.WorkloadKind == "" {
+				ct.WorkloadKind, ct.WorkloadName = composeWorkload(attrs, n)
+			}
 		}
 	}
 	ct.LastSeenAt = eventTime
@@ -527,7 +530,7 @@ func containerFromListItem(ct *apitypes.Container, now time.Time) *model.Contain
 	if len(ct.Names) > 0 {
 		name = strings.TrimPrefix(ct.Names[0], "/")
 	}
-	kind, project := composeWorkload(ct.Labels)
+	kind, project := composeWorkload(ct.Labels, name)
 	return &model.Container{
 		ID:            ct.ID,
 		Runtime:       model.RuntimeDocker,
@@ -545,10 +548,16 @@ func containerFromListItem(ct *apitypes.Container, now time.Time) *model.Contain
 const composeLabel = "com.docker.compose.project"
 
 // composeWorkload maps a container's labels (or event attributes, which carry
-// the labels) to its Compose project, if any.
-func composeWorkload(labels map[string]string) (kind, name string) {
+// the labels) to its workload: the Compose project when the label is present,
+// otherwise a standalone "Container" workload named after the container
+// (leading "/" tolerated). Both are empty only when the container name is
+// unknown too.
+func composeWorkload(labels map[string]string, containerName string) (kind, name string) {
 	if p := labels[composeLabel]; p != "" {
 		return model.WorkloadCompose, p
+	}
+	if n := strings.TrimPrefix(containerName, "/"); n != "" {
+		return model.WorkloadContainer, n
 	}
 	return "", ""
 }

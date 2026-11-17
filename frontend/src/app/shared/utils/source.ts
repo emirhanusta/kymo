@@ -22,7 +22,7 @@ export function sourceStatusLabel(src: SourceStatus): string {
 }
 
 export const READ_ONLY_HINT = 'Read-only source: management actions (start, stop, restart, kill, scale) are disabled.';
-export const CONFIG_ORIGIN_HINT = 'Defined in config.yaml — edit the file and restart KYMO to change or remove it.';
+export const CONFIG_ORIGIN_HINT = 'Managed in config.yaml — edit the file; changes apply automatically';
 
 /** One-line connection summary for lists. */
 export function sourceConnectionSummary(src: SourceStatus): string {

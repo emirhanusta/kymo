@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
-import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, DeploymentInfo, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery } from '../models/container.model';
+import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery, WorkloadSummary, WorkloadDetail, WorkloadQuery, WorkloadEventsQuery, WorkloadScore } from '../models/container.model';
 
 export const API_BASE = '/api/v1';
 
@@ -19,25 +19,6 @@ export class ContainerService {
   /** URL for the SSE log stream (EventSource cannot go through HttpClient). */
   logStreamUrl(id: string, tail = 200): string {
     return `${this.base}/containers/${encodeURIComponent(id)}/logs?tail=${tail}&follow=true`;
-  }
-
-  getContainers(
-    runtime?: string,
-    sourceName?: string,
-    filters: { q?: string; status?: string; workload_kind?: string; workload?: string } = {},
-  ): Observable<Container[]> {
-    let params = new HttpParams();
-    if (filters.q?.trim()) params = params.set('q', filters.q.trim());
-    if (filters.status) params = params.set('status', filters.status);
-    if (filters.workload_kind) params = params.set('workload_kind', filters.workload_kind);
-    if (filters.workload) params = params.set('workload', filters.workload);
-    if (runtime) {
-      params = params.set('runtime', runtime);
-    }
-    if (sourceName) {
-      params = params.set('source', sourceName);
-    }
-    return this.http.get<Container[]>(`${this.base}/containers`, { params });
   }
 
   getContainersPage(query: ContainerQuery): Observable<Page<Container>> {
@@ -162,13 +143,6 @@ export class ContainerService {
 
   // --- Deployments ---
 
-  /** namespace '' lists deployments across all namespaces. */
-  getDeployments(namespace = '', sourceName?: string): Observable<DeploymentInfo[]> {
-    let params = new HttpParams().set('namespace', namespace);
-    if (sourceName) params = params.set('source', sourceName);
-    return this.http.get<DeploymentInfo[]>(`${this.base}/deployments`, { params });
-  }
-
   scaleDeployment(namespace: string, name: string, replicas: number, sourceName?: string): Observable<ActionResult> {
     let params = new HttpParams();
     if (sourceName) params = params.set('source', sourceName);
@@ -226,13 +200,6 @@ export class ContainerService {
 
   // --- CronJobs ---
 
-  getCronJobs(namespace = '', sourceName?: string): Observable<CronJobExecution[]> {
-    let params = new HttpParams();
-    if (namespace) params = params.set('namespace', namespace);
-    if (sourceName) params = params.set('source', sourceName);
-    return this.http.get<CronJobExecution[]>(`${this.base}/cronjobs`, { params });
-  }
-
   getCronJobExecutions(namespace: string, name: string, limit = 50, sourceName?: string): Observable<CronJobExecution[]> {
     let params = new HttpParams().set('limit', limit.toString());
     if (sourceName) params = params.set('source', sourceName);
@@ -240,6 +207,45 @@ export class ContainerService {
       `${this.base}/cronjobs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/executions`,
       { params }
     ).pipe(
+      catchError(() => of([]))
+    );
+  }
+
+  // --- Workloads ---
+
+  getWorkloads(q: WorkloadQuery = {}): Observable<WorkloadSummary[]> {
+    let params = new HttpParams();
+    if (q.source) params = params.set('source', q.source);
+    if (q.namespace) params = params.set('namespace', q.namespace);
+    if (q.kind) params = params.set('kind', q.kind);
+    if (q.q?.trim()) params = params.set('q', q.q.trim());
+    if (q.status) params = params.set('status', q.status);
+    if (q.system) params = params.set('system', 'true');
+    return this.http.get<WorkloadSummary[]>(`${this.base}/workloads`, { params });
+  }
+
+  getWorkload(id: string): Observable<WorkloadDetail> {
+    return this.http.get<WorkloadDetail>(`${this.base}/workloads/${encodeURIComponent(id)}`);
+  }
+
+  /** Newest first; `before` pages backwards. */
+  getWorkloadEvents(id: string, q: WorkloadEventsQuery = {}): Observable<LifecycleEvent[]> {
+    let params = new HttpParams().set('limit', String(q.limit ?? 30));
+    if (q.before) params = params.set('before', q.before);
+    if (q.type) params = params.set('type', q.type);
+    return this.http.get<LifecycleEvent[]>(`${this.base}/workloads/${encodeURIComponent(id)}/events`, { params });
+  }
+
+  getWorkloadResources(id: string, from: string, to: string): Observable<ResourceSample[]> {
+    const params = new HttpParams().set('from', from).set('to', to);
+    return this.http.get<ResourceSample[]>(`${this.base}/workloads/${encodeURIComponent(id)}/resources`, { params }).pipe(
+      catchError(() => of([]))
+    );
+  }
+
+  getWorkloadScoreHistory(id: string, n = 60): Observable<WorkloadScore[]> {
+    const params = new HttpParams().set('n', String(n));
+    return this.http.get<WorkloadScore[]>(`${this.base}/workloads/${encodeURIComponent(id)}/score/history`, { params }).pipe(
       catchError(() => of([]))
     );
   }

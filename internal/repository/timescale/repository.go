@@ -84,7 +84,7 @@ type containerRepo struct{ db *DB }
 // alias the containers table as "c".
 const containerCols = `c.id, c.runtime, c.source_name, c.name, c.image, c.namespace, c.node_name,
   c.first_seen_at, c.last_seen_at, c.start_count, c.crash_count, c.oom_count, c.current_status,
-  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, ls.score`
+  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, c.workload_id, ls.score`
 
 // latestScoreJoin attaches the most recent stability score to each container row.
 const latestScoreJoin = `LEFT JOIN LATERAL (
@@ -104,9 +104,9 @@ const activeWhere = `c.deleted_at IS NULL AND c.ignored = false`
 const upsertContainerSQL = `
 INSERT INTO containers AS c (id, runtime, source_name, name, image, namespace, node_name,
   first_seen_at, last_seen_at, start_count, crash_count, oom_count, current_status,
-  workload_kind, workload_name, is_system)
+  workload_kind, workload_name, is_system, workload_id)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,0,0,0,$10,
-  COALESCE(NULLIF($11,''),'unknown'),$12,$13)
+  COALESCE(NULLIF($11,''),'unknown'),$12,$13,$15)
 ON CONFLICT (id) DO UPDATE SET
   name           = COALESCE(NULLIF(EXCLUDED.name,''), c.name),
   image          = COALESCE(NULLIF(EXCLUDED.image,''), c.image),
@@ -118,10 +118,11 @@ ON CONFLICT (id) DO UPDATE SET
   workload_kind  = CASE WHEN $11 = '' THEN c.workload_kind ELSE EXCLUDED.workload_kind END,
   workload_name  = COALESCE(NULLIF(EXCLUDED.workload_name,''), c.workload_name),
   is_system      = EXCLUDED.is_system OR c.is_system,
+  workload_id    = COALESCE(NULLIF(EXCLUDED.workload_id,''), c.workload_id),
   deleted_at     = CASE WHEN $14 THEN NULL ELSE c.deleted_at END
 RETURNING c.id, c.runtime, c.source_name, c.name, c.image, c.namespace, c.node_name,
   c.first_seen_at, c.last_seen_at, c.start_count, c.crash_count, c.oom_count, c.current_status,
-  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, NULL::double precision`
+  c.deleted_at, c.ignored, c.workload_kind, c.workload_name, c.is_system, c.workload_id, NULL::double precision`
 
 // Upsert inserts or updates a Container row. See upsertContainerSQL for the
 // field-level merge rules.
@@ -142,6 +143,7 @@ func (r *containerRepo) Upsert(ctx context.Context, c *model.Container, restore 
 		c.ID, c.Runtime, c.SourceName, c.Name, c.Image, c.Namespace, c.NodeName,
 		firstSeen, lastSeen, status,
 		c.WorkloadKind, c.WorkloadName, c.IsSystem, restore,
+		model.WorkloadID(c.SourceName, c.Namespace, c.WorkloadKind, c.WorkloadName),
 	)
 	out, err := scanContainer(row)
 	if err != nil {
@@ -256,6 +258,14 @@ func buildFilter(f repository.ContainerFilter) (string, []any) {
 	if f.Workload != "" {
 		args = append(args, f.Workload)
 		clauses = append(clauses, fmt.Sprintf("c.workload_name = $%d", len(args)))
+	}
+	if f.WorkloadID != "" {
+		args = append(args, f.WorkloadID)
+		clauses = append(clauses, fmt.Sprintf("c.workload_id = $%d", len(args)))
+	}
+	if !f.SeenSince.IsZero() {
+		args = append(args, f.SeenSince)
+		clauses = append(clauses, fmt.Sprintf("c.last_seen_at >= $%d", len(args)))
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		args = append(args, "%"+escapeLike(q)+"%")
@@ -501,7 +511,7 @@ func scanContainer(row interface {
 		&c.ID, &c.Runtime, &c.SourceName, &c.Name, &c.Image, &c.Namespace, &c.NodeName,
 		&c.FirstSeenAt, &c.LastSeenAt, &c.StartCount, &c.CrashCount, &c.OOMCount, &c.CurrentStatus,
 		&c.DeletedAt, &c.Ignored,
-		&c.WorkloadKind, &c.WorkloadName, &c.IsSystem, &c.Score,
+		&c.WorkloadKind, &c.WorkloadName, &c.IsSystem, &c.WorkloadID, &c.Score,
 	)
 }
 
@@ -585,6 +595,10 @@ func (r *eventRepo) FindRecent(ctx context.Context, q repository.EventQuery) ([]
 	if !q.Before.IsZero() {
 		args = append(args, q.Before)
 		clauses = append(clauses, fmt.Sprintf("e.occurred_at < $%d", len(args)))
+	}
+	if q.WorkloadID != "" {
+		args = append(args, q.WorkloadID)
+		clauses = append(clauses, fmt.Sprintf("c.workload_id = $%d", len(args)))
 	}
 	sql := `SELECT ` + eventCols + `, COALESCE(c.name, ''), COALESCE(c.runtime, '')
 FROM lifecycle_events e LEFT JOIN containers c ON c.id = e.container_id`

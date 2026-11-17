@@ -4,10 +4,13 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/spf13/viper"
+
+	"github.com/emirhanusta/kymo/internal/model"
 )
 
 // Config is the top-level configuration struct for the KYMO service.
@@ -21,6 +24,10 @@ type Config struct {
 	// SecretKey encrypts kubeconfigs uploaded through the UI (env KYMO_SECRET_KEY).
 	// Without it, Kubernetes sources can only reference kubeconfig files on the server.
 	SecretKey string `mapstructure:"secret_key"`
+
+	// File is the absolute path of the config file in use, or "" when the
+	// configuration comes from defaults and environment variables only.
+	File string `mapstructure:"-"`
 }
 
 // ServerConfig controls the HTTP server binding and timeout behaviour.
@@ -124,7 +131,42 @@ type LogConfig struct {
 //  3. Built-in defaults defined below.
 //
 // It returns an error if the resolved configuration cannot be decoded into Config.
-func Load() (*Config, error) {
+func Load() (*Config, error) { return load("") }
+
+// LoadFile is like Load but reads exactly the given file (it must exist).
+// Environment overrides, defaults and validation apply as in Load.
+func LoadFile(path string) (*Config, error) {
+	if path == "" {
+		return nil, fmt.Errorf("config: no config file in use")
+	}
+	return load(path)
+}
+
+// Reload re-reads the config file this Config was loaded from. It returns an
+// error when no file is in use or the new content is invalid.
+func (c *Config) Reload() (*Config, error) { return LoadFile(c.File) }
+
+// SourceSpecs converts the configured collector sources into source specs
+// (origin "config"). Bootstrap and live reload both use it.
+func SourceSpecs(cfg *Config) []model.SourceSpec {
+	specs := make([]model.SourceSpec, 0, len(cfg.Collector.Sources))
+	for _, src := range cfg.Collector.Sources {
+		specs = append(specs, model.SourceSpec{
+			Name:           src.Name,
+			Type:           src.Type,
+			Origin:         model.SourceOriginConfig,
+			Enabled:        true,
+			ReadOnly:       src.ReadOnly,
+			Socket:         src.Socket,
+			KubeconfigPath: src.KubeconfigPath,
+			KubeContext:    src.KubeContext,
+			PollInterval:   src.PollInterval,
+		})
+	}
+	return specs
+}
+
+func load(path string) (*Config, error) {
 	v := viper.New()
 
 	// --- Defaults ---
@@ -148,9 +190,16 @@ func Load() (*Config, error) {
 	// --- Config file (optional) ---
 	v.SetConfigName("config")
 	v.SetConfigType("yaml")
-	v.AddConfigPath(".")
-	v.AddConfigPath("/etc/kymo")
-	_ = v.ReadInConfig() // not an error if the file is absent
+	if path != "" {
+		v.SetConfigFile(path)
+		if err := v.ReadInConfig(); err != nil {
+			return nil, fmt.Errorf("config: reading %s: %w", path, err)
+		}
+	} else {
+		v.AddConfigPath(".")
+		v.AddConfigPath("/etc/kymo")
+		_ = v.ReadInConfig() // not an error if the file is absent
+	}
 
 	// --- Environment overrides ---
 	v.SetEnvPrefix("KYMO")
@@ -158,6 +207,12 @@ func Load() (*Config, error) {
 	v.AutomaticEnv()
 
 	cfg := &Config{}
+	if f := v.ConfigFileUsed(); f != "" {
+		if abs, err := filepath.Abs(f); err == nil {
+			f = abs
+		}
+		cfg.File = f
+	}
 	if err := v.Unmarshal(cfg); err != nil {
 		return nil, fmt.Errorf("config: unmarshal failed: %w", err)
 	}

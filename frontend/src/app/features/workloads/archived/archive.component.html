@@ -1,6 +1,6 @@
 <div class="space-y-4">
   <!-- Header -->
-  <app-page-header title="Archive" subtitle="Archived and ignored containers are stored here">
+  <app-page-header title="Archived & ignored" subtitle="Containers you archived or stopped tracking are kept here" crumbLabel="Workloads" crumbLink="/workloads">
     @if (tab() === 'archived' && archived().length > 0) {
       <button
         class="k-btn k-btn-danger"

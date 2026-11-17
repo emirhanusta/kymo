@@ -3,12 +3,13 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { Subject, of } from 'rxjs';
+import { Subject, forkJoin, of } from 'rxjs';
 import { catchError, debounceTime, map, switchMap } from 'rxjs/operators';
 
 import { ContainerService } from '../../core/services/container.service';
-import { Container } from '../../core/models/container.model';
+import { Container, WorkloadSummary } from '../../core/models/container.model';
 import { DialogDirective } from '../../shared/directives/dialog.directive';
+import { WorkloadBadgeComponent } from '../../shared/components/workload-badge/workload-badge.component';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
 import { ScoreClassPipe } from '../../shared/pipes/score-class.pipe';
 import { containerRoute } from '../../shared/utils/format';
@@ -18,6 +19,7 @@ interface PaletteTab { path: string; label: string; }
 
 type PaletteItem =
   | { kind: 'page'; key: string; label: string; path: string }
+  | { kind: 'workload'; key: string; workload: WorkloadSummary }
   | { kind: 'container'; key: string; container: Container };
 
 /**
@@ -27,7 +29,7 @@ type PaletteItem =
 @Component({
   selector: 'app-command-palette',
   standalone: true,
-  imports: [DialogDirective, StatusBadgeComponent, ScoreClassPipe],
+  imports: [DialogDirective, StatusBadgeComponent, WorkloadBadgeComponent, ScoreClassPipe],
   templateUrl: './command-palette.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -40,6 +42,7 @@ export class CommandPaletteComponent {
 
   query      = signal('');
   containers = signal<Container[]>([]);
+  workloads  = signal<WorkloadSummary[]>([]);
   searching  = signal(false);
   active     = signal(0);
 
@@ -54,6 +57,7 @@ export class CommandPaletteComponent {
 
   items = computed<PaletteItem[]>(() => [
     ...this.pages().map(t => ({ kind: 'page' as const, key: 'p:' + t.path, label: t.label, path: t.path })),
+    ...this.workloads().map(w => ({ kind: 'workload' as const, key: 'w:' + w.id, workload: w })),
     ...this.containers().map(c => ({ kind: 'container' as const, key: 'c:' + c.id, container: c })),
   ]);
 
@@ -61,16 +65,23 @@ export class CommandPaletteComponent {
     this.query$.pipe(
       debounceTime(200),
       switchMap(q => {
-        if (!q.trim()) return of([] as Container[]);
+        if (!q.trim()) return of({ workloads: [] as WorkloadSummary[], containers: [] as Container[] });
         this.searching.set(true);
-        return this.svc.getContainersPage({ page: 1, limit: 8, q }).pipe(
-          map(p => p?.data ?? []),
-          catchError(() => of([] as Container[])),
-        );
+        return forkJoin({
+          workloads: this.svc.getWorkloads({ q }).pipe(
+            map(list => (list ?? []).slice(0, 5)),
+            catchError(() => of([] as WorkloadSummary[])),
+          ),
+          containers: this.svc.getContainersPage({ page: 1, limit: 8, q }).pipe(
+            map(p => p?.data ?? []),
+            catchError(() => of([] as Container[])),
+          ),
+        });
       }),
       takeUntilDestroyed(),
-    ).subscribe(list => {
-      this.containers.set(list);
+    ).subscribe(({ workloads, containers }) => {
+      this.workloads.set(workloads);
+      this.containers.set(containers);
       this.searching.set(false);
       this.clampActive();
     });
@@ -79,7 +90,7 @@ export class CommandPaletteComponent {
   onInput(value: string): void {
     this.query.set(value);
     this.active.set(0);
-    if (!value.trim()) this.containers.set([]);
+    if (!value.trim()) { this.containers.set([]); this.workloads.set([]); }
     this.query$.next(value);
   }
 
@@ -108,8 +119,10 @@ export class CommandPaletteComponent {
   open(item: PaletteItem): void {
     this.closed.emit();
     if (item.kind === 'page') {
-      // Page paths may carry a query string (e.g. /workloads?view=cronjobs).
+      // Page paths may carry a query string (e.g. /workloads?kind=CronJob).
       this.router.navigateByUrl(item.path);
+    } else if (item.kind === 'workload') {
+      this.router.navigate(['/workloads', item.workload.id]);
     } else {
       this.router.navigate(containerRoute(item.container.id, item.container.runtime));
     }

@@ -4,7 +4,7 @@ import { Observable } from 'rxjs';
 
 import { API_BASE } from './container.service';
 import {
-  ActionResult, KubeContextList, ServerMeta, SourceInput, SourceStatus, SourceTestResult,
+  ActionResult, KubeContextList, ServerMeta, SourceInput, SourceStatus, SourceTestResult, SyncResult,
 } from '../models/container.model';
 
 /** Source management (CRUD, connection test, kubeconfig context discovery) and server meta. */
@@ -15,6 +15,10 @@ export class SourceService {
 
   getMeta(): Observable<ServerMeta> {
     return this.http.get<ServerMeta>(`${this.base}/meta`);
+  }
+
+  reloadConfig(): Observable<SyncResult> {
+    return this.http.post<SyncResult>(`${this.base}/sources/reload`, {});
   }
 
   test(input: SourceInput): Observable<SourceTestResult> {

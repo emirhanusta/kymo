@@ -2,9 +2,9 @@ import { inject } from '@angular/core';
 import { Router, Routes } from '@angular/router';
 import { ShellComponent } from './layout/shell/shell.component';
 
-/** Old top-level workload pages now live under /workloads?view=…. */
-const workloadRedirect = (view: string) => () =>
-  inject(Router).createUrlTree(['/workloads'], { queryParams: { view } });
+/** Old top-level workload pages now live under /workloads. */
+const workloadRedirect = (queryParams: Record<string, string>) => () =>
+  inject(Router).createUrlTree(['/workloads'], { queryParams });
 
 export const routes: Routes = [
   {
@@ -18,13 +18,6 @@ export const routes: Routes = [
           import('./features/dashboard/dashboard.component').then(m => m.DashboardComponent),
       },
       {
-        path: 'containers',
-        loadComponent: () =>
-          import('./features/containers/container-list/container-list.component').then(
-            m => m.ContainerListComponent
-          ),
-      },
-      {
         path: 'containers/:id',
         loadComponent: () =>
           import('./features/containers/container-detail/container-detail.component').then(
@@ -34,7 +27,18 @@ export const routes: Routes = [
       {
         path: 'workloads',
         loadComponent: () =>
-          import('./features/workloads/workloads.component').then(m => m.WorkloadsComponent),
+          import('./features/workloads/list/workload-list.component').then(m => m.WorkloadListComponent),
+      },
+      // Must precede `workloads/:id` so "archived" is not taken as a workload id.
+      {
+        path: 'workloads/archived',
+        loadComponent: () =>
+          import('./features/workloads/archived/archive.component').then(m => m.ArchiveComponent),
+      },
+      {
+        path: 'workloads/:id',
+        loadComponent: () =>
+          import('./features/workloads/detail/workload-detail.component').then(m => m.WorkloadDetailComponent),
       },
       {
         path: 'events',
@@ -46,27 +50,29 @@ export const routes: Routes = [
         loadComponent: () =>
           import('./features/sources/sources.component').then(m => m.SourcesComponent),
       },
-      {
-        path: 'archive',
-        loadComponent: () =>
-          import('./features/archive/archive.component').then(
-            m => m.ArchiveComponent
-          ),
-      },
 
       // ── legacy links ──────────────────────────────────────────────────────
+      // The container list is gone: old filters map onto the workloads table (workload_kind→kind, workload→q).
       {
-        path: 'pods',
+        path: 'containers',
         pathMatch: 'full',
-        redirectTo: () =>
-          inject(Router).createUrlTree(['/containers'], { queryParams: { runtime: 'kubernetes' } }),
+        redirectTo: ({ queryParams }) => {
+          const qp: Record<string, string> = {};
+          if (queryParams['workload_kind']) qp['kind'] = queryParams['workload_kind'];
+          const q = queryParams['workload'] || queryParams['q'];
+          if (q) qp['q'] = q;
+          if (queryParams['source']) qp['source'] = queryParams['source'];
+          return inject(Router).createUrlTree(['/workloads'], { queryParams: qp });
+        },
       },
+      { path: 'pods', pathMatch: 'full', redirectTo: workloadRedirect({}) },
       {
         path: 'pods/:id',
         redirectTo: ({ params }) => inject(Router).createUrlTree(['/containers', params['id']]),
       },
-      { path: 'deployments', pathMatch: 'full', redirectTo: workloadRedirect('deployments') },
-      { path: 'cronjobs', pathMatch: 'full', redirectTo: workloadRedirect('cronjobs') },
+      { path: 'deployments', pathMatch: 'full', redirectTo: workloadRedirect({ kind: 'Deployment' }) },
+      { path: 'cronjobs', pathMatch: 'full', redirectTo: workloadRedirect({ kind: 'CronJob' }) },
+      { path: 'archive', pathMatch: 'full', redirectTo: '/workloads/archived' },
     ],
   },
 ];

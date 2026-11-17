@@ -21,14 +21,14 @@
   } @else if (loadError() === 'not-found') {
     <div class="k-panel">
       <app-empty-state icon="search" message="Container not found" hint="It may have been archived, ignored or permanently deleted.">
-        <a [routerLink]="backPath" class="mt-4 text-xs text-kymo-amber hover:underline underline-offset-4">← back to {{ backLabel.toLowerCase() }}</a>
+        <a [routerLink]="backPath()" class="mt-4 text-xs text-kymo-amber hover:underline underline-offset-4">← back to {{ backLabel().toLowerCase() }}</a>
       </app-empty-state>
     </div>
   } @else if (loadError() === 'error' || !container()) {
     <app-error-state message="Failed to load container" (retry)="retry()" />
   } @else {
     <!-- Header -->
-    <app-page-header [title]="container()!.name" [crumbLabel]="backLabel" [crumbLink]="backPath">
+    <app-page-header [title]="container()!.name" [crumbLabel]="backLabel()" [crumbLink]="backPath()">
       <span subtitle class="flex items-center gap-x-3 gap-y-1 flex-wrap">
         <app-status-badge [status]="container()!.current_status" />
         @if (container()!.workload_kind) {
@@ -49,13 +49,21 @@
       @if (container()!.workload_name) {
         <div class="flex gap-2">
           <dt class="k-label">{{ container()!.workload_kind === 'Compose' ? 'project' : 'workload' }}</dt>
-          <dd>
-            <a
-              routerLink="/containers"
-              [queryParams]="{ workload_kind: container()!.workload_kind || null, workload: container()!.workload_name }"
-              class="text-kymo-ink hover:text-kymo-amber underline-offset-4 hover:underline"
-              [title]="'All containers of ' + container()!.workload_name"
-            >{{ container()!.workload_name }}</a>
+          <dd class="flex items-center gap-2">
+            @if (container()!.workload_id) {
+              <a
+                [routerLink]="['/workloads', container()!.workload_id]"
+                class="text-kymo-ink hover:text-kymo-amber underline-offset-4 hover:underline"
+                [title]="'Open workload ' + container()!.workload_name"
+              >{{ container()!.workload_name }}</a>
+            } @else {
+              <a
+                routerLink="/workloads"
+                [queryParams]="{ q: container()!.workload_name }"
+                class="text-kymo-ink hover:text-kymo-amber underline-offset-4 hover:underline"
+                [title]="'Find workload ' + container()!.workload_name"
+              >{{ container()!.workload_name }}</a>
+            }
           </dd>
         </div>
       }
@@ -224,12 +232,11 @@
       <div class="k-panel p-5">
         <div class="flex items-center justify-between mb-4">
           <h2 class="k-label">Pod</h2>
-          @if (container()!.workload_kind === 'Deployment' && container()!.workload_name) {
+          @if (container()!.workload_id && container()!.workload_name) {
             <a
-              routerLink="/workloads"
-              [queryParams]="{ view: 'deployments' }"
+              [routerLink]="['/workloads', container()!.workload_id]"
               class="text-xs text-kymo-amber hover:underline underline-offset-4"
-              title="Go to Deployments"
+              title="Open workload"
             >↑ {{ container()!.workload_name }}</a>
           }
         </div>

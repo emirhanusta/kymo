@@ -14,6 +14,7 @@ import { ErrorStateComponent } from '../../shared/components/error-state/error-s
 import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
 import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import { containerRoute, shortId } from '../../shared/utils/format';
+import { podNameFromId } from '../../shared/utils/source';
 import { eventChipClass, eventIcon, eventLabel, eventReason, showsExitCode } from '../../shared/utils/events';
 
 const PAGE_SIZE = 100;
@@ -164,6 +165,11 @@ export class EventsComponent {
 
   route(ev: LifecycleEvent): string[] {
     return containerRoute(ev.container_id, ev.runtime);
+  }
+
+  /** Kubernetes events belong to a pod (id is `namespace/pod/container`); Docker containers have none. */
+  pod(ev: LifecycleEvent): string {
+    return podNameFromId(ev.container_id);
   }
 
   name(ev: LifecycleEvent): string {

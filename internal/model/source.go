@@ -20,6 +20,10 @@ const (
 // belong to a Docker Compose project (com.docker.compose.project label).
 const WorkloadCompose = "Compose"
 
+// WorkloadContainer is the workload kind assigned to standalone Docker
+// containers (no Compose label); the workload is named after the container.
+const WorkloadContainer = "Container"
+
 // SourceSpec fully describes a collector source, wherever it was declared.
 type SourceSpec struct {
 	Name     string

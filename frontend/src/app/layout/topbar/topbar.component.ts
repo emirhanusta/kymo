@@ -19,24 +19,22 @@ export interface NavTab {
   label: string;
 }
 
-/** Fixed main navigation (digit hotkeys 1–6 in this order). The source selector only filters data. */
+/** Fixed main navigation (digit hotkeys 1–4 in this order). The source selector only filters data. */
 export const NAV_TABS: NavTab[] = [
   { path: '/dashboard',  label: 'Overview' },
-  { path: '/containers', label: 'Containers' },
   { path: '/workloads',  label: 'Workloads' },
   { path: '/events',     label: 'Events' },
   { path: '/sources',    label: 'Sources' },
-  { path: '/archive',    label: 'Archive' },
 ];
 
 /** Command palette "pages": the tabs plus deep links into sub-views. */
 export const PALETTE_PAGES: NavTab[] = [
   ...NAV_TABS,
-  { path: '/containers?runtime=docker',     label: 'Docker containers' },
-  { path: '/containers?runtime=kubernetes', label: 'Kubernetes containers' },
-  { path: '/workloads?view=deployments',    label: 'Deployments' },
-  { path: '/workloads?view=cronjobs',       label: 'CronJobs' },
-  { path: '/workloads?view=compose',        label: 'Compose projects' },
+  { path: '/workloads?kind=Deployment',     label: 'Deployments' },
+  { path: '/workloads?kind=CronJob',        label: 'CronJobs' },
+  { path: '/workloads?kind=Compose',        label: 'Compose projects' },
+  { path: '/workloads?kind=Container',      label: 'Standalone containers' },
+  { path: '/workloads/archived',            label: 'Archived & ignored' },
   { path: '/sources?add=1',                 label: 'Add source' },
 ];
 
@@ -153,8 +151,8 @@ export class TopbarComponent {
       return;
     }
 
-    // 1–6: switch tabs.
-    if (ev.ctrlKey || ev.metaKey || ev.altKey || !/^[1-6]$/.test(ev.key)) return;
+    // 1–4: switch tabs.
+    if (ev.ctrlKey || ev.metaKey || ev.altKey || !/^[1-4]$/.test(ev.key)) return;
     if (isTypingOrModal(ev)) return;
     const tab = this.tabs[+ev.key - 1];
     if (!tab) return;

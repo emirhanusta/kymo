@@ -15,6 +15,8 @@ type EventQuery struct {
 	// Before returns only events that occurred strictly before this time
 	// (cursor for "load older").
 	Before time.Time
+	// WorkloadID restricts the feed to the instances of one workload.
+	WorkloadID string
 }
 
 // EventRepository defines the persistence operations for LifecycleEvent records.

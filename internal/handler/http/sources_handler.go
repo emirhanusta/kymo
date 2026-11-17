@@ -17,10 +17,38 @@ var Version = "dev"
 //
 //	GET /api/v1/meta
 func (h *Handler) Meta(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
+	meta := gin.H{
 		"version":               Version,
 		"secret_key_configured": h.sources != nil && h.sources.SecretConfigured(),
-	})
+		"config_file":           "",
+		"config_sync":           nil,
+	}
+	if h.sources != nil {
+		meta["config_file"] = h.sources.ConfigFile()
+		if sync := h.sources.LastConfigSync(); sync != nil {
+			meta["config_sync"] = sync
+		}
+	}
+	c.JSON(http.StatusOK, meta)
+}
+
+// ReloadSources re-reads config.yaml now and applies its sources.
+//
+//	POST /api/v1/sources/reload
+func (h *Handler) ReloadSources(c *gin.Context) {
+	res, err := h.sources.ReloadConfig(c.Request.Context())
+	var ce *service.ConfigError
+	switch {
+	case errors.Is(err, service.ErrNoConfigFile):
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+	case errors.As(err, &ce):
+		c.JSON(http.StatusBadRequest, gin.H{"error": ce.Error()})
+	case err != nil:
+		h.log.Error("reload sources failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+	default:
+		c.JSON(http.StatusOK, res)
+	}
 }
 
 // sourceError maps SourceManager errors to HTTP responses.

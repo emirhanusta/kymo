@@ -9,6 +9,10 @@ like a kymograph tracing a needle over chart paper.
 
 ## What it does
 
+- **Workload-level history** — every pod a Deployment, StatefulSet, DaemonSet,
+  CronJob or Job ever ran is aggregated into one workload, so crashes, OOM
+  kills, restarts and the stability score survive rollouts and rescheduling.
+  Pods killed by a rollout or scale-down are recorded as stops, not crashes.
 - **Lifecycle history** — start / stop / crash / OOM events per container,
   with exit codes and reasons, kept across restarts of KYMO itself.
 - **Resource traces** — CPU, memory and network rates over 1h / 6h / 24h / 7d
@@ -31,7 +35,8 @@ like a kymograph tracing a needle over chart paper.
 | ![Containers](docs/screenshots/02-containers.jpg) | ![Container detail](docs/screenshots/03-detail.jpg) |
 | ![Resource traces](docs/screenshots/04-resources.jpg) | ![Command palette](docs/screenshots/05-command-palette.jpg) |
 | ![Sources](docs/screenshots/06-sources.jpg) | ![Add source](docs/screenshots/07-add-source.jpg) |
-| ![Compose workloads](docs/screenshots/09-workloads-compose.jpg) | ![Events](docs/screenshots/10-events.jpg) |
+| ![Workloads](docs/screenshots/09-workloads.jpg) | ![Workload detail](docs/screenshots/11-workload-detail.jpg) |
+| ![Workload pods](docs/screenshots/12-workload-pods.jpg) | ![Events](docs/screenshots/10-events.jpg) |
 
 ## Quick start (Docker Compose)
 
@@ -67,6 +72,13 @@ Sources can be declared in `config.yaml` (locked in the UI) or managed on the
 **Sources** page. For Kubernetes you can point at a kubeconfig file on the
 server, or paste/upload one — uploads are stored encrypted and require
 `KYMO_SECRET_KEY` to be set.
+
+**Live reload:** the `collector.sources` list in `config.yaml` is applied while
+KYMO runs — the file is watched, and you can also press *Reload config.yaml* on
+the Sources page or `POST /api/v1/sources/reload`. Added, changed and removed
+sources take effect immediately (recorded history is kept); an invalid file is
+rejected and the current sources keep running. All other settings (server,
+database, log, secret key, poll and scoring intervals) still need a restart.
 
 See [`config.example.yaml`](config.example.yaml). Every key can be overridden
 with an environment variable prefixed `KYMO_`, e.g. `KYMO_DATABASE_DSN`,

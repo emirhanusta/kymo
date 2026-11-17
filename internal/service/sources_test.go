@@ -66,7 +66,7 @@ func waitFor(t *testing.T, cond func() bool) {
 }
 
 func TestRecorderAttachDetachWhileRunning(t *testing.T) {
-	r := NewRecorderService(nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 
 	before := newFake(0)
 	r.AttachSource(model.SourceSpec{Name: "a", Type: "docker", Enabled: true}, before, nil)
@@ -115,7 +115,7 @@ func TestRecorderAttachDetachWhileRunning(t *testing.T) {
 }
 
 func TestRecorderRetriesFailingSource(t *testing.T) {
-	r := NewRecorderService(nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
 	flaky := newFake(1)
 	r.AttachSource(model.SourceSpec{Name: "k", Type: "kubernetes", Enabled: true}, flaky, nil)
 
@@ -171,5 +171,52 @@ func TestBuildSpecValidation(t *testing.T) {
 	}
 	if _, err := m.buildSpec(SourceInput{Type: "docker"}, existing); err == nil {
 		t.Error("type change accepted")
+	}
+}
+
+// slowStopCollector blocks in Stop until released, like a Kubernetes collector
+// draining its informer.
+type slowStopCollector struct {
+	*fakeCollector
+	release chan struct{}
+}
+
+func (s *slowStopCollector) Stop() error {
+	<-s.release
+	return s.fakeCollector.Stop()
+}
+
+func TestRecorderReplaceKeepsSourceListed(t *testing.T) {
+	r := NewRecorderService(nil, nil, nil, nil, nil, nil, ScoringConfig{Interval: time.Hour}, zap.NewNop()).(*recorderService)
+	slow := &slowStopCollector{fakeCollector: newFake(0), release: make(chan struct{})}
+	r.AttachSource(model.SourceSpec{Name: "k", Type: "kubernetes", Enabled: true}, slow, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = r.Run(ctx) }()
+	waitFor(t, func() bool { return healthOf(t, r, "k").status == SourceConnected })
+
+	replaced := make(chan struct{})
+	next := newFake(0)
+	go func() {
+		r.AttachSource(model.SourceSpec{Name: "k", Type: "kubernetes", Enabled: true, ReadOnly: true}, next, nil)
+		close(replaced)
+	}()
+
+	// While the old collector is still stopping, the source is listed with the
+	// new settings and does not disappear.
+	waitFor(t, func() bool { return r.IsReadOnly("k") })
+	if h := healthOf(t, r, "k"); h.status != SourceConnecting {
+		t.Fatalf("status while replacing = %s, want connecting", h.status)
+	}
+	if next.starts.Load() != 0 {
+		t.Fatal("new collector started before the old one stopped")
+	}
+
+	close(slow.release)
+	<-replaced
+	waitFor(t, func() bool { return healthOf(t, r, "k").status == SourceConnected })
+	if len(r.order) != 1 {
+		t.Fatalf("order = %v, want one entry", r.order)
 	}
 }
