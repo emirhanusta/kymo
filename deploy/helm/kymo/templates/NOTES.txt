@@ -1,0 +1,30 @@
+KYMO {{ .Chart.AppVersion }} was installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+{{- if .Values.cluster.enabled }}
+
+It monitors the cluster it runs in (source "{{ .Values.cluster.name }}") with {{ if .Values.rbac.management.enabled }}READ + MANAGEMENT (delete pods, scale/restart Deployments){{ else }}read-only{{ end }} cluster-wide access.
+{{- end }}
+
+Open the UI:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "kymo.fullname" . }} {{ .Values.service.port }}:{{ .Values.service.port }}
+  then browse to http://localhost:{{ .Values.service.port }}
+{{- end }}
+
+Check it is healthy:
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+IMPORTANT
+  * KYMO has no authentication. Do not expose it publicly without an
+    authenticating proxy in front.
+  * KYMO_SECRET_KEY lives in Secret "{{ include "kymo.keySecretName" . }}" (key "{{ include "kymo.keySecretKey" . }}"). Back it up:
+    stored kubeconfigs and notification URLs cannot be decrypted without it.
+{{- if .Values.timescaledb.enabled }}
+  * The bundled TimescaleDB is a single node{{ if not .Values.timescaledb.persistence.enabled }} WITHOUT persistence: history is lost when its pod restarts{{ end }}. For production consider an external
+    database (timescaledb.enabled=false, database.dsn / database.existingSecret).
+{{- end }}
+  * CPU/memory sampling needs metrics-server in the cluster.

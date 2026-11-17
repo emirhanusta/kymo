@@ -1,0 +1,160 @@
+{{- if .Values.timescaledb.enabled }}
+{{- $db := include "kymo.timescaledb.fullname" . }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $db }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kymo.timescaledb.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+  selector:
+    {{- include "kymo.timescaledb.selectorLabels" . | nindent 4 }}
+---
+# Headless service giving the StatefulSet a stable network identity.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $db }}-headless
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kymo.timescaledb.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+  selector:
+    {{- include "kymo.timescaledb.selectorLabels" . | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $db }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kymo.timescaledb.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ $db }}-headless
+  selector:
+    matchLabels:
+      {{- include "kymo.timescaledb.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kymo.timescaledb.selectorLabels" . | nindent 8 }}
+      {{- with .Values.timescaledb.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.timescaledb.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.timescaledb.podSecurityContext | nindent 8 }}
+      containers:
+        - name: timescaledb
+          image: {{ include "kymo.timescaledb.image" . | quote }}
+          imagePullPolicy: {{ .Values.timescaledb.image.pullPolicy }}
+          {{- with .Values.timescaledb.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: {{ .Values.timescaledb.auth.username | quote }}
+            - name: POSTGRES_DB
+              value: {{ .Values.timescaledb.auth.database | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kymo.secretName" . }}
+                  key: postgres-password
+            # A subdirectory avoids "directory not empty" on volumes with lost+found.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          readinessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          startupProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" -h 127.0.0.1
+            periodSeconds: 5
+            failureThreshold: 60
+          resources:
+            {{- toYaml .Values.timescaledb.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 256Mi
+        {{- if not .Values.timescaledb.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+      {{- with .Values.timescaledb.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.timescaledb.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.timescaledb.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if .Values.timescaledb.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          {{- toYaml .Values.timescaledb.persistence.accessModes | nindent 10 }}
+        {{- with .Values.timescaledb.persistence.storageClass }}
+        storageClassName: {{ if eq . "-" }}""{{ else }}{{ . }}{{ end }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.timescaledb.persistence.size }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,314 @@
+# Default values for the KYMO chart.
+#
+# With the defaults KYMO monitors the cluster it runs in, stores its history in
+# a bundled single-node TimescaleDB, and is reachable only inside the cluster
+# (use `kubectl port-forward` or enable the ingress).
+#
+# KYMO has NO authentication and (optionally) management actions - do not
+# expose it publicly without an authenticating proxy in front.
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Image
+# ---------------------------------------------------------------------------
+image:
+  repository: ghcr.io/emirhanusta/kymo
+  # Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Pull secrets for a private registry, e.g. [{name: regcred}].
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# Workload
+# ---------------------------------------------------------------------------
+# KYMO is a single writer (one recorder per database); do not scale beyond 1.
+replicaCount: 1
+
+# Port the HTTP server listens on inside the container.
+containerPort: 8080
+
+podAnnotations: {}
+podLabels: {}
+
+priorityClassName: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  # Matches the user created in the Dockerfile.
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Extra environment variables for the KYMO container (list of EnvVar objects),
+# e.g. [{name: KYMO_DATABASE_MAX_CONNS, value: "30"}].
+extraEnv: []
+
+# Extra volumes / mounts for the KYMO container.
+extraVolumes: []
+extraVolumeMounts: []
+
+# Probes hit GET /api/v1/healthz (which also checks the database).
+startupProbe:
+  failureThreshold: 30
+  periodSeconds: 5
+livenessProbe:
+  periodSeconds: 20
+  timeoutSeconds: 5
+  failureThreshold: 3
+readinessProbe:
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Wait for the database before starting KYMO (otherwise KYMO exits when the
+# database is unreachable and the pod restarts until it is). Uses pg_isready
+# with the DSN; it never authenticates.
+waitForDatabase:
+  enabled: true
+  image:
+    repository: timescale/timescaledb
+    tag: latest-pg16
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# RBAC (cluster-wide, READ-ONLY by default)
+# ---------------------------------------------------------------------------
+rbac:
+  # Create the ClusterRole + ClusterRoleBinding. Set to false to bring your own
+  # (see the chart README for the required rules).
+  create: true
+  management:
+    # Also allow the UI management actions: delete (restart) pods, scale and
+    # rollout-restart Deployments. Adds pods/delete and deployments update+patch.
+    # Leave false for a strictly read-only recorder.
+    enabled: false
+
+# ---------------------------------------------------------------------------
+# What KYMO monitors
+# ---------------------------------------------------------------------------
+cluster:
+  # Register the cluster KYMO runs in as a source (uses the pod's in-cluster
+  # credentials; no kubeconfig). Set to false to start with no sources and add
+  # remote clusters from the UI instead.
+  enabled: true
+  # Source name shown in the UI. Renaming later creates a new source (history is
+  # kept under the old name).
+  name: in-cluster
+  # Per-source resource sampling interval; empty uses collector.statsPollInterval.
+  pollInterval: ""
+  # Disables management actions for this source in the UI. null = automatic:
+  # true unless rbac.management.enabled is true.
+  readOnly: null
+
+# Additional sources written verbatim into collector.sources of config.yaml
+# (snake_case keys, see config.example.yaml). Remote clusters need a kubeconfig
+# mounted via extraVolumes, or can simply be added from the UI when
+# secretKey is set. Example:
+# extraSources:
+#   - name: staging
+#     type: kubernetes
+#     kubeconfig_path: /etc/kymo-kubeconfigs/staging
+#     read_only: true
+extraSources: []
+
+# ---------------------------------------------------------------------------
+# Application configuration (rendered into config.yaml)
+# ---------------------------------------------------------------------------
+server:
+  readTimeout: 15s
+  # Externally reachable URL of the UI (e.g. https://kymo.example.com). Used for
+  # the "Open in KYMO" links in notifications.
+  publicUrl: ""
+
+log:
+  level: info    # debug | info | warn | error
+  format: json   # json | console
+
+collector:
+  statsPollInterval: 15s   # needs metrics-server for CPU/memory
+  scoringInterval: 60s
+  scoringWindow: 24h
+  # When a container crashes or is OOM-killed, store the tail of its logs
+  # (30 days). Logs may contain sensitive data: set enabled=false to disable.
+  crashLogs:
+    enabled: true
+    tailLines: 200      # max 2000
+    maxBytes: 65536     # max 1048576
+  # Kubernetes Events are kept 90 days. Warning events are always kept, Normal
+  # ones only for normalReasons.
+  k8sEvents:
+    enabled: true
+    # Empty = KYMO's built-in list (see config.example.yaml).
+    normalReasons: []
+    excludeNamespaces: []
+
+issues:
+  evaluateInterval: 30s
+  degradedAfter: 3m
+  resolveAfter: 5m
+  reopenWindow: 15m
+  includeSystem: false   # also evaluate kube-system & co.
+
+notifications:
+  enabled: true
+  # Channels declared here are locked in the UI and reloaded live. Written
+  # verbatim into config.yaml (snake_case keys). Their webhook URLs end up in
+  # PLAIN TEXT in the config object - set configInSecret=true to keep
+  # them in a Secret instead. Example:
+  # channels:
+  #   - name: ops-slack
+  #     type: slack            # slack | discord | webhook
+  #     url: https://hooks.slack.com/services/T000/B000/XXXX
+  #     min_severity: critical
+  #     notify_resolved: true
+  #     include_logs: true
+  channels: []
+
+# Store config.yaml in a Secret instead of a ConfigMap (use when notification
+# channels contain webhook URLs / secrets).
+configInSecret: false
+
+# Free-form YAML deep-merged over everything above (snake_case keys exactly as
+# in config.example.yaml; lists are replaced). Escape hatch for settings the
+# chart has no value for. Edits to collector.sources and notification channels
+# are hot-reloaded; other settings need a pod restart. Example:
+#   config:
+#     collector:
+#       k8s_events:
+#         exclude_namespaces: [kube-system]
+config: {}
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+secretKey:
+  # KYMO_SECRET_KEY encrypts kubeconfigs uploaded in the UI and notification
+  # webhook URLs stored in the database. It MUST stay stable: losing it makes
+  # stored kubeconfigs unreadable.
+  # Leave empty to have one generated on first install; it is then preserved
+  # across upgrades (looked up from the existing Secret).
+  value: ""
+  # Use an existing Secret instead (takes precedence over `value`).
+  existingSecret: ""
+  existingSecretKey: secret-key
+
+# NOTE: the generated Secret is removed on `helm uninstall`, but the database
+# PVC is kept by Kubernetes. Reinstalling then generates a new database password
+# that does not match the old data: delete the PVC (data-<release>-timescaledb-0)
+# or set timescaledb.auth.password / secretKey.value explicitly.
+
+# ---------------------------------------------------------------------------
+# Database
+# ---------------------------------------------------------------------------
+# Used when timescaledb.enabled=false. TimescaleDB extension must be available.
+database:
+  # Full DSN, e.g. postgres://kymo:pass@db.example.com:5432/kymo?sslmode=require
+  dsn: ""
+  # Or reference an existing Secret holding the DSN.
+  existingSecret: ""
+  existingSecretKey: dsn
+  maxConns: 20
+  # Apply the embedded SQL migrations at startup.
+  autoMigrate: true
+
+# Bundled single-node TimescaleDB (StatefulSet). Fine for evaluation and small
+# clusters; for production prefer a managed/HA database (set enabled=false).
+timescaledb:
+  enabled: true
+  image:
+    repository: timescale/timescaledb
+    tag: latest-pg16
+    pullPolicy: IfNotPresent
+  auth:
+    username: kymo
+    database: kymo
+    # Empty = generated on first install and preserved across upgrades.
+    password: ""
+  persistence:
+    enabled: true     # false = emptyDir, history is lost when the pod restarts
+    size: 10Gi
+    storageClass: ""  # "" = cluster default, "-" = no storage class
+    accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  podSecurityContext:
+    seccompProfile:
+      type: RuntimeDefault
+  # The postgres entrypoint needs to chown the data dir and drop privileges, so
+  # the root filesystem/capabilities cannot be locked down like KYMO's.
+  securityContext: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  priorityClassName: ""
+
+# ---------------------------------------------------------------------------
+# Networking
+# ---------------------------------------------------------------------------
+service:
+  type: ClusterIP
+  port: 8080
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Log streaming uses long-lived SSE connections; with ingress-nginx add e.g.
+  #   nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  #   nginx.ingress.kubernetes.io/proxy-buffering: "off"
+  hosts: []
+  # hosts:
+  #   - host: kymo.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  tls: []
+  # tls:
+  #   - secretName: kymo-tls
+  #     hosts: [kymo.example.com]
+
+# Image used by `helm test`.
+tests:
+  image:
+    repository: busybox
+    tag: "1.36"

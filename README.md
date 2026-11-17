@@ -52,6 +52,28 @@ a `config.yaml` at `/etc/kymo/config.yaml` plus the kubeconfig it references
 (see the commented `volumes` in `docker-compose.yml` and
 [`config.example.yaml`](config.example.yaml)).
 
+## Run inside Kubernetes (Helm)
+
+KYMO can run in the cluster it monitors using the in-cluster ServiceAccount
+(no kubeconfig). The chart in [`deploy/helm/kymo`](deploy/helm/kymo) installs
+KYMO with read-only cluster RBAC and a bundled TimescaleDB:
+
+```bash
+helm install kymo deploy/helm/kymo -n kymo --create-namespace
+kubectl -n kymo port-forward svc/kymo 8080:8080
+```
+
+See the [chart README](deploy/helm/kymo/README.md) for external databases,
+ingress, notification channels and all values. To try it on minikube without a
+registry, build the image into the cluster and skip pulling:
+
+```bash
+minikube image build -t ghcr.io/emirhanusta/kymo:0.1.0 .
+helm install kymo deploy/helm/kymo -n kymo --create-namespace --set image.pullPolicy=Never
+```
+
+Tagging `v*` publishes a multi-arch image to `ghcr.io/emirhanusta/kymo`.
+
 ## Running locally
 
 Requirements: Go 1.24+, Node 20+, a TimescaleDB instance.
