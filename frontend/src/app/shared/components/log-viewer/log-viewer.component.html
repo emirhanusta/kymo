@@ -30,6 +30,7 @@
 
     <div class="flex-1"></div>
 
+    @if (!podGone()) {
     <!-- Search -->
     <div class="relative">
       <svg class="w-3.5 h-3.5 text-kymo-muted absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -49,6 +50,7 @@
       <input type="checkbox"  [checked]="onlyMatches()" (change)="onlyMatches.set($any($event.target).checked)" />
       filter
     </label>
+    }
 
     <div class="flex items-center gap-1 flex-none">
       <button type="button" class="p-1.5 hover:bg-kymo-raised transition-colors"
@@ -58,6 +60,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h13a3 3 0 010 6h-4m0 0l2-2m-2 2l2 2M4 18h5" />
         </svg>
       </button>
+      @if (!podGone()) {
       <button type="button" class="p-1.5 hover:bg-kymo-raised transition-colors"
         [class]="follow() ? 'text-kymo-running' : 'text-kymo-muted hover:text-kymo-ink'"
         (click)="toggleFollow()" [title]="follow() ? 'Stop live stream' : 'Follow (live stream)'" [attr.aria-label]="follow() ? 'Stop live stream' : 'Follow (live stream)'" [attr.aria-pressed]="follow()">
@@ -75,6 +78,7 @@
           <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
         </svg>
       </button>
+      }
       <button type="button" class="p-1.5 text-kymo-muted hover:text-kymo-danger hover:bg-kymo-raised transition-colors" (click)="close()" title="Close (Esc)" aria-label="Close logs">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -85,7 +89,52 @@
 
   <!-- Body -->
   <div class="flex-1 overflow-auto bg-kymo-deep scrollbar-thin" #logBody>
-    @if (loading()) {
+    @if (podGone()) {
+      <div class="max-w-3xl mx-auto px-4 py-6 space-y-4" aria-live="polite">
+        <div>
+          <p class="text-sm text-kymo-ink">This pod no longer exists in the cluster</p>
+          <p class="text-xs text-kymo-muted mt-1">Kubernetes deletes logs with the pod. KYMO keeps the last lines of crashes only.</p>
+        </div>
+        @if (snapLoading()) {
+          <p class="text-xs text-kymo-faint">loading crash snapshots…</p>
+        } @else if (snapshots().length === 0) {
+          <p class="text-xs text-kymo-faint">No crash snapshots were kept for this container.</p>
+        } @else {
+          <div>
+            <p class="k-label mb-1.5">Crash snapshots ({{ snapshots().length }})</p>
+            <ul class="border border-kymo-rule divide-y divide-kymo-rule max-h-40 overflow-auto scrollbar-thin" role="listbox" aria-label="Crash snapshots">
+              @for (s of snapshots(); track s.id; let i = $index) {
+                <li role="option" [attr.aria-selected]="i === snapIdx()">
+                  <button type="button" class="w-full text-left px-3 py-1.5 text-xs flex gap-3 hover:bg-kymo-raised transition-colors"
+                          [class]="i === snapIdx() ? 'bg-kymo-raised text-kymo-ink' : 'text-kymo-muted'" (click)="snapIdx.set(i)">
+                    <span class="tabular-nums">{{ s.occurred_at | date:'MMM d, HH:mm:ss' }}</span>
+                    <span>{{ s.reason || 'terminated' }}</span>
+                    <span class="tabular-nums text-kymo-danger">exit {{ s.exit_code }}</span>
+                  </button>
+                </li>
+              }
+            </ul>
+          </div>
+          @if (selectedSnap(); as sn) {
+            <div>
+              <pre class="bg-kymo-deep border border-kymo-rule px-3 py-2 text-[11px] leading-relaxed text-kymo-ink/80 max-h-[50vh] overflow-auto scrollbar-thin whitespace-pre-wrap break-all font-mono m-0" tabindex="0" aria-label="Crash log snapshot">{{ snapTail() }}</pre>
+              <p class="mt-1 text-[11px] text-kymo-faint flex items-center gap-3 flex-wrap">
+                <span>{{ sn.line_count }} line{{ sn.line_count === 1 ? '' : 's' }}@if (sn.previous) { · previous container}</span>
+                @if (sn.truncated) { <span class="text-kymo-amber">truncated — older output not kept</span> }
+                <button type="button" class="text-kymo-amber hover:underline underline-offset-4" (click)="snapModal.set(true)">open full log</button>
+              </p>
+            </div>
+          }
+        }
+        <p class="text-[11px] text-kymo-faint">Pod may still exist (e.g. a finished Job)?
+          <button type="button" class="text-kymo-amber hover:underline underline-offset-4" (click)="retryLive()">try the cluster</button></p>
+      </div>
+    } @else if (errorMsg(); as msg) {
+      <div class="flex flex-col items-center justify-center gap-3 h-full text-sm text-kymo-muted" role="alert">
+        <span>{{ msg }}</span>
+        <button type="button" class="k-btn k-btn-sm" (click)="fetchLogs()">Retry</button>
+      </div>
+    } @else if (loading()) {
       <div class="flex items-center justify-center gap-3 h-full text-kymo-muted text-sm">
         <div class="w-4 h-4 border-2 border-kymo-rule border-t-kymo-amber animate-spin"></div>
         <span>loading logs…</span>
@@ -106,6 +155,7 @@
   </div>
 
   <!-- Footer -->
+  @if (!podGone()) {
   <div class="flex items-center gap-3 px-4 py-1.5 border-t border-kymo-rule text-xs text-kymo-muted flex-none bg-kymo-deep">
     <span>{{ lines().length }} line{{ lines().length === 1 ? '' : 's' }}</span>
     @if (view().hasQuery) {
@@ -120,4 +170,8 @@
       <span>last {{ 200 }} lines · max {{ 500 }} kept</span>
     }
   </div>
+  }
 </div>
+@if (snapModal() && selectedSnap()) {
+  <app-crash-log-modal [log]="selectedSnap()!" (closed)="snapModal.set(false)" />
+}

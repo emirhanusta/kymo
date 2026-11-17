@@ -2,8 +2,11 @@ import {
   Component, ChangeDetectionStrategy, Input, Output, EventEmitter,
   signal, computed, OnDestroy, OnInit, inject, ElementRef, viewChild, AfterViewChecked,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { ContainerService } from '../../../core/services/container.service';
 import { ToastService } from '../../../core/services/toast.service';
+import { CrashLog } from '../../../core/models/container.model';
+import { CrashLogModalComponent } from '../crash-log-modal/crash-log-modal.component';
 import { DialogDirective } from '../../directives/dialog.directive';
 
 const MAX_LINES = 500;
@@ -34,10 +37,17 @@ function splitMatches(line: string, q: string): LinePart[] {
   return parts;
 }
 
+/** The `{error, code, crash_logs}` body of a failed logs request (text responses arrive as a JSON string). */
+function parseErrorBody(err: unknown): { code?: string; crash_logs?: number } | null {
+  let b = (err as { error?: unknown } | null)?.error;
+  if (typeof b === 'string') { try { b = JSON.parse(b); } catch { return null; } }
+  return b && typeof b === 'object' ? b as { code?: string; crash_logs?: number } : null;
+}
+
 @Component({
   selector: 'app-log-viewer',
   standalone: true,
-  imports: [DialogDirective],
+  imports: [DialogDirective, DatePipe, CrashLogModalComponent],
   templateUrl: './log-viewer.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -48,11 +58,21 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
   @Input() live = false;
   /** Other containers of the same pod; with more than one entry the header shows a switcher. */
   @Input() containers: { id: string; name: string }[] = [];
+  /** The pod is known to be gone: open straight in snapshot mode (no live attempt). */
+  @Input() gone = false;
   @Output() closed = new EventEmitter<void>();
 
   private svc   = inject(ContainerService);
   private toast = inject(ToastService);
 
+  /** Pod no longer exists in the cluster: show stored crash-log snapshots instead of logs. */
+  podGone     = signal(false);
+  snapshots   = signal<CrashLog[]>([]);
+  snapLoading = signal(false);
+  snapIdx     = signal(0);
+  snapModal   = signal(false);
+  /** Friendly error for a failed (non-410) logs request; null when fine. */
+  errorMsg    = signal<string | null>(null);
   currentId   = signal('');
   currentName = signal('');
   lines       = signal<string[]>([]);
@@ -89,7 +109,9 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
   ngOnInit(): void {
     this.currentId.set(this.containerId);
     this.currentName.set(this.containerName);
-    if (this.live) {
+    if (this.gone) {
+      this.enterGone();
+    } else if (this.live) {
       this.follow.set(true);
       this.startStream();
     } else {
@@ -105,7 +127,10 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
     this.currentId.set(c.id);
     this.currentName.set(c.name);
     this.lines.set([]);
-    if (this.follow()) this.startStream(); else this.fetchLogs();
+    this.podGone.set(false);
+    this.errorMsg.set(null);
+    if (this.gone) this.enterGone();
+    else if (this.follow()) this.startStream(); else this.fetchLogs();
   }
 
   toggleFollow(): void {
@@ -118,19 +143,64 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
     }
   }
 
+  /** Live attempt from the snapshot view ("try the cluster anyway"). */
+  retryLive(): void {
+    this.gone = false;
+    this.podGone.set(false);
+    this.fetchLogs();
+  }
+
   fetchLogs(): void {
     this.loading.set(true);
+    this.errorMsg.set(null);
     this.svc.getContainerLogs(this.currentId(), TAIL).subscribe({
       next: text => {
         this.lines.set(text.split('\n').filter(l => l.length > 0).slice(-MAX_LINES));
         this.loading.set(false);
         this.shouldScroll = true;
       },
-      error: err => {
-        this.toast.apiError(err, 'Failed to fetch logs');
-        this.loading.set(false);
-      },
+      error: err => this.onLogsError(err),
     });
+  }
+
+  /** 410 pod_gone -> snapshot mode; anything else -> short friendly message with Retry. */
+  private onLogsError(err: unknown): void {
+    this.loading.set(false);
+    this.stopStream();
+    this.follow.set(false);
+    const body = parseErrorBody(err);
+    if ((err as { status?: number })?.status === 410 || body?.code === 'pod_gone') {
+      this.enterGone(body?.crash_logs);
+      return;
+    }
+    const status = (err as { status?: number })?.status;
+    this.errorMsg.set(status === 0
+      ? 'Could not reach KYMO. Check your connection and retry.'
+      : 'Logs are unavailable right now. The cluster could not return them.');
+  }
+
+  private enterGone(count?: number): void {
+    this.stopStream();
+    this.follow.set(false);
+    this.loading.set(false);
+    this.errorMsg.set(null);
+    this.lines.set([]);
+    this.podGone.set(true);
+    this.snapIdx.set(0);
+    if (count === 0) { this.snapshots.set([]); return; }
+    this.snapLoading.set(true);
+    const id = this.currentId();
+    this.svc.getContainerCrashLogs(id, 20).subscribe(l => {
+      if (id !== this.currentId()) return;
+      this.snapshots.set(l);
+      this.snapLoading.set(false);
+    });
+  }
+
+  selectedSnap(): CrashLog | null { return this.snapshots()[this.snapIdx()] ?? null; }
+  snapTail(): string {
+    const lines = (this.selectedSnap()?.lines ?? '').replace(/\n+$/, '').split('\n');
+    return lines.slice(-MAX_LINES).join('\n');
   }
 
   startStream(): void {
@@ -146,12 +216,16 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.shouldScroll = true;
     };
     this.es.onerror = () => {
-      // No auto-reconnect: drop back to the static view and tell the user.
+      // No auto-reconnect: drop back to the static view. EventSource errors carry no body,
+      // so one quick non-follow GET tells us why (pod gone vs. transient).
       this.stopStream();
-      if (this.follow()) {
-        this.follow.set(false);
-        this.toast.info('Log stream ended');
-      }
+      if (!this.follow()) return;
+      this.follow.set(false);
+      const id = this.currentId();
+      this.svc.getContainerLogs(id, 1).subscribe({
+        next: () => { if (id === this.currentId()) this.toast.info('Log stream ended'); },
+        error: err => { if (id === this.currentId()) this.onLogsError(err); },
+      });
     };
   }
 

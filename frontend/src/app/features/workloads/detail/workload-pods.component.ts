@@ -89,10 +89,12 @@ interface Section {
                            [title]="c.name + ' · ' + c.current_status">
                           <span class="k-led" [class]="dotClass(c.current_status)"></span>{{ c.name }}
                         </a>
+                        @if (isActive(c) || hasSnapshots(c)) {
                         <button type="button" class="px-1 border-l border-kymo-rule text-kymo-muted hover:text-kymo-amber transition-colors"
-                                [attr.aria-label]="'Logs of ' + c.name" [title]="isRunning(c) ? 'Live logs' : 'Logs'" (click)="openLogs(p, c)">
+                                [attr.aria-label]="(isActive(c) ? 'Logs of ' : 'Crash logs of ') + c.name" [title]="isActive(c) ? 'Live logs' : 'Crash logs'" (click)="openLogs(p, c)">
                           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" /></svg>
                         </button>
+                        }
                       </span>
                     }
                   </div>
@@ -102,10 +104,14 @@ interface Section {
                 <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell" [title]="p.firstSeen">{{ p.firstSeen | timeago }}</td>
                 <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap" [title]="p.lastSeen">{{ p.lastSeen | timeago }}</td>
                 <td class="px-4 py-2.5 text-right whitespace-nowrap">
-                  <button type="button" class="k-btn k-btn-sm" [attr.aria-label]="'Logs of ' + p.name" (click)="openLogs(p)">
-                    @if (p.current && p.status === 'running') { <span class="k-led bg-kymo-running animate-pulse" aria-hidden="true"></span> }
-                    Logs
-                  </button>
+                  @if (p.current) {
+                    <button type="button" class="k-btn k-btn-sm" [attr.aria-label]="'Logs of ' + p.name" (click)="openLogs(p)">
+                      @if (p.status === 'running') { <span class="k-led bg-kymo-running animate-pulse" aria-hidden="true"></span> }
+                      Logs
+                    </button>
+                  } @else if (p.crashes + p.ooms > 0) {
+                    <button type="button" class="k-btn k-btn-sm" [attr.aria-label]="'Crash logs of ' + p.name" (click)="openLogs(p)">Crash logs</button>
+                  }
                 </td>
               </tr>
               @if (isExpanded(p.key)) {
@@ -142,7 +148,13 @@ interface Section {
                             </td>
                             <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
                               <a [routerLink]="['/containers', c.id]" class="text-kymo-amber hover:underline underline-offset-4">Container detail</a>
-                              <button type="button" class="ml-3 text-kymo-amber hover:underline underline-offset-4" (click)="openLogs(p, c)">Logs</button>
+                              @if (isActive(c)) {
+                                <button type="button" class="ml-3 text-kymo-amber hover:underline underline-offset-4" (click)="openLogs(p, c)">Logs</button>
+                              } @else if (hasSnapshots(c)) {
+                                <button type="button" class="ml-3 text-kymo-amber hover:underline underline-offset-4" (click)="openLogs(p, c)">Crash logs</button>
+                              } @else {
+                                <span class="ml-3 text-kymo-faint" title="Kubernetes deletes logs with the pod">logs gone with the pod</span>
+                              }
                             </td>
                           </tr>
                         }
@@ -176,7 +188,7 @@ interface Section {
     </div>
 
     @if (logTarget(); as t) {
-      <app-log-viewer [containerId]="t.id" [containerName]="t.name" [containers]="t.siblings" [live]="t.live" (closed)="logTarget.set(null)" />
+      <app-log-viewer [containerId]="t.id" [containerName]="t.name" [containers]="t.siblings" [live]="t.live" [gone]="!t.live" (closed)="logTarget.set(null)" />
     }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -199,6 +211,10 @@ export class WorkloadPodsComponent {
   readonly evLabel = eventLabel;
   readonly evReason = eventReason;
   readonly isRunning = (c: Container) => normalizeStatus(c.current_status) === 'running';
+  /** Still part of the current pod set (not stopped): the pod exists, so live logs can work. */
+  readonly isActive = (c: Container) => normalizeStatus(c.current_status) !== 'stopped';
+  /** Stopped containers keep crash-time snapshots only when they crashed or were OOM-killed. */
+  readonly hasSnapshots = (c: Container) => c.crash_count + c.oom_count > 0;
   readonly restartsOf = (c: Container) => Math.max(0, c.start_count - 1);
 
   noun = computed(() => this.label().toLowerCase());
@@ -305,10 +321,11 @@ export class WorkloadPodsComponent {
 
   /** Live logs of a running container; the pod's first running (else first) container when none is given. */
   openLogs(p: PodRow, c?: Container): void {
-    const target = c ?? p.containers.find(x => this.isRunning(x)) ?? p.containers[0];
+    const target = c ?? p.containers.find(x => this.isRunning(x))
+      ?? p.containers.find(x => this.isActive(x) || this.hasSnapshots(x)) ?? p.containers[0];
     if (!target) return;
     this.logTarget.set({
-      id: target.id, name: target.name, live: this.isRunning(target),
+      id: target.id, name: target.name, live: this.isActive(target),
       siblings: p.containers.map(x => ({ id: x.id, name: x.name })),
     });
   }
