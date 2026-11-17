@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -22,6 +23,9 @@ type Config struct {
 	Collector CollectorConfig `mapstructure:"collector"`
 	Log       LogConfig       `mapstructure:"log"`
 	Issues    IssuesConfig    `mapstructure:"issues"`
+
+	// LogCapture configures opt-in error-log capture.
+	LogCapture LogCaptureConfig `mapstructure:"log_capture"`
 
 	Notifications NotificationsConfig `mapstructure:"notifications"`
 
@@ -73,6 +77,91 @@ type IssuesConfig struct {
 	ReopenWindow time.Duration `mapstructure:"reopen_window"`
 	// IncludeSystem also evaluates system workloads (kube-system, …).
 	IncludeSystem bool `mapstructure:"include_system"`
+	// ErrorRateThreshold is the number of captured error log lines in 5 minutes
+	// at which an "error_rate" issue opens (default 20).
+	ErrorRateThreshold int `mapstructure:"error_rate_threshold"`
+}
+
+// Defaults of log_capture.
+const (
+	DefaultLogCaptureMaxStreams = 50
+	DefaultLogCaptureMaxLines   = 600
+	DefaultLogCaptureSamples    = 50
+	DefaultLogCaptureRetention  = "7d"
+	DefaultErrorRateThreshold   = 20
+)
+
+// LogCaptureConfig configures opt-in error-log capture: for opted-in workloads
+// KYMO follows container logs and keeps error lines grouped into signatures.
+// Logs can contain sensitive data; masking is best-effort.
+type LogCaptureConfig struct {
+	// Enabled is the global kill switch (default true). Nothing is captured
+	// unless a workload / namespace is opted in as well.
+	Enabled bool `mapstructure:"enabled"`
+	// MaxStreamsPerSource caps concurrently followed containers per source (default 50).
+	MaxStreamsPerSource int `mapstructure:"max_streams_per_source"`
+	// MaxLinesPerMinute caps captured error entries per container and minute (default 600).
+	MaxLinesPerMinute int `mapstructure:"max_lines_per_minute"`
+	// SamplesPerSignature is how many newest occurrences are kept per signature (default 50).
+	SamplesPerSignature int `mapstructure:"samples_per_signature"`
+	// Retention is how long occurrences and counts are kept: "7d", "48h" (default 7d).
+	// Applied at startup.
+	Retention string `mapstructure:"retention"`
+	// ExtraPatterns are regexes that additionally mark a line as an error.
+	ExtraPatterns []string `mapstructure:"extra_patterns"`
+	// IgnorePatterns are regexes that discard a line.
+	IgnorePatterns []string `mapstructure:"ignore_patterns"`
+	// Targets are opt-ins declared in the file (read-only in the UI).
+	Targets []LogCaptureTarget `mapstructure:"targets"`
+}
+
+// LogCaptureTarget is a target declared in config.yaml.
+type LogCaptureTarget struct {
+	Source    string `mapstructure:"source"`
+	Namespace string `mapstructure:"namespace"`
+	// Workload is "Kind/name" (e.g. "Deployment/worker"); empty = whole namespace.
+	Workload string `mapstructure:"workload"`
+}
+
+// WorkloadID returns the workload id of the target ("" for a namespace target).
+func (t LogCaptureTarget) WorkloadID() string {
+	kind, name, ok := strings.Cut(t.Workload, "/")
+	if !ok {
+		return ""
+	}
+	return model.WorkloadID(t.Source, t.Namespace, kind, name)
+}
+
+// RetentionDuration parses Retention ("7d", "48h", "90m").
+func (c LogCaptureConfig) RetentionDuration() (time.Duration, error) {
+	return ParseRetention(c.Retention)
+}
+
+// ParseRetention parses a duration that also accepts a "d" (days) suffix.
+func ParseRetention(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		s = DefaultLogCaptureRetention
+	}
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		var days int
+		if _, err := fmt.Sscanf(n, "%d", &days); err != nil || fmt.Sprint(days) != n {
+			return 0, fmt.Errorf("invalid duration %q", s)
+		}
+		return time.Duration(days) * 24 * time.Hour, nil
+	}
+	return time.ParseDuration(s)
+}
+
+// TargetSpecs converts the declared targets into model targets (origin config).
+func (c LogCaptureConfig) TargetSpecs() []*model.LogCaptureTarget {
+	out := make([]*model.LogCaptureTarget, 0, len(c.Targets))
+	for _, t := range c.Targets {
+		out = append(out, &model.LogCaptureTarget{
+			SourceName: t.Source, Namespace: t.Namespace, WorkloadID: t.WorkloadID(), Origin: model.TargetOriginConfig,
+		})
+	}
+	return out
 }
 
 // NotificationsConfig configures issue notifications.
@@ -287,6 +376,13 @@ func load(path string) (*Config, error) {
 	v.SetDefault("issues.resolve_after", "5m")
 	v.SetDefault("issues.reopen_window", "15m")
 	v.SetDefault("issues.include_system", false)
+	v.SetDefault("issues.error_rate_threshold", DefaultErrorRateThreshold)
+
+	v.SetDefault("log_capture.enabled", true)
+	v.SetDefault("log_capture.max_streams_per_source", DefaultLogCaptureMaxStreams)
+	v.SetDefault("log_capture.max_lines_per_minute", DefaultLogCaptureMaxLines)
+	v.SetDefault("log_capture.samples_per_signature", DefaultLogCaptureSamples)
+	v.SetDefault("log_capture.retention", DefaultLogCaptureRetention)
 	v.SetDefault("notifications.enabled", true)
 
 	v.SetDefault("database.dsn", "postgres://kymo:kymo@localhost:5432/kymo?sslmode=disable")
@@ -394,6 +490,55 @@ func (c *Config) validate() error {
 		if ch.RepeatMinutes < 0 {
 			return fmt.Errorf("config: notification channel %q: repeat_minutes must be >= 0", ch.Name)
 		}
+	}
+	return c.validateLogCapture()
+}
+
+// validateLogCapture checks the log_capture and error-rate settings.
+func (c *Config) validateLogCapture() error {
+	lc := c.LogCapture
+	if lc.MaxStreamsPerSource < 1 || lc.MaxStreamsPerSource > 1000 {
+		return fmt.Errorf("config: log_capture.max_streams_per_source must be between 1 and 1000")
+	}
+	if lc.MaxLinesPerMinute < 1 {
+		return fmt.Errorf("config: log_capture.max_lines_per_minute must be >= 1")
+	}
+	if lc.SamplesPerSignature < 1 || lc.SamplesPerSignature > 1000 {
+		return fmt.Errorf("config: log_capture.samples_per_signature must be between 1 and 1000")
+	}
+	d, err := lc.RetentionDuration()
+	if err != nil || d < time.Hour || d > 365*24*time.Hour {
+		return fmt.Errorf("config: log_capture.retention %q must be a duration between 1h and 365d (e.g. 7d)", lc.Retention)
+	}
+	for _, p := range lc.ExtraPatterns {
+		if _, err := regexp.Compile(p); err != nil {
+			return fmt.Errorf("config: log_capture.extra_patterns %q: %w", p, err)
+		}
+	}
+	for _, p := range lc.IgnorePatterns {
+		if _, err := regexp.Compile(p); err != nil {
+			return fmt.Errorf("config: log_capture.ignore_patterns %q: %w", p, err)
+		}
+	}
+	seen := map[string]bool{}
+	for i, t := range lc.Targets {
+		if t.Source == "" || t.Namespace == "" {
+			return fmt.Errorf("config: log_capture.targets[%d] needs source and namespace", i)
+		}
+		if t.Workload != "" {
+			kind, name, ok := strings.Cut(t.Workload, "/")
+			if !ok || kind == "" || name == "" || strings.Contains(t.Workload, ":") {
+				return fmt.Errorf("config: log_capture.targets[%d]: workload %q must look like Deployment/name", i, t.Workload)
+			}
+		}
+		key := t.Source + "\x00" + t.Namespace + "\x00" + t.Workload
+		if seen[key] {
+			return fmt.Errorf("config: duplicate log_capture target %s/%s %s", t.Source, t.Namespace, t.Workload)
+		}
+		seen[key] = true
+	}
+	if c.Issues.ErrorRateThreshold < 1 {
+		return fmt.Errorf("config: issues.error_rate_threshold must be >= 1")
 	}
 	return nil
 }

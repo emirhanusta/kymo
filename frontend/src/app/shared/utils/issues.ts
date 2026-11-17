@@ -12,6 +12,7 @@ export const ISSUE_TYPES: { type: IssueType; label: string }[] = [
   { type: 'evicted',       label: 'Evicted' },
   { type: 'volume_mount',  label: 'Volume mount failing' },
   { type: 'probe_failing', label: 'Probe failing' },
+  { type: 'error_rate',    label: 'Error logs' },
 ];
 
 export function issueTypeLabel(type: IssueType | string): string {
@@ -29,6 +30,11 @@ export function severityTextClass(s: IssueSeverity): string {
 /** Route of the issue's workload page. */
 export function issueWorkloadRoute(i: Pick<Issue, 'workload_id'>): string[] {
   return ['/workloads', i.workload_id];
+}
+
+/** Query params of the issue's workload link: error-log issues open the Errors tab. */
+export function issueWorkloadQuery(i: Pick<Issue, 'type'>): Record<string, string> | null {
+  return i.type === 'error_rate' ? { tab: 'errors' } : null;
 }
 
 /** "OOMKilled" / "Crashing" / plain status, for the status badge of a workload. */

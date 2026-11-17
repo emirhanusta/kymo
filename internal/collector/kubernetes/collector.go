@@ -95,6 +95,12 @@ type Collector struct {
 	k8sEvents      K8sEventOptions
 	k8sEventFilter k8sEventFilter
 
+	// errHost / errMgr drive opt-in error-log capture (nil when off); openLog
+	// replaces the real log stream in tests.
+	errHost ErrorLogHost
+	errMgr  *errorLogManager
+	openLog logOpener
+
 	clientset        kubernetes.Interface
 	metricsAvailable bool // true when metrics-server is reachable
 
@@ -150,6 +156,7 @@ func New(log *zap.Logger, sourceName, kubeconfigPath string, kubeconfigData []by
 		crashLogs:      opts.CrashLogs.normalized(),
 		k8sEvents:      opts.K8sEvents,
 		k8sEventFilter: newK8sEventFilter(opts.K8sEvents),
+		errHost:        opts.ErrorLogs,
 		logged:         make(map[string]struct{}),
 		logSem:         make(chan struct{}, maxConcurrentCrashLogFetches),
 		log:            log,
@@ -188,6 +195,10 @@ func (c *Collector) Start(ctx context.Context) error {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
+	if c.errHost != nil {
+		// Created before the informers start: their handlers kick it.
+		c.errMgr = newErrorLogManager(c, c.errHost)
+	}
 
 	// Build informer factory with no resync (0 = no periodic resync events).
 	c.factory = informers.NewSharedInformerFactory(c.clientset, 0)
@@ -210,6 +221,8 @@ func (c *Collector) Start(ctx context.Context) error {
 			return fmt.Errorf("kubernetes: add k8s event handler: %w", err)
 		}
 	}
+
+	c.podLister = podInformer.Lister()
 
 	// Start all informers (non-blocking; goroutines are owned by the factory).
 	c.factory.Start(runCtx.Done())
@@ -249,6 +262,12 @@ func (c *Collector) Start(ctx context.Context) error {
 	c.metricsAvailable = c.checkMetricsAvailable()
 	if !c.metricsAvailable {
 		c.log.Warn("kubernetes: metrics-server not found; resource sampling disabled")
+	}
+
+	if c.errMgr != nil {
+		c.wg.Add(2)
+		go c.errMgr.run(runCtx)
+		go c.errMgr.flushLoop(runCtx)
 	}
 
 	c.wg.Add(1)
@@ -403,6 +422,7 @@ func (c *Collector) onPodAdd(ctx context.Context, obj interface{}, isInInitialLi
 	c.mu.Unlock()
 
 	c.emitPendingContainers(ctx, pod, wl)
+	c.kickErrorLogs()
 
 	if isInInitialList {
 		// Startup seeding: record each container's current state without
@@ -522,6 +542,7 @@ func (c *Collector) onPodUpdate(ctx context.Context, oldObj, newObj interface{})
 	}
 
 	c.emitPendingContainers(ctx, newPod, wl)
+	c.kickErrorLogs()
 }
 
 // emitPendingContainers records containers that the pod spec declares but the
@@ -597,6 +618,7 @@ func (c *Collector) onPodDelete(ctx context.Context, obj interface{}) {
 
 	pk := podKey(pod)
 	now := time.Now().UTC()
+	defer c.kickErrorLogs()
 
 	c.mu.Lock()
 	rec := c.pods[pk]

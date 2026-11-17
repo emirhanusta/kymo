@@ -20,12 +20,14 @@ const (
 	IssueEvicted      IssueType = "evicted"
 	IssueVolumeMount  IssueType = "volume_mount"
 	IssueProbeFailing IssueType = "probe_failing"
+	// IssueError is a burst of captured error log lines (opt-in log capture).
+	IssueError IssueType = "error_rate"
 )
 
 // IssueTypes lists every issue type.
 var IssueTypes = []IssueType{
 	IssueCrashLoop, IssueOOM, IssueDegraded, IssueJobFailed,
-	IssueCantSchedule, IssueImagePull, IssueEvicted, IssueVolumeMount, IssueProbeFailing,
+	IssueCantSchedule, IssueImagePull, IssueEvicted, IssueVolumeMount, IssueProbeFailing, IssueError,
 }
 
 // ValidIssueType reports whether t is a known issue type.

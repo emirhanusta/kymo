@@ -176,7 +176,27 @@ collector:
     normalReasons: []
     excludeNamespaces: []
 
+# Opt-in error-log capture (see "Error log capture" in the README). Workloads are
+# opted in from the UI, with the pod annotation kymo.io/capture-error-logs: "true"
+# or via targets below. Logs may contain sensitive data; masking is best-effort.
+# Needs "get" on pods/log, which the chart's RBAC already grants.
+logCapture:
+  enabled: true              # global kill switch
+  maxStreamsPerSource: 50    # followed containers per source
+  maxLinesPerMinute: 600     # error entries per container and minute; excess is dropped
+  samplesPerSignature: 50    # newest masked occurrences kept per signature
+  retention: 7d              # occurrences + counts; applied at startup
+  extraPatterns: []          # regexes that also mark a line as an error
+  ignorePatterns: []         # regexes that discard a line
+  # Read-only opt-ins (snake_case keys, written verbatim into config.yaml):
+  # targets:
+  #   - source: kymo
+  #     namespace: shop
+  #     workload: Deployment/worker   # optional; omitted = whole namespace
+  targets: []
+
 issues:
+  errorRateThreshold: 20   # "Error logs" issue: captured error lines in 5 minutes
   evaluateInterval: 30s
   degradedAfter: 3m
   resolveAfter: 5m

@@ -33,6 +33,9 @@ type Config struct {
 	IncludeSystem bool
 	// Retention is how long resolved issues are kept (default 90 days).
 	Retention time.Duration
+	// ErrorRateThreshold is the number of captured error log lines within
+	// ErrorWindow at which an "error_rate" issue opens (default 20).
+	ErrorRateThreshold int
 }
 
 // Defaults for Config.
@@ -42,6 +45,11 @@ const (
 	DefaultResolveAfter  = 5 * time.Minute
 	DefaultReopenWindow  = 15 * time.Minute
 	DefaultRetention     = 90 * 24 * time.Hour
+	// DefaultErrorRateThreshold is the default for Config.ErrorRateThreshold.
+	DefaultErrorRateThreshold = 20
+
+	// ErrorWindow is the look-back of the error_rate rule.
+	ErrorWindow = 5 * time.Minute
 
 	eventWindow   = 24 * time.Hour
 	k8sWindow     = 30 * time.Minute
@@ -60,6 +68,9 @@ func (c Config) withDefaults() Config {
 	def(&c.ResolveAfter, DefaultResolveAfter)
 	def(&c.ReopenWindow, DefaultReopenWindow)
 	def(&c.Retention, DefaultRetention)
+	if c.ErrorRateThreshold <= 0 {
+		c.ErrorRateThreshold = DefaultErrorRateThreshold
+	}
 	return c
 }
 
@@ -84,6 +95,8 @@ type Deps struct {
 	K8sEvents repository.K8sEventRepository
 	CronJobs  repository.CronJobRepository
 	Issues    repository.IssueRepository
+	// ErrorLogs supplies captured error counts for the error_rate rule (nil = rule off).
+	ErrorLogs repository.ErrorLogRepository
 	Sources   SourceRegistry
 	// Notifier may be nil (issues are tracked, nobody is told).
 	Notifier Notifier
@@ -391,7 +404,34 @@ func (e *Engine) collect(ctx context.Context, now time.Time, open map[key]*model
 			add(c)
 		}
 	}
+	if err := e.errorRateConditions(ctx, now, wanted, add); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// errorRateConditions adds error_rate for workloads whose captured error log
+// lines in the last ErrorWindow reach the threshold.
+func (e *Engine) errorRateConditions(ctx context.Context, now time.Time, wanted map[string]*model.WorkloadSummary, add func(condition)) error {
+	if e.d.ErrorLogs == nil {
+		return nil
+	}
+	rates, err := e.d.ErrorLogs.WorkloadErrorRates(ctx, now.Add(-ErrorWindow).Truncate(time.Minute))
+	if err != nil {
+		return fmt.Errorf("list error log rates: %w", err)
+	}
+	for _, r := range rates {
+		w := wanted[r.WorkloadID]
+		if w == nil || r.Count < int64(e.cfg.ErrorRateThreshold) {
+			continue
+		}
+		c := base(w)
+		c.Type, c.Severity = model.IssueError, model.SeverityWarning
+		c.Title = fmt.Sprintf("Error logs ×%d in 5m", r.Count)
+		c.Detail = truncate(r.TopTemplate, 300)
+		add(c)
+	}
+	return nil
 }
 
 // recentEvents loads the OOM and crash events of the last 24h per workload.

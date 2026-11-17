@@ -25,6 +25,7 @@ import (
 	"github.com/emirhanusta/kymo/internal/repository/timescale"
 	"github.com/emirhanusta/kymo/internal/secret"
 	"github.com/emirhanusta/kymo/internal/service"
+	"github.com/emirhanusta/kymo/internal/service/errorlogs"
 	"github.com/emirhanusta/kymo/internal/service/issues"
 	"github.com/emirhanusta/kymo/internal/service/notify"
 	"github.com/emirhanusta/kymo/migrations"
@@ -104,18 +105,26 @@ func main() {
 	if err := syncNotificationChannels(notifier, cfg.Notifications.Channels, log); err != nil {
 		log.Warn("syncing notification channels from config.yaml failed", zap.Error(err))
 	}
+	errorSvc, err := errorlogs.New(db.ErrorLogs(), cfg.LogCapture, svc, log)
+	if err != nil {
+		log.Fatal("invalid log_capture configuration", zap.Error(err))
+	}
+	applyLogCapture(errorSvc, cfg.LogCapture, log)
 	engine := issues.New(issues.Config{
 		Interval:      cfg.Issues.EvaluateInterval,
 		DegradedAfter: cfg.Issues.DegradedAfter,
 		ResolveAfter:  cfg.Issues.ResolveAfter,
 		ReopenWindow:  cfg.Issues.ReopenWindow,
 		IncludeSystem: cfg.Issues.IncludeSystem,
+
+		ErrorRateThreshold: cfg.Issues.ErrorRateThreshold,
 	}, issues.Deps{
 		Workloads: db.Workloads(),
 		Events:    db.Events(),
 		K8sEvents: db.K8sEvents(),
 		CronJobs:  db.CronJobs(),
 		Issues:    db.Issues(),
+		ErrorLogs: db.ErrorLogs(),
 		Sources:   svc,
 		Notifier:  notifier,
 		Log:       log,
@@ -137,6 +146,7 @@ func main() {
 				NormalReasons:     cfg.Collector.K8sEvents.NormalReasons,
 				ExcludeNamespaces: cfg.Collector.K8sEvents.ExcludeNamespaces,
 			},
+			ErrorLogs: errorSvc,
 		})
 	}
 	sources := service.NewSourceManager(db.Sources(), box, svc, mgmt, factory, log)
@@ -155,6 +165,7 @@ func main() {
 			if err := syncNotificationChannels(notifier, fresh.Notifications.Channels, log); err != nil {
 				log.Warn("syncing notification channels from config.yaml failed", zap.Error(err))
 			}
+			applyLogCapture(errorSvc, fresh.LogCapture, log)
 			return config.SourceSpecs(fresh), nil
 		})
 	}
@@ -190,6 +201,7 @@ func main() {
 	httphandler.New(svc, mgmt, sources, db, log, router,
 		httphandler.WithIssues(db.Issues()),
 		httphandler.WithNotifications(notifier),
+		httphandler.WithErrorLogs(errorSvc),
 		httphandler.WithServerInfo(cfg.Server.PublicURL, cfg.Notifications.Enabled))
 	if cfg.Server.StaticDir != "" {
 		if err := httphandler.ServeSPA(router, cfg.Server.StaticDir); err != nil {
@@ -247,6 +259,7 @@ func main() {
 	// Issue engine and notification workers.
 	notifier.Start(rootCtx)
 	go engine.Run(rootCtx)
+	go errorSvc.Run(rootCtx)
 
 	// Run the recorder event loop in the background.
 	go func() {
@@ -266,7 +279,8 @@ func main() {
 }
 
 // restartOnlyChanges lists the top-level settings that differ between the
-// running config and a freshly loaded one. Only collector.sources is applied live.
+// running config and a freshly loaded one. collector.sources, the notification
+// channels and log_capture (except retention) are applied live.
 func restartOnlyChanges(old, fresh *config.Config) string {
 	var changed []string
 	if old.Server != fresh.Server {
@@ -287,6 +301,9 @@ func restartOnlyChanges(old, fresh *config.Config) string {
 	if old.SecretKey != fresh.SecretKey {
 		changed = append(changed, "secret_key")
 	}
+	if old.LogCapture.Retention != fresh.LogCapture.Retention {
+		changed = append(changed, "log_capture.retention")
+	}
 	oc, fc := old.Collector, fresh.Collector
 	if oc.StatsPollInterval != fc.StatsPollInterval || oc.ScoringInterval != fc.ScoringInterval || oc.ScoringWindow != fc.ScoringWindow || oc.CrashLogs != fc.CrashLogs || !slices.Equal(oc.K8sEvents.NormalReasons, fc.K8sEvents.NormalReasons) || !slices.Equal(oc.K8sEvents.ExcludeNamespaces, fc.K8sEvents.ExcludeNamespaces) || oc.K8sEvents.Enabled != fc.K8sEvents.Enabled {
 		changed = append(changed, "collector (poll/scoring/crash_logs/k8s_events)")
@@ -306,6 +323,20 @@ func syncNotificationChannels(n *notify.Service, declared []config.NotificationC
 		log.Info("notification channels loaded from config.yaml", zap.Int("count", len(declared)))
 	}
 	return nil
+}
+
+// applyLogCapture applies the log_capture section live (settings, patterns and
+// the config.yaml targets). A bad section keeps the previous settings.
+func applyLogCapture(s *errorlogs.Service, lc config.LogCaptureConfig, log *zap.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := s.ApplyConfig(ctx, lc); err != nil {
+		log.Warn("applying log_capture from config.yaml failed", zap.Error(err))
+		return
+	}
+	if len(lc.Targets) > 0 {
+		log.Info("log capture targets loaded from config.yaml", zap.Int("count", len(lc.Targets)))
+	}
 }
 
 // buildLogger constructs a zap.Logger from the provided LogConfig.

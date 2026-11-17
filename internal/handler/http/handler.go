@@ -31,6 +31,7 @@ type Handler struct {
 
 	issues       repository.IssueRepository
 	notif        NotificationAPI
+	errlogs      ErrorLogAPI
 	publicURL    string
 	notifEnabled bool
 }
@@ -130,6 +131,18 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 		v1.DELETE("/notifications/channels/:id", h.DeleteChannel)
 		v1.POST("/notifications/channels/:id/test", h.TestChannel)
 		v1.GET("/notifications/deliveries", h.ListDeliveries)
+
+		// Opt-in error-log capture and the captured error signatures
+		v1.GET("/log-capture/targets", h.ListLogCaptureTargets)
+		v1.POST("/log-capture/targets", h.CreateLogCaptureTarget)
+		v1.DELETE("/log-capture/targets/:id", h.DeleteLogCaptureTarget)
+		v1.GET("/log-capture/status", h.LogCaptureStatus)
+		v1.GET("/workloads/:id/log-capture", h.GetWorkloadLogCapture)
+		v1.PUT("/workloads/:id/log-capture", h.SetWorkloadLogCapture)
+		v1.GET("/workloads/:id/errors", h.GetWorkloadErrors)
+		v1.GET("/errors", h.ListErrors)
+		v1.GET("/errors/:id", h.GetError)
+		v1.GET("/errors/:id/occurrences", h.ListErrorOccurrences)
 
 		// Recent events endpoint (cross-container)
 		v1.GET("/events/recent", h.GetRecentEvents)

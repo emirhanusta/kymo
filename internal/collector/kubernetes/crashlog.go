@@ -28,6 +28,8 @@ const (
 type Options struct {
 	CrashLogs CrashLogOptions
 	K8sEvents K8sEventOptions
+	// ErrorLogs enables opt-in error-log capture (nil = off).
+	ErrorLogs ErrorLogHost
 }
 
 // CrashLogOptions configures crash-time log snapshots. Logs can contain

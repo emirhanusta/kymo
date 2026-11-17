@@ -16,7 +16,7 @@ import { ErrorStateComponent } from '../../shared/components/error-state/error-s
 import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
 import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import { formatSpan } from '../../shared/utils/format';
-import { issueTypeLabel, severityLedClass, severityTextClass } from '../../shared/utils/issues';
+import { issueTypeLabel, issueWorkloadQuery, severityLedClass, severityTextClass } from '../../shared/utils/issues';
 
 type Tab = 'open' | 'resolved';
 const PAGE = 50;
@@ -44,6 +44,7 @@ export class IssuesComponent {
   );
 
   readonly typeLabel = issueTypeLabel;
+  readonly wlQuery   = issueWorkloadQuery;
   readonly led       = severityLedClass;
   readonly text      = severityTextClass;
 

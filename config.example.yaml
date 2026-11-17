@@ -88,6 +88,29 @@ issues:
   resolve_after: "5m"        # a problem must be gone this long before it resolves
   reopen_window: "15m"       # returning within this window reopens the same issue (flap)
   include_system: false      # also evaluate kube-system & co.
+  error_rate_threshold: 20   # "Error logs" issue: captured error lines in 5 minutes (needs log_capture)
+
+# Opt-in error-log capture. For workloads you opt in (UI toggle, pod annotation
+# kymo.io/capture-error-logs: "true", or the targets below) KYMO follows the
+# logs of their RUNNING containers, keeps only error lines (with stack traces),
+# groups them into signatures and stores counts + a few masked samples.
+# Nothing is captured unless a workload / namespace is opted in. NOTE: logs can
+# contain sensitive data; masking (tokens, passwords, keys, JWTs, card numbers)
+# is best-effort. Needs "get" on pods/log in the source's RBAC. Targets,
+# patterns and limits apply live when this file changes; retention needs a restart.
+log_capture:
+  enabled: true                # global kill switch: false = nothing streams
+  max_streams_per_source: 50   # concurrently followed containers per source (oldest first)
+  max_lines_per_minute: 600    # per container; excess error entries are dropped and counted
+  samples_per_signature: 50    # newest masked occurrences kept per signature
+  retention: "7d"              # occurrences and counts ("7d", "48h"); applied at startup
+  extra_patterns: []           # extra regexes that mark a line as an error, e.g. ["connection reset"]
+  ignore_patterns: []          # regexes that discard a line, e.g. ["healthz", "(?i)deprecat"]
+  targets: []                  # opt-ins declared here are read-only in the UI
+  # targets:
+  #   - source: "dev-cluster"
+  #     namespace: "shop"
+  #     workload: "Deployment/worker"   # optional (Kind/name); omitted = whole namespace
 
 # Notifications (Slack, Discord, generic webhook). Channels are usually added in
 # the UI (Settings), which stores their URL encrypted and therefore needs
@@ -107,7 +130,8 @@ notifications:
   #     sources: []                       # empty = all clusters
   #     namespaces: []                    # empty = all namespaces
   #     types: []                         # empty = all; crash_loop, oom, degraded, job_failed,
-  #                                       # cant_schedule, image_pull, evicted, volume_mount, probe_failing
+  #                                       # cant_schedule, image_pull, evicted, volume_mount, probe_failing,
+  #                                       # error_rate
   #     notify_resolved: true
   #     include_logs: true                # attach the newest crash log (last 20 lines)
   #     repeat_minutes: 0                 # re-send open issues every N minutes (0 = never)
