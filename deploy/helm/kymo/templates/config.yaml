@@ -1,0 +1,25 @@
+{{- include "kymo.validate" . }}
+{{- if .Values.configInSecret }}
+apiVersion: v1
+kind: Secret
+type: Opaque
+metadata:
+  name: {{ include "kymo.configName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kymo.labels" . | nindent 4 }}
+stringData:
+  config.yaml: |
+    {{- include "kymo.configYaml" . | nindent 4 }}
+{{- else }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kymo.configName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kymo.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- include "kymo.configYaml" . | nindent 4 }}
+{{- end }}
