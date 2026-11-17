@@ -80,7 +80,7 @@
                     @if (i.detail) {
                       <p class="text-[11px] text-kymo-muted truncate" [title]="i.detail">{{ i.detail }}</p>
                     }
-                    <a [routerLink]="['/workloads', i.workload_id]" class="block text-xs text-kymo-ink truncate group-hover:text-kymo-amber hover:underline underline-offset-4 mt-0.5" [title]="i.name">{{ i.name }}</a>
+                    <a [routerLink]="['/workloads', i.workload_id]" [queryParams]="wlQuery(i)" class="block text-xs text-kymo-ink truncate group-hover:text-kymo-amber hover:underline underline-offset-4 mt-0.5" [title]="i.name">{{ i.name }}</a>
                     <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace || '—' }} · {{ i.source_name }}</p>
                   </div>
                   <app-workload-badge class="flex-none hidden sm:inline-flex" [kind]="i.kind" />
@@ -128,7 +128,7 @@
                   <td class="px-4 py-2.5">
                     <div class="flex items-center gap-2 min-w-0">
                       <app-workload-badge class="flex-none" [kind]="i.kind" />
-                      <a [routerLink]="['/workloads', i.workload_id]" class="text-xs text-kymo-ink truncate max-w-[16rem] hover:text-kymo-amber hover:underline underline-offset-4" [title]="i.name">{{ i.name }}</a>
+                      <a [routerLink]="['/workloads', i.workload_id]" [queryParams]="wlQuery(i)" class="text-xs text-kymo-ink truncate max-w-[16rem] hover:text-kymo-amber hover:underline underline-offset-4" [title]="i.name">{{ i.name }}</a>
                     </div>
                     <p class="text-[11px] text-kymo-faint mt-0.5">{{ i.namespace || '—' }}</p>
                   </td>

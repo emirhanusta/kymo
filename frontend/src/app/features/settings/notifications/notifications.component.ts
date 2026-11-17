@@ -14,6 +14,7 @@ import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { CONFIG_ORIGIN_HINT } from '../../../shared/utils/source';
+import { SettingsNavComponent } from '../settings-nav.component';
 import { ChannelDialogComponent } from './channel-dialog/channel-dialog.component';
 import { channelFilterSummary, channelTestMessage } from './channel-utils';
 
@@ -25,7 +26,7 @@ const TYPE_LABEL = { slack: 'Slack', discord: 'Discord', webhook: 'Webhook' } as
   standalone: true,
   imports: [
     TimeagoPipe, PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
-    ConfirmDialogComponent, ChannelDialogComponent,
+    ConfirmDialogComponent, ChannelDialogComponent, SettingsNavComponent,
   ],
   templateUrl: './notifications.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,

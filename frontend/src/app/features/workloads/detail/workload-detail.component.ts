@@ -14,6 +14,9 @@ import { RefreshService } from '../../../core/services/refresh.service';
 import { PageContextService } from '../../../core/services/page-context.service';
 import { IssuesService } from '../../../core/services/issues.service';
 import { Issue } from '../../../core/models/issue.model';
+import { ErrorSignature } from '../../../core/models/error-log.model';
+import { ErrorLogService } from '../../../core/services/error-log.service';
+import { WorkloadErrorsComponent } from './workload-errors.component';
 import { IssueChipsComponent } from '../../../shared/components/issue-chips/issue-chips.component';
 import { statusReason } from '../../../shared/utils/issues';
 import { SourceStateService } from '../../../core/services/source-state.service';
@@ -49,7 +52,7 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   { key: '7d',  ms: 7 * 24 * HOUR },
 ];
 
-type TabKey = 'timeline' | 'pods' | 'resources' | 'runs';
+type TabKey = 'timeline' | 'pods' | 'resources' | 'runs' | 'errors';
 
 @Component({
   selector: 'app-workload-detail',
@@ -58,7 +61,7 @@ type TabKey = 'timeline' | 'pods' | 'resources' | 'runs';
     RouterLink, DecimalPipe, DatePipe, PageHeaderComponent, StatusBadgeComponent, WorkloadBadgeComponent,
     StabilityGaugeComponent, ResourceChartsComponent, ReadOnlyTagComponent, EmptyStateComponent,
     ErrorStateComponent, TimeagoPipe, ScoreClassPipe, LastCrashCardComponent, WorkloadTimelineComponent,
-    WorkloadPodsComponent, IssueChipsComponent,
+    WorkloadPodsComponent, IssueChipsComponent, WorkloadErrorsComponent,
   ],
   templateUrl: './workload-detail.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -72,6 +75,7 @@ export class WorkloadDetailComponent {
   private pageCtx    = inject(PageContextService);
   private sources    = inject(SourceStateService);
   private issueSvc   = inject(IssuesService);
+  private errorSvc   = inject(ErrorLogService);
   readonly statusReason = statusReason;
 
   readonly ranges = RANGES;
@@ -99,6 +103,11 @@ export class WorkloadDetailComponent {
   warnings1h = signal(0);
   /** The workload's open issues (server-detected). */
   openIssues = signal<Issue[]>([]);
+  /** Error signatures of the last 24h (Errors tab badge). */
+  errors24h  = signal<ErrorSignature[]>([]);
+  hasNewError = computed(() => this.errors24h().some(e => e.is_new));
+  /** Recorded history of a removed cluster: capture settings are read-only. */
+  isRemovedCluster = computed(() => this.sources.isRemoved(this.workload()?.source_name));
 
   /** Newest crash/OOM events, crash-log snapshots and revisions (Last crash card, timeline markers, pods). */
   ctx = signal<CrashContext>({ crashEvents: [], logs: [], revisions: [] });
@@ -182,11 +191,14 @@ export class WorkloadDetailComponent {
   instanceLabel  = computed(() => (this.isJob() ? 'Run' : 'Pod'));
 
   /** Cron/Job runs live in the Runs tab; a Job's pods are its runs, so it has no separate Pods tab. */
-  tabs = computed<{ key: TabKey; label: string }[]>(() => {
-    const t: { key: TabKey; label: string }[] = [{ key: 'timeline', label: 'Timeline' }];
+  tabs = computed<{ key: TabKey; label: string; badge?: number; dot?: boolean }[]>(() => {
+    const t: { key: TabKey; label: string; badge?: number; dot?: boolean }[] = [{ key: 'timeline', label: 'Timeline' }];
     if (!this.isJob()) t.push({ key: 'pods', label: 'Pods' });
     t.push({ key: 'resources', label: 'Resources' });
     if (this.isJobKind()) t.push({ key: 'runs', label: 'Runs' });
+    if (this.workload()?.runtime !== 'docker') {
+      t.push({ key: 'errors', label: 'Errors', badge: this.errors24h().length, dot: this.hasNewError() });
+    }
     return t;
   });
 
@@ -240,6 +252,7 @@ export class WorkloadDetailComponent {
     this.ctx.set({ crashEvents: [], logs: [], revisions: [] });
     this.warnings1h.set(0);
     this.openIssues.set([]);
+    this.errors24h.set([]);
     this.resources.set([]);
     this.deployment.set(null);
     this.scaleValue.set(null);
@@ -262,8 +275,10 @@ export class WorkloadDetailComponent {
       ctx:     this.svc.getCrashContext(id),
       k8s:     this.svc.getWorkloadK8sEvents(id, { since: hourAgoIso(), limit: 500 }).pipe(catchError(() => of([] as K8sEvent[]))),
       issues:  this.issueSvc.forWorkload(id, 'open').pipe(catchError(() => of([] as Issue[]))),
+      errors:  this.errorSvc.forWorkload(id, '24h').pipe(catchError(() => of([] as ErrorSignature[]))),
     }).subscribe({
-      next: ({ detail, history, ctx, k8s, issues }) => {
+      next: ({ detail, history, ctx, k8s, issues, errors }) => {
+        this.errors24h.set(errors);
         this.warnings1h.set(warningsLastHour(k8s));
         this.openIssues.set(issues);
         const w = detail.workload;

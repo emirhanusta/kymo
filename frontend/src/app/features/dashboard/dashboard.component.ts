@@ -23,10 +23,15 @@ import { averageScore, formatScore } from '../../shared/utils/score';
 import { containerRoute, shortId } from '../../shared/utils/format';
 import { sourceDotClass, sourceStatusLabel } from '../../shared/utils/source';
 import { isLongRunning } from '../../shared/utils/workload';
-import { severityLedClass, severityTextClass } from '../../shared/utils/issues';
+import { issueWorkloadQuery, severityLedClass, severityTextClass } from '../../shared/utils/issues';
+import { ErrorLogService } from '../../core/services/error-log.service';
+import { ErrorSignature, LogCaptureTarget } from '../../core/models/error-log.model';
+import { ErrorSparkComponent } from '../../shared/components/error-spark/error-spark.component';
+import { ErrorTemplateComponent } from '../../shared/components/error-spark/error-template.component';
 import { eventChipClass, eventTextClass, eventIcon, eventLabel, eventReason, showsExitCode } from '../../shared/utils/events';
 
 const TOP_ISSUES = 5;
+const TOP_ERRORS = 5;
 
 interface ClusterCard {
   name: string;
@@ -45,6 +50,7 @@ interface ClusterCard {
   imports: [
     RouterLink, TimeagoPipe, ScoreClassPipe, WorkloadBadgeComponent,
     PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
+    ErrorSparkComponent, ErrorTemplateComponent,
   ],
   templateUrl: './dashboard.component.html',
   styleUrl: './dashboard.component.scss',
@@ -57,6 +63,17 @@ export class DashboardComponent {
   private router     = inject(Router);
   protected state    = inject(WorkloadStateService);
   private issueSvc   = inject(IssuesService);
+  private errorSvc   = inject(ErrorLogService);
+
+  private loadedErrors  = signal<ErrorSignature[]>([]);
+  private loadedTargets = signal<LogCaptureTarget[]>([]);
+  /** Most frequent error messages of the last 24h across connected clusters. */
+  topErrors = computed(() =>
+    [...this.sourceSvc.globalScope(this.loadedErrors(), e => e.source_name)]
+      .sort((a, b) => b.count - a.count || b.last_seen.localeCompare(a.last_seen)).slice(0, TOP_ERRORS));
+  /** Shown once anything was captured or capture is configured somewhere. */
+  showErrors = computed(() => this.loadedErrors().length > 0 || this.loadedTargets().length > 0);
+  readonly issueQuery = issueWorkloadQuery;
 
   eventsError  = signal(false);
   private loadedEvents = signal<LifecycleEvent[]>([]);
@@ -145,7 +162,17 @@ export class DashboardComponent {
     this.router.navigate(['/workloads']);
   }
 
+  private loadErrors(): void {
+    const removed = this.sourceSvc.selectedRemoved()?.name;
+    // The API orders by recency; fetch a wider page so the most frequent ones can be picked client-side.
+    this.errorSvc.list({ since: '24h', limit: 50, source: removed }).pipe(catchError(() => of(null)))
+      .subscribe(list => { if (list) this.loadedErrors.set(list); });
+    this.errorSvc.targets().pipe(catchError(() => of(null)))
+      .subscribe(list => { if (list) this.loadedTargets.set(list); });
+  }
+
   loadEvents(): void {
+    this.loadErrors();
     // A removed cluster is requested explicitly; otherwise the newest events are filtered to connected clusters.
     const removed = this.sourceSvc.selectedRemoved()?.name;
     this.svc.getRecentEvents(removed ? 20 : 40, removed).pipe(catchError(() => of(null))).subscribe(events => {

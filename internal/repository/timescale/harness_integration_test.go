@@ -133,7 +133,8 @@ func reset(t *testing.T) *DB {
 	t.Helper()
 	requireDB(t)
 	_, err := testDB.pool.Exec(context.Background(), `TRUNCATE containers, lifecycle_events,
-  resource_samples, stability_scores, workload_scores, cronjob_executions, sources, crash_logs, k8s_events, issues, notification_channels, notification_deliveries CASCADE`)
+  resource_samples, stability_scores, workload_scores, cronjob_executions, sources, crash_logs, k8s_events, issues, notification_channels, notification_deliveries,
+  log_capture_targets, error_signatures, error_counts, error_occurrences CASCADE`)
 	if err != nil {
 		t.Fatalf("reset: %v", err)
 	}

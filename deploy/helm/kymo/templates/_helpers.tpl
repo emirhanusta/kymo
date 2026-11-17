@@ -136,7 +136,17 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
     "degraded_after" .Values.issues.degradedAfter
     "resolve_after" .Values.issues.resolveAfter
     "reopen_window" .Values.issues.reopenWindow
-    "include_system" .Values.issues.includeSystem)
+    "include_system" .Values.issues.includeSystem
+    "error_rate_threshold" (.Values.issues.errorRateThreshold | default 20))
+  "log_capture" (dict
+    "enabled" .Values.logCapture.enabled
+    "max_streams_per_source" .Values.logCapture.maxStreamsPerSource
+    "max_lines_per_minute" .Values.logCapture.maxLinesPerMinute
+    "samples_per_signature" .Values.logCapture.samplesPerSignature
+    "retention" .Values.logCapture.retention
+    "extra_patterns" (.Values.logCapture.extraPatterns | default list)
+    "ignore_patterns" (.Values.logCapture.ignorePatterns | default list)
+    "targets" (.Values.logCapture.targets | default list))
   "notifications" (dict "enabled" .Values.notifications.enabled "channels" .Values.notifications.channels)
   "log" (dict "level" .Values.log.level "format" .Values.log.format) -}}
 {{- $cfg = mustMergeOverwrite $cfg (deepCopy .Values.config) -}}

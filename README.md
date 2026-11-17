@@ -101,8 +101,10 @@ server, or paste/upload one — uploads are stored encrypted and require
 KYMO runs — the file is watched, and you can also press *Reload config.yaml* on
 the Sources page or `POST /api/v1/sources/reload`. Added, changed and removed
 sources take effect immediately (recorded history is kept); an invalid file is
-rejected and the current sources keep running. All other settings (server,
-database, log, secret key, poll and scoring intervals) still need a restart.
+rejected and the current sources keep running. The notification channels and
+`log_capture` (targets, patterns, limits) are applied live too. All other
+settings (server, database, log, secret key, poll and scoring intervals,
+`issues`, `log_capture.retention`) still need a restart.
 
 See [`config.example.yaml`](config.example.yaml). Every key can be overridden
 with an environment variable prefixed `KYMO_`, e.g. `KYMO_DATABASE_DSN`,
@@ -134,6 +136,8 @@ source's kubeconfig needs `list` and `watch` on `events` (core API group,
 cluster-wide). API: `GET /api/v1/k8s-events[?source&namespace&type&reason&workload_id&q&since&before&limit]`,
 `GET /api/v1/workloads/:id/k8s-events`, `GET /api/v1/k8s-events/reasons[?source&since]`.
 
+**Error log capture:** see [below](#error-log-capture).
+
 **Revisions:** each container records its pod's revision
 (`pod-template-hash`, `controller-revision-hash`, or the Job name);
 `GET /api/v1/workloads/:id/revisions` lists rollouts newest first.
@@ -153,6 +157,7 @@ persistent issue per workload and type:
 | `job_failed` | critical | a CronJob's latest finished run failed |
 | `cant_schedule`, `image_pull`, `evicted`, `volume_mount` | critical | Warning Kubernetes events from the last 30 min (FailedScheduling, ErrImagePull/ImagePullBackOff, Evicted, FailedMount/FailedAttachVolume) |
 | `probe_failing` | warning | Unhealthy events from the last 30 min |
+| `error_rate` | warning | captured error log lines of the last 5 min reach `issues.error_rate_threshold` (default 20), "Error logs ×N in 5m", detail = the top signature (needs [error log capture](#error-log-capture)) |
 
 An issue resolves once its condition has been gone for `issues.resolve_after`
 (5m). If the problem returns within `issues.reopen_window` (15m) the *same*
@@ -212,6 +217,66 @@ ok := hmac.Equal([]byte("sha256="+hex.EncodeToString(mac.Sum(nil))), []byte(r.He
 > **Security note:** the API has no authentication and exposes management
 > actions (delete pod, scale, rollout restart). Run it on a trusted network or behind an
 > authenticating proxy, and be careful which kubeconfig context a source uses.
+
+## Error log capture
+
+Opt-in: KYMO follows the log stream of the **running** containers of the
+workloads you enable, keeps only error-level lines (with their stack traces),
+groups them into **signatures** and stores counts plus a few masked samples.
+Nothing is captured until you opt in.
+
+> **Privacy:** container logs can contain sensitive data (tokens, personal
+> data, ...). Captured lines are masked before they are stored (Bearer/Basic
+> tokens, `password=` / `secret` / `token` / `api_key` pairs, AWS access keys,
+> JWTs, URL credentials, 13-19 digit card-like numbers become `***`), but
+> masking is **best-effort** and cannot recognise every secret. Enable capture
+> only for workloads whose logs you are allowed to store, and keep the
+> database and the API private. Read-only sources can capture too (it only
+> reads logs); the source's RBAC needs `get` on `pods/log`.
+
+**Opting in** (any one is enough):
+
+1. the workload's *Error logs* toggle in the UI, or a namespace target
+   (`POST /api/v1/log-capture/targets`, stored in the database);
+2. the pod template annotation `kymo.io/capture-error-logs: "true"`;
+3. `log_capture.targets` in `config.yaml` (read-only in the UI, reloaded live).
+
+**What is an error:** JSON lines with `level` / `severity` / `lvl` of error,
+fatal, ... (or pino/bunyan numbers >= 50), logfmt `level=error`, klog `E...` /
+`F...` lines, plain text with an `ERROR` / `FATAL` / `PANIC` / `CRITICAL` /
+`[error]` level token near the start, `panic:` / `fatal error:`, Python
+`Traceback`, Java `Exception in thread` / `...Exception:` lines and Node
+`...Error:` lines. The first level word wins, so an `INFO` line that merely
+contains the word "error" is ignored, and a structured level always decides.
+`log_capture.extra_patterns` (regexes that also mark a line as an error) and
+`log_capture.ignore_patterns` (regexes that discard a line) refine this.
+Stack traces (indented lines, `at ...`, `Caused by`, `... N more`, Python
+tracebacks, Go panic/goroutine dumps) are attached to their error line: up to
+50 lines, closed after 200 ms without a new line.
+
+**Signatures:** the first line is normalised (timestamps, UUIDs, hex ids, IPs,
+numbers, quoted strings and e-mail addresses become `<ts> <uuid> <hex> <ip> <n>
+<str> <email>`, level prefixes are stripped) and hashed with the workload id, so
+"order 17 failed" and "order 9001 failed" are one signature with a count.
+Per signature KYMO keeps per-minute counts (exact totals), the pods affected and
+the newest `samples_per_signature` masked occurrences (default 50, each up to
+8 KB).
+
+**Limits** (`log_capture.*`): `max_streams_per_source` (default 50 containers per
+source, oldest container first), `max_lines_per_minute` (default 600 error
+entries per container; the excess is dropped and shown as *dropped lines* in
+`GET /api/v1/log-capture/status`), single lines are cut at 8 KB, `retention`
+(default `7d`) for counts and occurrences, `enabled: false` is a global kill
+switch. Targets, patterns and limits are applied live (UI, API and config
+reload) without restarting a source; `retention` is applied at startup.
+
+**API** (all under `/api/v1`): `GET|POST /log-capture/targets`,
+`DELETE /log-capture/targets/:id` (403 for config targets),
+`GET|PUT /workloads/:id/log-capture` (`{enabled}`; 409 with `via` when it is
+enabled through a namespace target, annotation or config),
+`GET /log-capture/status`, `GET /errors[?source&namespace&workload_id&since=1h|6h|24h|7d&limit]`,
+`GET /workloads/:id/errors`, `GET /errors/:id`,
+`GET /errors/:id/occurrences[?limit&before]`.
 
 ## Keyboard
 

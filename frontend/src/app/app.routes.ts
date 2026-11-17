@@ -80,6 +80,11 @@ export const routes: Routes = [
             loadComponent: () =>
               import('./features/settings/notifications/notifications.component').then(m => m.NotificationsComponent),
           },
+          {
+            path: 'log-capture',
+            loadComponent: () =>
+              import('./features/settings/log-capture/log-capture.component').then(m => m.LogCaptureComponent),
+          },
         ],
       },
 

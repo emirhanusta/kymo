@@ -462,6 +462,13 @@ func (r *containerRepo) PurgeSource(ctx context.Context, sourceName string) (int
 	if _, err := tx.Exec(ctx, `DELETE FROM k8s_events WHERE source_name = $1`, sourceName); err != nil {
 		return 0, fmt.Errorf("timescale: purge source k8s events: %w", err)
 	}
+	// Error signatures cascade to their counts and occurrences.
+	if _, err := tx.Exec(ctx, `DELETE FROM error_signatures WHERE source_name = $1`, sourceName); err != nil {
+		return 0, fmt.Errorf("timescale: purge source error signatures: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM log_capture_targets WHERE source_name = $1`, sourceName); err != nil {
+		return 0, fmt.Errorf("timescale: purge source log capture targets: %w", err)
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return 0, fmt.Errorf("timescale: purge source commit: %w", err)
 	}

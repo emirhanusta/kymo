@@ -1,6 +1,6 @@
 export type IssueType =
   | 'crash_loop' | 'oom' | 'degraded' | 'job_failed' | 'cant_schedule'
-  | 'image_pull' | 'evicted' | 'volume_mount' | 'probe_failing';
+  | 'image_pull' | 'evicted' | 'volume_mount' | 'probe_failing' | 'error_rate';
 export type IssueSeverity = 'critical' | 'warning';
 export type IssueStatus = 'open' | 'resolved';
 

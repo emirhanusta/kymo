@@ -122,7 +122,10 @@
           [attr.tabindex]="tab() === t.key ? 0 : -1"
           class="px-4 h-9 text-xs font-medium whitespace-nowrap border-b-2 -mb-px transition-colors"
           [class]="tab() === t.key ? 'border-kymo-amber text-kymo-amber' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
-          (click)="setTab(t.key)">{{ t.label }}</button>
+          (click)="setTab(t.key)">{{ t.label }}
+          @if (t.badge) { <span class="ml-1.5 tabular-nums text-kymo-faint">{{ t.badge }}</span> }
+          @if (t.dot) { <span class="k-led bg-kymo-amber ml-1 align-middle" title="New error message in the last 24h" aria-label="new errors"></span> }
+        </button>
       }
     </div>
 
@@ -208,6 +211,9 @@
         <div class="h-64 bg-kymo-panel border border-kymo-rule animate-pulse"></div>
       }
     </section>
+        }
+        @case ('errors') {
+          <app-workload-errors [workloadId]="id()" [namespace]="w.namespace ?? ''" [historyOnly]="isRemovedCluster()" />
         }
         @case ('runs') {
           @if (isCronJob()) {

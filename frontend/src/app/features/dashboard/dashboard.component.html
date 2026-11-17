@@ -65,7 +65,7 @@
         <ul class="divide-y divide-kymo-rule">
           @for (i of topIssues(); track i.id) {
             <li>
-              <a [routerLink]="['/workloads', i.workload_id]" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
+              <a [routerLink]="['/workloads', i.workload_id]" [queryParams]="issueQuery(i)" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
                 <span class="k-led flex-none" [class]="issueLed(i.severity)" aria-hidden="true"></span>
                 <app-workload-badge class="flex-none" [kind]="i.kind" />
                 <div class="flex-1 min-w-0">
@@ -80,6 +80,35 @@
         </ul>
       }
     </section>
+
+    <!-- Top errors (opt-in error-log capture) -->
+    @if (showErrors()) {
+      <section class="k-panel overflow-hidden flex flex-col" aria-labelledby="dash-errors-title">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between">
+          <h2 id="dash-errors-title" class="k-label">Top errors (24h)</h2>
+          <a routerLink="/settings/log-capture" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4">Log capture →</a>
+        </div>
+        @if (topErrors().length === 0) {
+          <app-empty-state icon="check" tone="success" [compact]="true" message="No captured errors" hint="Capture is on; nothing logged at error level in the last 24 hours." />
+        } @else {
+          <ul class="divide-y divide-kymo-rule">
+            @for (e of topErrors(); track e.id) {
+              <li>
+                <a [routerLink]="['/workloads', e.workload_id]" [queryParams]="{ tab: 'errors' }" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
+                  <div class="w-40 sm:w-52 flex-none min-w-0">
+                    <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="e.name">{{ e.name }}</p>
+                    <p class="text-[11px] text-kymo-faint truncate">{{ e.namespace ? e.namespace + ' · ' : '' }}{{ e.source_name }}</p>
+                  </div>
+                  <p class="flex-1 min-w-0 text-xs text-kymo-muted truncate" [title]="e.template"><app-error-template [template]="e.template" /></p>
+                  <app-error-spark class="hidden sm:inline-block" [buckets]="e.buckets" />
+                  <span class="text-xs flex-none w-12 text-right tabular-nums" [class]="e.level === 'fatal' ? 'text-kymo-danger' : 'text-kymo-amber'">{{ e.count }}</span>
+                </a>
+              </li>
+            }
+          </ul>
+        }
+      </section>
+    }
 
     <!-- Clusters -->
     @if (clusterCards().length > 0) {
