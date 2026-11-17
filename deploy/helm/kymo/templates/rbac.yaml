@@ -1,0 +1,66 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kymo.fullname" . }}
+  labels:
+    {{- include "kymo.labels" . | nindent 4 }}
+rules:
+  # Pod informer (internal/collector/kubernetes/collector.go): list+watch drive
+  # container start/stop/crash/OOM detection; get is used for per-pod lookups
+  # (events -> pod, workload resolution).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  # Crash-log snapshots (crashlog.go) and the UI's live log viewer.
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  # Kubernetes Events informer (k8sevent.go), cluster-wide.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+  # Namespace picker in the UI and the source connection test.
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+  # Workload resolution (workload.go): ReplicaSet -> Deployment owner, Job -> CronJob
+  # owner; Deployments are also listed for the UI's scale/restart picker.
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "deployments"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch"]
+  # CPU/memory sampling from metrics-server (GET /apis/metrics.k8s.io/v1beta1/
+  # namespaces/<ns>/pods/<pod>). Optional: without metrics-server KYMO simply
+  # records no resource samples.
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+  {{- if .Values.rbac.management.enabled }}
+  # OPT-IN management actions (rbac.management.enabled): "restart pod" deletes
+  # it, "scale" updates and "rollout restart" patches the Deployment.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["update", "patch"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kymo.fullname" . }}
+  labels:
+    {{- include "kymo.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kymo.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kymo.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

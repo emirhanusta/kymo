@@ -88,3 +88,30 @@ jobs:
           push: false
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  helm:
+    name: Helm chart (lint, template)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Lint
+        run: helm lint deploy/helm/kymo
+      - name: Template (defaults)
+        run: helm template kymo deploy/helm/kymo > /dev/null
+      - name: Template (external database)
+        run: |
+          helm template kymo deploy/helm/kymo \
+            --set timescaledb.enabled=false \
+            --set database.dsn='postgres://kymo:pass@db.example.com:5432/kymo?sslmode=require' > /dev/null
+      - name: Template (ingress)
+        run: |
+          helm template kymo deploy/helm/kymo \
+            --set ingress.enabled=true \
+            --set ingress.className=nginx \
+            --set 'ingress.hosts[0].host=kymo.example.com' > /dev/null
+      - name: Template fails without a database DSN
+        run: |
+          if helm template kymo deploy/helm/kymo --set timescaledb.enabled=false > /dev/null 2>&1; then
+            echo "expected failure when no database is configured"; exit 1
+          fi

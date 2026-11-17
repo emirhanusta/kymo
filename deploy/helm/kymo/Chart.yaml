@@ -1,0 +1,20 @@
+apiVersion: v2
+name: kymo
+description: KYMO - a Kubernetes container-lifecycle recorder (starts, crashes, OOM kills, resource traces, stability scores) backed by TimescaleDB.
+type: application
+version: 0.1.0
+# Image tag used when image.tag is empty. Keep in sync with the release tag (v<appVersion>).
+appVersion: "0.1.0"
+kubeVersion: ">=1.23.0-0"
+home: https://github.com/emirhanusta/kymo
+sources:
+  - https://github.com/emirhanusta/kymo
+keywords:
+  - kubernetes
+  - monitoring
+  - observability
+  - timescaledb
+  - container
+maintainers:
+  - name: emirhanusta
+    url: https://github.com/emirhanusta

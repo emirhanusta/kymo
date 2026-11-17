@@ -35,9 +35,10 @@ FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata
 
-# Run as a non-root user for security.
-RUN addgroup -S kymo && adduser -S kymo -G kymo
-USER kymo
+# Run as a non-root user for security. The numeric uid lets Kubernetes verify
+# runAsNonRoot (it cannot resolve a user name to a uid).
+RUN addgroup -S -g 10001 kymo && adduser -S -u 10001 -G kymo kymo
+USER 10001:10001
 
 COPY --from=builder /kymo /kymo
 COPY --from=web /web/dist/frontend/browser /app/web

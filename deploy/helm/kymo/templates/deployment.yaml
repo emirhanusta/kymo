@@ -1,0 +1,148 @@
+{{- include "kymo.validate" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kymo.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kymo.labels" . | nindent 4 }}
+spec:
+  # Single writer: never run two KYMO pods against one database.
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "kymo.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Restart on secret changes (env vars are read at startup). Deliberately
+        # NOT on the config object: config.yaml is hot-reloaded.
+        checksum/secret: {{ toJson (dict "key" .Values.secretKey "database" .Values.database "pw" .Values.timescaledb.auth "user" .Values.timescaledb.enabled) | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "kymo.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kymo.serviceAccountName" . }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.waitForDatabase.enabled }}
+      initContainers:
+        - name: wait-for-db
+          image: "{{ .Values.waitForDatabase.image.repository }}:{{ .Values.waitForDatabase.image.tag }}"
+          imagePullPolicy: {{ .Values.waitForDatabase.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until pg_isready -q -d "$KYMO_DATABASE_DSN"; do
+                echo "waiting for the database..."
+                sleep 2
+              done
+          env:
+            - name: KYMO_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kymo.dsnSecretName" . }}
+                  key: {{ include "kymo.dsnSecretKey" . }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: {{ .Values.podSecurityContext.runAsUser | default 10001 }}
+            capabilities:
+              drop: [ALL]
+          resources:
+            {{- toYaml .Values.waitForDatabase.resources | nindent 12 }}
+      {{- end }}
+      containers:
+        - name: kymo
+          image: {{ include "kymo.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          env:
+            - name: KYMO_DATABASE_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kymo.dsnSecretName" . }}
+                  key: {{ include "kymo.dsnSecretKey" . }}
+            - name: KYMO_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kymo.keySecretName" . }}
+                  key: {{ include "kymo.keySecretKey" . }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /api/v1/healthz
+              port: http
+            {{- toYaml .Values.startupProbe | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /api/v1/healthz
+              port: http
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/healthz
+              port: http
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            # Mounted as a directory (not subPath) so ConfigMap updates reach the
+            # pod and KYMO's file watcher can hot-reload them.
+            - name: config
+              mountPath: /etc/kymo
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          {{- if .Values.configInSecret }}
+          secret:
+            secretName: {{ include "kymo.configName" . }}
+          {{- else }}
+          configMap:
+            name: {{ include "kymo.configName" . }}
+          {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
