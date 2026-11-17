@@ -16,19 +16,28 @@ database:
   # Apply the embedded SQL migrations on startup.
   auto_migrate: true
 
+# Encrypts kubeconfigs uploaded through the UI (AES-256-GCM). Without it,
+# Kubernetes sources added in the UI can only reference kubeconfig files on
+# the server. Prefer setting it via the KYMO_SECRET_KEY environment variable.
+# secret_key: "change-me"
+
 collector:
   stats_poll_interval: "15s"   # default resource sampling interval
   scoring_interval: "60s"      # how often stability scores are recomputed
   scoring_window: "24h"        # look-back window for scoring
+  # Sources declared here are locked in the UI. Sources can also be added,
+  # edited and removed at runtime from the Sources page (stored in the database).
   sources:
     - name: "local-docker"
       type: "docker"
+      # read_only: true                          # hide/forbid start, stop, kill, …
       # socket: "unix:///var/run/docker.sock"   # default: DOCKER_HOST
     # - name: "dev-cluster"
     #   type: "kubernetes"
     #   kubeconfig_path: "/path/to/kubeconfig"
     #   kube_context: "dev"                      # default: current-context
     #   poll_interval: "30s"                     # needs metrics-server for CPU/memory
+    #   read_only: true                          # recommended for production clusters
 
 log:
   level: "info"      # debug | info | warn | error

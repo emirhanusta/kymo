@@ -353,6 +353,7 @@ func (c *Collector) handleContainerEvent(ctx context.Context, msg events.Message
 			Image:       attrs["image"],
 			FirstSeenAt: eventTime,
 		}
+		ct.WorkloadKind, ct.WorkloadName = composeWorkload(attrs)
 		// Only persist in the running set for "start"; other events for unknown
 		// containers may arrive out of order (e.g. after a collector restart).
 		if msg.Action == events.ActionStart {
@@ -526,6 +527,7 @@ func containerFromListItem(ct *apitypes.Container, now time.Time) *model.Contain
 	if len(ct.Names) > 0 {
 		name = strings.TrimPrefix(ct.Names[0], "/")
 	}
+	kind, project := composeWorkload(ct.Labels)
 	return &model.Container{
 		ID:            ct.ID,
 		Runtime:       model.RuntimeDocker,
@@ -534,7 +536,21 @@ func containerFromListItem(ct *apitypes.Container, now time.Time) *model.Contain
 		FirstSeenAt:   time.Unix(ct.Created, 0).UTC(),
 		LastSeenAt:    now,
 		CurrentStatus: listItemStatus(ct),
+		WorkloadKind:  kind,
+		WorkloadName:  project,
 	}
+}
+
+// composeLabel is the label Docker Compose sets on every container it creates.
+const composeLabel = "com.docker.compose.project"
+
+// composeWorkload maps a container's labels (or event attributes, which carry
+// the labels) to its Compose project, if any.
+func composeWorkload(labels map[string]string) (kind, name string) {
+	if p := labels[composeLabel]; p != "" {
+		return model.WorkloadCompose, p
+	}
+	return "", ""
 }
 
 // listItemStatus maps a container list entry to our status, treating a

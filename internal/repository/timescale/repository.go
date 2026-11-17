@@ -249,6 +249,14 @@ func buildFilter(f repository.ContainerFilter) (string, []any) {
 		args = append(args, f.Status)
 		clauses = append(clauses, fmt.Sprintf("c.current_status = $%d", len(args)))
 	}
+	if f.WorkloadKind != "" {
+		args = append(args, f.WorkloadKind)
+		clauses = append(clauses, fmt.Sprintf("c.workload_kind = $%d", len(args)))
+	}
+	if f.Workload != "" {
+		args = append(args, f.Workload)
+		clauses = append(clauses, fmt.Sprintf("c.workload_name = $%d", len(args)))
+	}
 	if q := strings.TrimSpace(f.Query); q != "" {
 		args = append(args, "%"+escapeLike(q)+"%")
 		n := len(args)
@@ -411,6 +419,15 @@ func (r *containerRepo) HardDeleteDeleted(ctx context.Context, sourceName string
 	return tag.RowsAffected(), nil
 }
 
+// DeleteBySource permanently removes every container of a source (CASCADE).
+func (r *containerRepo) DeleteBySource(ctx context.Context, sourceName string) (int64, error) {
+	tag, err := r.db.pool.Exec(ctx, `DELETE FROM containers WHERE source_name = $1`, sourceName)
+	if err != nil {
+		return 0, fmt.Errorf("timescale: container delete by source: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 // HardDeleteIgnored permanently removes all ignored (non-deleted) containers and
 // their related records (via CASCADE). Optionally filtered by sourceName.
 func (r *containerRepo) HardDeleteIgnored(ctx context.Context, sourceName string) (int64, error) {
@@ -550,17 +567,33 @@ WHERE e.container_id = $1 AND e.occurred_at >= $2 ORDER BY e.occurred_at ASC`, c
 	return scanEvents(rows, false)
 }
 
-// FindRecent returns the n most recent events across all containers, joined
-// with the owning container's name and runtime.
-func (r *eventRepo) FindRecent(ctx context.Context, n int, sourceName string) ([]*model.LifecycleEvent, error) {
+// FindRecent returns the most recent events matching q across all containers,
+// joined with the owning container's name and runtime.
+func (r *eventRepo) FindRecent(ctx context.Context, q repository.EventQuery) ([]*model.LifecycleEvent, error) {
+	var (
+		clauses []string
+		args    []any
+	)
+	if q.Source != "" {
+		args = append(args, q.Source)
+		clauses = append(clauses, fmt.Sprintf("e.source_name = $%d", len(args)))
+	}
+	if q.Type != "" {
+		args = append(args, q.Type)
+		clauses = append(clauses, fmt.Sprintf("e.event_type = $%d", len(args)))
+	}
+	if !q.Before.IsZero() {
+		args = append(args, q.Before)
+		clauses = append(clauses, fmt.Sprintf("e.occurred_at < $%d", len(args)))
+	}
 	sql := `SELECT ` + eventCols + `, COALESCE(c.name, ''), COALESCE(c.runtime, '')
 FROM lifecycle_events e LEFT JOIN containers c ON c.id = e.container_id`
-	args := []any{n}
-	if sourceName != "" {
-		args = append(args, sourceName)
-		sql += ` WHERE e.source_name = $2`
+	if len(clauses) > 0 {
+		sql += " WHERE " + strings.Join(clauses, " AND ")
 	}
-	sql += ` ORDER BY e.occurred_at DESC LIMIT $1`
+	args = append(args, q.Limit)
+	sql += fmt.Sprintf(" ORDER BY e.occurred_at DESC LIMIT $%d", len(args))
+
 	rows, err := r.db.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, fmt.Errorf("timescale: event find recent: %w", err)

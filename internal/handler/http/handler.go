@@ -23,16 +23,17 @@ type Pinger interface {
 
 // Handler holds all HTTP handler methods and their shared dependencies.
 type Handler struct {
-	svc  service.RecorderService
-	mgmt service.ManagementService
-	db   Pinger
-	log  *zap.Logger
+	svc     service.RecorderService
+	mgmt    service.ManagementService
+	sources *service.SourceManager
+	db      Pinger
+	log     *zap.Logger
 }
 
 // New creates a Handler, registers all API routes on r, and returns the Handler.
 // db may be nil, in which case /healthz does not check the database.
-func New(svc service.RecorderService, mgmt service.ManagementService, db Pinger, log *zap.Logger, r *gin.Engine) *Handler {
-	h := &Handler{svc: svc, mgmt: mgmt, db: db, log: log}
+func New(svc service.RecorderService, mgmt service.ManagementService, sources *service.SourceManager, db Pinger, log *zap.Logger, r *gin.Engine) *Handler {
+	h := &Handler{svc: svc, mgmt: mgmt, sources: sources, db: db, log: log}
 	h.registerRoutes(r)
 	return h
 }
@@ -43,8 +44,15 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 	{
 		v1.GET("/healthz", h.Healthz)
 
-		// Source list endpoint
+		v1.GET("/meta", h.Meta)
+
+		// Sources
 		v1.GET("/sources", h.ListSources)
+		v1.POST("/sources", h.CreateSource)
+		v1.POST("/sources/test", h.TestSource)
+		v1.POST("/sources/contexts", h.SourceContexts)
+		v1.PUT("/sources/:name", h.UpdateSource)
+		v1.DELETE("/sources/:name", h.DeleteSource)
 
 		// Read-only container endpoints
 		v1.GET("/containers", h.ListContainers)
@@ -132,6 +140,7 @@ func (h *Handler) ListSources(c *gin.Context) {
 //   - source  (optional): filter by collector source name (e.g. "local-docker").
 //   - q       (optional): case-insensitive substring of name/image/namespace/workload.
 //   - status  (optional): filter by current status (running, stopped, crashing, …).
+//   - workload_kind / workload (optional): filter by workload kind / exact name.
 //   - sort / order (paged mode): sort field (incl. "score") and "asc"/"desc".
 //   - page    (optional): 1-based page number; when present the response is
 //     wrapped in a page envelope: {data, total, page, limit, total_pages}.
@@ -144,6 +153,9 @@ func (h *Handler) ListContainers(c *gin.Context) {
 		Source:  c.Query("source"),
 		Query:   c.Query("q"),
 		Status:  model.ContainerStatus(c.Query("status")),
+
+		WorkloadKind: c.Query("workload_kind"),
+		Workload:     c.Query("workload"),
 	}
 
 	// If neither pagination param is provided fall back to the flat-list response
@@ -515,6 +527,8 @@ func (h *Handler) ListCronJobs(c *gin.Context) {
 // Query parameters:
 //   - limit  (optional, default 20, max 200): number of events to return.
 //   - source (optional): restrict to one collector source.
+//   - type   (optional): restrict to one event type (start, crash, oom, …).
+//   - before (optional, RFC3339): only events older than this (pagination cursor).
 //
 // GET /api/v1/events/recent
 func (h *Handler) GetRecentEvents(c *gin.Context) {
@@ -524,7 +538,16 @@ func (h *Handler) GetRecentEvents(c *gin.Context) {
 			limit = parsed
 		}
 	}
-	events, err := h.svc.GetRecentEvents(c.Request.Context(), limit, c.Query("source"))
+	q := repository.EventQuery{Limit: limit, Source: c.Query("source"), Type: model.EventType(c.Query("type"))}
+	if v := c.Query("before"); v != "" {
+		t, err := time.Parse(time.RFC3339Nano, v)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "before must be an RFC3339 timestamp"})
+			return
+		}
+		q.Before = t
+	}
+	events, err := h.svc.GetRecentEvents(c.Request.Context(), q)
 	if err != nil {
 		h.log.Error("get recent events failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})

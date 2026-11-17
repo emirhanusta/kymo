@@ -13,6 +13,8 @@ import { ContainerService } from '../../../core/services/container.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { RefreshService } from '../../../core/services/refresh.service';
 import { PageContextService } from '../../../core/services/page-context.service';
+import { SourceStateService } from '../../../core/services/source-state.service';
+import { ReadOnlyTagComponent } from '../../../shared/components/read-only-tag/read-only-tag.component';
 import {
   ActionResult, Container, StabilityScore, LifecycleEvent, ResourceSample, PodDetail,
 } from '../../../core/models/container.model';
@@ -53,6 +55,7 @@ const RANGES: { key: RangeKey; ms: number }[] = [
     MetricCardComponent, StatusBadgeComponent, WorkloadBadgeComponent, StabilityGaugeComponent,
     TimeagoPipe, LogViewerComponent, DeleteModalComponent, ConfirmDialogComponent,
     ResourceChartsComponent, EmptyStateComponent, ErrorStateComponent, PageHeaderComponent, ScoreClassPipe,
+    ReadOnlyTagComponent,
   ],
   templateUrl: './container-detail.component.html',
   styleUrl: './container-detail.component.scss',
@@ -65,6 +68,7 @@ export class ContainerDetailComponent {
   private toast      = inject(ToastService);
   private refreshSvc = inject(RefreshService);
   private pageCtx    = inject(PageContextService);
+  private sources    = inject(SourceStateService);
 
   readonly ranges = RANGES;
   readonly eventLabel  = eventLabel;
@@ -141,6 +145,9 @@ export class ContainerDetailComponent {
     ];
   });
 
+  /** Read-only sources: hide start/stop/restart/kill; logs and archive/ignore stay available. */
+  readOnly = computed(() => this.sources.isReadOnly(this.container()?.source_name));
+
   isDocker = computed(() => this.container()?.runtime === 'docker');
   isK8s    = computed(() => this.container()?.runtime === 'kubernetes');
 
@@ -162,13 +169,8 @@ export class ContainerDetailComponent {
   canRestart = computed(() => ['running', 'paused'].includes(this.status()));
   canKill    = computed(() => ['running', 'paused', 'crashing'].includes(this.status()));
 
-  get backPath(): string {
-    return this.router.url.startsWith('/pods/') ? '/pods' : '/containers';
-  }
-
-  get backLabel(): string {
-    return this.backPath === '/pods' ? 'Pods' : 'Containers';
-  }
+  readonly backPath = '/containers';
+  readonly backLabel = 'Containers';
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
 
@@ -332,9 +334,7 @@ export class ContainerDetailComponent {
         this.toast.success(res?.message || successMsg);
         this.router.navigate([back]);
       },
-      error: err => {
-        this.toast.error(err?.error?.message || 'Operation failed');
-      },
+      error: err => this.toast.apiError(err, 'Operation failed'),
     });
   }
 
@@ -354,7 +354,7 @@ export class ContainerDetailComponent {
       },
       error: err => {
         this.actionBusy.set(false);
-        this.toast.error(err?.error?.message || errorMsg);
+        this.toast.apiError(err, errorMsg);
       },
     });
   }

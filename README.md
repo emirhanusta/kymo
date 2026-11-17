@@ -15,8 +15,10 @@ like a kymograph tracing a needle over chart paper.
   (long ranges are downsampled server-side).
 - **Stability score (0–100)** — penalties for restarts, crashes, OOM kills,
   CPU volatility and reporting gaps over a configurable window.
-- **Multiple sources** — any number of Docker daemons and Kubernetes clusters;
-  an unreachable source is retried in the background and shown as such.
+- **Sources from the UI** — add, edit, pause and remove Docker daemons and
+  Kubernetes clusters at runtime, with a connection test before saving. Mark a
+  source read-only to disable every management action for it. Unreachable
+  sources are retried in the background and shown as such.
 - **Management** — start / stop / restart / kill Docker containers, delete
   pods, scale and restart Deployments, stream logs.
 - **Kubernetes extras** — workload detection (Deployment, Job, CronJob, …) and
@@ -28,6 +30,8 @@ like a kymograph tracing a needle over chart paper.
 |---|---|
 | ![Containers](docs/screenshots/02-containers.jpg) | ![Container detail](docs/screenshots/03-detail.jpg) |
 | ![Resource traces](docs/screenshots/04-resources.jpg) | ![Command palette](docs/screenshots/05-command-palette.jpg) |
+| ![Sources](docs/screenshots/06-sources.jpg) | ![Add source](docs/screenshots/07-add-source.jpg) |
+| ![Compose workloads](docs/screenshots/09-workloads-compose.jpg) | ![Events](docs/screenshots/10-events.jpg) |
 
 ## Quick start (Docker Compose)
 
@@ -58,6 +62,11 @@ proxying `/api` to :8080). Database migrations are applied automatically on
 startup; `make migrate DSN=...` applies them by hand.
 
 ## Configuration
+
+Sources can be declared in `config.yaml` (locked in the UI) or managed on the
+**Sources** page. For Kubernetes you can point at a kubeconfig file on the
+server, or paste/upload one — uploads are stored encrypted and require
+`KYMO_SECRET_KEY` to be set.
 
 See [`config.example.yaml`](config.example.yaml). Every key can be overridden
 with an environment variable prefixed `KYMO_`, e.g. `KYMO_DATABASE_DSN`,

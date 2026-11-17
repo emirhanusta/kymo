@@ -47,7 +47,17 @@
         <div class="flex gap-2"><dt class="k-label">ns</dt><dd class="text-kymo-ink">{{ container()!.namespace }}</dd></div>
       }
       @if (container()!.workload_name) {
-        <div class="flex gap-2"><dt class="k-label">workload</dt><dd class="text-kymo-ink">{{ container()!.workload_name }}</dd></div>
+        <div class="flex gap-2">
+          <dt class="k-label">{{ container()!.workload_kind === 'Compose' ? 'project' : 'workload' }}</dt>
+          <dd>
+            <a
+              routerLink="/containers"
+              [queryParams]="{ workload_kind: container()!.workload_kind || null, workload: container()!.workload_name }"
+              class="text-kymo-ink hover:text-kymo-amber underline-offset-4 hover:underline"
+              [title]="'All containers of ' + container()!.workload_name"
+            >{{ container()!.workload_name }}</a>
+          </dd>
+        </div>
       }
       @if (container()!.node_name) {
         <div class="flex gap-2"><dt class="k-label">node</dt><dd class="text-kymo-ink">{{ container()!.node_name }}</dd></div>
@@ -71,7 +81,10 @@
 
     <!-- Action Bar -->
     <div class="flex items-center gap-2 flex-wrap border-y border-kymo-rule py-3" role="toolbar" aria-label="Container actions">
-      @if (isDocker()) {
+      @if (readOnly() && !(isK8s() && isCronJobOrJob())) {
+        <app-read-only-tag />
+      }
+      @if (isDocker() && !readOnly()) {
         <button type="button" class="k-btn k-btn-go" [disabled]="actionBusy() || !canStart()" (click)="startContainer()" title="Start container">
           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linejoin="round" d="M5 3l14 9-14 9V3z" /></svg>
           Start
@@ -89,7 +102,7 @@
           Kill
         </button>
       }
-      @if (isK8s() && !isCronJobOrJob()) {
+      @if (isK8s() && !isCronJobOrJob() && !readOnly()) {
         <button type="button" class="k-btn k-btn-primary" [disabled]="actionBusy()" (click)="restartContainer()" title="Delete pod (K8s will recreate it)">
           <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
           Restart Pod
@@ -213,7 +226,8 @@
           <h2 class="k-label">Pod</h2>
           @if (container()!.workload_kind === 'Deployment' && container()!.workload_name) {
             <a
-              routerLink="/deployments"
+              routerLink="/workloads"
+              [queryParams]="{ view: 'deployments' }"
               class="text-xs text-kymo-amber hover:underline underline-offset-4"
               title="Go to Deployments"
             >↑ {{ container()!.workload_name }}</a>
@@ -231,7 +245,7 @@
           <div class="border-t border-kymo-rule">
             @for (sibling of podSiblings(); track sibling.id) {
               <a
-                [routerLink]="['/pods', sibling.id]"
+                [routerLink]="['/containers', sibling.id]"
                 class="flex items-center gap-3 px-3 py-2 border-b border-kymo-rule hover:bg-kymo-raised transition-colors"
               >
                 <app-status-badge [status]="sibling.current_status" compact />

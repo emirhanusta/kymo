@@ -15,7 +15,7 @@
       class="order-last lg:order-none w-full lg:w-auto lg:flex-1 min-w-0 flex items-stretch overflow-x-auto scrollbar-none -mx-3 px-1 sm:-mx-4 sm:px-2 lg:mx-0 lg:px-0 border-t border-kymo-rule lg:border-t-0"
       aria-label="Main navigation"
     >
-      @for (tab of tabs(); track tab.path; let i = $index) {
+      @for (tab of tabs; track tab.path; let i = $index) {
         <a
           [routerLink]="tab.path"
           routerLinkActive="!text-kymo-amber !border-kymo-amber"
@@ -130,5 +130,5 @@
 </header>
 
 @if (paletteOpen()) {
-  <app-command-palette [tabs]="tabs()" (closed)="paletteOpen.set(false)" />
+  <app-command-palette [tabs]="palettePages" (closed)="paletteOpen.set(false)" />
 }

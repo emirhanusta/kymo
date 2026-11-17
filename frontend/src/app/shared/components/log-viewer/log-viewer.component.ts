@@ -103,7 +103,7 @@ export class LogViewerComponent implements OnInit, OnDestroy, AfterViewChecked {
         this.shouldScroll = true;
       },
       error: err => {
-        this.toast.error(err?.error?.message || 'Failed to fetch logs');
+        this.toast.apiError(err, 'Failed to fetch logs');
         this.loading.set(false);
       },
     });

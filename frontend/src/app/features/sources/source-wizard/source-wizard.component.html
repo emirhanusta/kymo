@@ -1,0 +1,446 @@
+<div class="fixed inset-0 bg-kymo-deep/85 z-50 flex items-start sm:items-center justify-center p-4 overflow-y-auto">
+  <div
+    appDialog
+    (dismiss)="closed.emit()"
+    aria-labelledby="source-wizard-title"
+    class="bg-kymo-panel border border-kymo-rule border-t-kymo-amber w-full max-w-2xl flex flex-col max-h-[calc(100vh-2rem)]"
+    (click)="$event.stopPropagation()"
+  >
+    <!-- Header + steps -->
+    <div class="px-5 pt-4 pb-3 border-b border-kymo-rule flex-none">
+      <div class="flex items-start justify-between gap-4">
+        <h2 id="source-wizard-title" class="text-sm font-semibold uppercase tracking-[0.08em] text-kymo-ink">
+          {{ isEdit() ? 'Edit source ' + source()!.name : 'Add source' }}
+        </h2>
+        <button type="button" class="k-btn k-btn-icon k-btn-sm border-transparent text-kymo-muted -mr-2 -mt-1" (click)="closed.emit()" aria-label="Close">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M6 18L18 6M6 6l12 12" /></svg>
+        </button>
+      </div>
+      <ol class="flex items-center gap-2 mt-3 text-[11px] uppercase tracking-[0.08em]" aria-label="Steps">
+        @for (s of steps; track s.n) {
+          @if (!(isEdit() && s.n === 1)) {
+            <li
+              class="flex items-center gap-1.5"
+              [class]="step() === s.n ? 'text-kymo-amber' : (step() > s.n ? 'text-kymo-ink' : 'text-kymo-faint')"
+              [attr.aria-current]="step() === s.n ? 'step' : null"
+            >
+              <span class="w-4 h-4 flex items-center justify-center border text-[10px]" [class]="step() === s.n ? 'border-kymo-amber' : 'border-kymo-rule'">{{ isEdit() ? s.n - 1 : s.n }}</span>
+              {{ s.label }}
+              @if (s.n < 3) {
+                <span class="text-kymo-faint ml-1" aria-hidden="true">—</span>
+              }
+            </li>
+          }
+        }
+      </ol>
+    </div>
+
+    <!-- Body -->
+    <div class="px-5 py-5 overflow-y-auto scrollbar-thin flex-1 min-h-0">
+      @switch (step()) {
+
+        <!-- ── Step 1: type ─────────────────────────────────────────────── -->
+        @case (1) {
+          <p id="wiz-type-label" class="k-label mb-3">What do you want to record?</p>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3" role="radiogroup" aria-labelledby="wiz-type-label" (keydown)="onTypeKeydown($event)">
+            <button
+              type="button"
+              role="radio"
+              data-type="docker"
+              [attr.data-step-focus]="type() !== 'kubernetes' ? '' : null"
+              [attr.data-autofocus]="type() !== 'kubernetes' ? '' : null"
+              [attr.aria-checked]="type() === 'docker'"
+              [attr.tabindex]="type() === 'kubernetes' ? -1 : 0"
+              class="text-left p-4 border transition-colors flex flex-col gap-2 min-h-32"
+              [class]="type() === 'docker' ? 'border-kymo-amber bg-kymo-raised' : 'border-kymo-rule hover:border-kymo-faint'"
+              (click)="chooseType('docker')"
+              (dblclick)="chooseType('docker'); next()"
+            >
+              <span class="flex items-center justify-between">
+                <span class="text-sm font-semibold" [class]="type() === 'docker' ? 'text-kymo-amber' : 'text-kymo-ink'">Docker</span>
+                <span class="w-3.5 h-3.5 border flex items-center justify-center" [class]="type() === 'docker' ? 'border-kymo-amber' : 'border-kymo-faint'" aria-hidden="true">
+                  @if (type() === 'docker') { <span class="w-1.5 h-1.5 bg-kymo-amber"></span> }
+                </span>
+              </span>
+              <span class="text-xs text-kymo-muted">A Docker engine reached through its socket or TCP host. Records containers, Compose projects, restarts, crashes and resource usage.</span>
+            </button>
+            <button
+              type="button"
+              role="radio"
+              data-type="kubernetes"
+              [attr.data-step-focus]="type() === 'kubernetes' ? '' : null"
+              [attr.data-autofocus]="type() === 'kubernetes' ? '' : null"
+              [attr.aria-checked]="type() === 'kubernetes'"
+              [attr.tabindex]="type() === 'kubernetes' ? 0 : -1"
+              class="text-left p-4 border transition-colors flex flex-col gap-2 min-h-32"
+              [class]="type() === 'kubernetes' ? 'border-kymo-amber bg-kymo-raised' : 'border-kymo-rule hover:border-kymo-faint'"
+              (click)="chooseType('kubernetes')"
+              (dblclick)="chooseType('kubernetes'); next()"
+            >
+              <span class="flex items-center justify-between">
+                <span class="text-sm font-semibold" [class]="type() === 'kubernetes' ? 'text-kymo-amber' : 'text-kymo-ink'">Kubernetes</span>
+                <span class="w-3.5 h-3.5 border flex items-center justify-center" [class]="type() === 'kubernetes' ? 'border-kymo-amber' : 'border-kymo-faint'" aria-hidden="true">
+                  @if (type() === 'kubernetes') { <span class="w-1.5 h-1.5 bg-kymo-amber"></span> }
+                </span>
+              </span>
+              <span class="text-xs text-kymo-muted">A cluster reached through a kubeconfig context. Records pods, deployments and cronjob runs across namespaces.</span>
+            </button>
+          </div>
+        }
+
+        <!-- ── Step 2: connection ───────────────────────────────────────── -->
+        @case (2) {
+          <div class="space-y-5">
+            <!-- Name -->
+            <div>
+              <label for="wiz-name" class="k-label block mb-1.5">Name</label>
+              <div class="flex items-center gap-2">
+                <input
+                  id="wiz-name"
+                  type="text"
+                  class="k-input w-full"
+                  [class.!border-kymo-danger]="(nameTouched() || attempted()) && !!nameError()"
+                  [attr.data-step-focus]="isEdit() ? null : ''"
+                  [attr.data-autofocus]="isEdit() ? null : ''"
+                  [value]="name()"
+                  [disabled]="isEdit()"
+                  placeholder="e.g. prod-cluster or build-host"
+                  autocomplete="off"
+                  spellcheck="false"
+                  maxlength="63"
+                  [attr.aria-invalid]="(nameTouched() || attempted()) && !!nameError()"
+                  aria-describedby="wiz-name-help"
+                  (input)="onName($any($event.target).value)"
+                  (blur)="nameTouched.set(true)"
+                />
+                <span class="k-label px-1.5 h-[1.875rem] flex items-center border border-kymo-rule flex-none">{{ type() === 'kubernetes' ? 'k8s' : 'docker' }}</span>
+              </div>
+              @if ((nameTouched() || attempted()) && nameError()) {
+                <p id="wiz-name-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ nameError() }}</p>
+              } @else {
+                <p id="wiz-name-help" class="text-xs text-kymo-faint mt-1.5">
+                  @if (isEdit()) { Name and type can't be changed. } @else { Lowercase letters, digits, "-", "_" and "."; used in URLs and filters. }
+                </p>
+              }
+            </div>
+
+            @if (type() === 'docker') {
+              <!-- Docker socket -->
+              <div>
+                <label for="wiz-socket" class="k-label block mb-1.5">Socket / host <span class="normal-case tracking-normal text-kymo-faint">(optional)</span></label>
+                <input
+                  id="wiz-socket"
+                  type="text"
+                  class="k-input w-full"
+                  [attr.data-step-focus]="isEdit() ? '' : null"
+                  [attr.data-autofocus]="isEdit() ? '' : null"
+                  [value]="socket()"
+                  placeholder="unix:///var/run/docker.sock"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-describedby="wiz-socket-help"
+                  (input)="socket.set($any($event.target).value)"
+                />
+                <p id="wiz-socket-help" class="text-xs text-kymo-faint mt-1.5">Empty = the server's default (DOCKER_HOST or the local socket). Also accepts tcp://host:2376.</p>
+              </div>
+            } @else {
+              <!-- Kubeconfig -->
+              <fieldset>
+                <legend class="k-label mb-1.5">Kubeconfig</legend>
+                <div class="flex border border-kymo-rule w-fit" role="group" aria-label="Kubeconfig source">
+                  <button
+                    type="button"
+                    class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule"
+                    [class]="kubeMode() === 'path' ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+                    [attr.aria-pressed]="kubeMode() === 'path'"
+                    [attr.data-step-focus]="isEdit() && kubeMode() === 'path' ? '' : null"
+                    [attr.data-autofocus]="isEdit() && kubeMode() === 'path' ? '' : null"
+                    (click)="setKubeMode('path')"
+                  >Path on server</button>
+                  <button
+                    type="button"
+                    class="px-3 h-7 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    [class]="kubeMode() === 'paste' ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+                    [attr.aria-pressed]="kubeMode() === 'paste'"
+                    [disabled]="pasteDisabled() && !storedUpload()"
+                    [attr.aria-describedby]="pasteDisabled() ? 'wiz-paste-disabled' : null"
+                    [attr.data-step-focus]="isEdit() && kubeMode() === 'paste' ? '' : null"
+                    [attr.data-autofocus]="isEdit() && kubeMode() === 'paste' ? '' : null"
+                    (click)="setKubeMode('paste')"
+                  >Paste / upload</button>
+                </div>
+                @if (pasteDisabled()) {
+                  <p id="wiz-paste-disabled" class="text-xs text-kymo-muted mt-1.5">
+                    Paste / upload is disabled: uploaded kubeconfigs are stored encrypted and the server has no secret key.
+                    Set <code class="text-kymo-amber">KYMO_SECRET_KEY</code> on the KYMO server and restart it to enable this.
+                  </p>
+                }
+
+                @if (kubeMode() === 'path') {
+                  <div class="mt-3">
+                    <label for="wiz-path" class="sr-only">Kubeconfig path on the server</label>
+                    <input
+                      id="wiz-path"
+                      type="text"
+                      class="k-input w-full"
+                      [value]="kubeconfigPath()"
+                      placeholder="/etc/kymo/kubeconfig.yaml"
+                      autocomplete="off"
+                      spellcheck="false"
+                      aria-describedby="wiz-path-help"
+                      (input)="onPath($any($event.target).value)"
+                    />
+                    <p id="wiz-path-help" class="text-xs text-kymo-faint mt-1.5">A path readable by the KYMO server process. Empty = in-cluster config or the server's default kubeconfig.</p>
+                  </div>
+                } @else {
+                  <div class="mt-3">
+                    <label for="wiz-kubeconfig" class="sr-only">Kubeconfig YAML</label>
+                    <textarea
+                      id="wiz-kubeconfig"
+                      rows="8"
+                      class="k-input w-full !h-auto py-2 font-mono text-[11px] leading-relaxed resize-y scrollbar-thin"
+                      [class.!border-kymo-danger]="attempted() && !!kubeError()"
+                      [value]="kubeconfigText()"
+                      [disabled]="pasteDisabled()"
+                      [placeholder]="isEdit() && storedUpload() ? 'Leave empty to keep the stored kubeconfig' : 'apiVersion: v1\nkind: Config\nclusters: …'"
+                      spellcheck="false"
+                      [attr.aria-invalid]="attempted() && !!kubeError()"
+                      aria-describedby="wiz-kubeconfig-help"
+                      (input)="onKubeconfigText($any($event.target).value)"
+                    ></textarea>
+                    <div class="flex items-center gap-3 mt-1.5 flex-wrap">
+                      <label class="k-btn k-btn-sm cursor-pointer" [class.opacity-40]="pasteDisabled()" [class.pointer-events-none]="pasteDisabled()">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>
+                        Upload file
+                        <input type="file" class="sr-only" accept=".yaml,.yml,.conf,.config,text/yaml,application/yaml,text/plain" [disabled]="pasteDisabled()" (change)="onFile($event)" />
+                      </label>
+                      @if (fileLabel()) {
+                        <span class="text-xs text-kymo-muted truncate">loaded {{ fileLabel() }}</span>
+                      }
+                    </div>
+                    @if (fileError()) {
+                      <p class="text-xs text-kymo-danger mt-1.5" role="alert">{{ fileError() }}</p>
+                    }
+                    @if (attempted() && kubeError()) {
+                      <p id="wiz-kubeconfig-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ kubeError() }}</p>
+                    } @else {
+                      <p id="wiz-kubeconfig-help" class="text-xs text-kymo-faint mt-1.5">
+                        @if (isEdit() && storedUpload()) {
+                          An uploaded kubeconfig is stored. Leave this empty to keep it, or paste a new one to replace it.
+                        } @else {
+                          Stored encrypted on the server. Prefer a dedicated, least-privilege service account.
+                        }
+                      </p>
+                    }
+                  </div>
+                }
+              </fieldset>
+
+              <!-- Context -->
+              <div>
+                <label for="wiz-context" class="k-label flex items-center gap-2 mb-1.5">
+                  Context
+                  @if (contextsState() === 'loading') {
+                    <span class="w-3 h-3 border border-kymo-rule border-t-kymo-amber rounded-full animate-spin" aria-hidden="true"></span>
+                    <span class="sr-only">loading contexts</span>
+                  }
+                </label>
+                @if (contextsState() === 'ok' && contexts().length > 0) {
+                  <select
+                    id="wiz-context"
+                    class="k-input w-full cursor-pointer"
+                    [value]="context()"
+                    (change)="setContext($any($event.target).value)"
+                  >
+                    @for (c of contexts(); track c.name) {
+                      <option [value]="c.name" [selected]="c.name === context()">{{ contextLabel(c) }}</option>
+                    }
+                  </select>
+                  @if (selectedContext(); as c) {
+                    <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 text-xs mt-2">
+                      <dt class="k-label">cluster</dt><dd class="text-kymo-ink break-all">{{ c.cluster || '—' }}</dd>
+                      <dt class="k-label">server</dt><dd class="text-kymo-ink break-all">{{ c.server || '—' }}</dd>
+                      @if (c.namespace) {
+                        <dt class="k-label">namespace</dt><dd class="text-kymo-ink">{{ c.namespace }}</dd>
+                      }
+                    </dl>
+                  }
+                } @else {
+                  <input
+                    id="wiz-context"
+                    type="text"
+                    class="k-input w-full"
+                    [value]="context()"
+                    placeholder="kubeconfig's current context"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-describedby="wiz-context-help"
+                    (input)="setContext($any($event.target).value)"
+                  />
+                  <p id="wiz-context-help" class="text-xs mt-1.5" [class]="contextsState() === 'error' ? 'text-kymo-danger' : 'text-kymo-faint'">
+                    @if (contextsState() === 'error') {
+                      {{ contextsError() }}
+                    } @else if (contextsState() === 'loading') {
+                      Reading contexts…
+                    } @else {
+                      Enter a kubeconfig path or paste a kubeconfig to pick from its contexts. Empty = the kubeconfig's current context.
+                    }
+                  </p>
+                }
+              </div>
+
+              @if (isProd()) {
+                <div class="flex items-start gap-2 px-3 py-2.5 border border-kymo-amber/50 border-l-2 border-l-kymo-amber text-xs text-kymo-amber" role="status">
+                  <span class="k-label !text-kymo-amber flex-none">prod?</span>
+                  <span>This context looks like a production cluster. Read-only has been ticked so KYMO can't restart, scale or delete anything there — untick it only if you really want management actions.</span>
+                </div>
+              }
+            }
+
+            <!-- Common -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label for="wiz-poll" class="k-label block mb-1.5">Poll interval <span class="normal-case tracking-normal text-kymo-faint">(seconds, optional)</span></label>
+                <input
+                  id="wiz-poll"
+                  type="number"
+                  min="1"
+                  step="1"
+                  inputmode="numeric"
+                  class="k-input w-full"
+                  [class.!border-kymo-danger]="!!pollError()"
+                  [value]="pollInterval()"
+                  placeholder="server default"
+                  [attr.aria-invalid]="!!pollError()"
+                  aria-describedby="wiz-poll-help"
+                  (input)="pollInterval.set($any($event.target).value)"
+                />
+                @if (pollError()) {
+                  <p id="wiz-poll-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ pollError() }}</p>
+                } @else {
+                  <p id="wiz-poll-help" class="text-xs text-kymo-faint mt-1.5">How often resource usage is sampled.</p>
+                }
+              </div>
+              <div class="sm:pt-6">
+                <label class="flex items-start gap-2 text-xs text-kymo-ink cursor-pointer">
+                  <input type="checkbox" class="mt-0.5" [checked]="readOnly()" (change)="readOnly.set($any($event.target).checked)" />
+                  <span>
+                    Read-only (disable management actions)
+                    <span class="block text-kymo-faint mt-0.5">Start / stop / restart / kill / scale are refused. Logs and history stay available.</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+          </div>
+        }
+
+        <!-- ── Step 3: test & save ──────────────────────────────────────── -->
+        @case (3) {
+          <div class="space-y-4">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="k-label">Connection test</h3>
+              <button type="button" class="k-btn k-btn-sm" [disabled]="testing() || saving()" (click)="runTest()" data-step-focus>
+                <svg class="w-3 h-3" [class.animate-spin]="testing()" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                Re-test
+              </button>
+            </div>
+
+            <div aria-live="polite">
+              @if (testing()) {
+                <div class="flex items-center gap-2 text-xs text-kymo-muted py-6 justify-center">
+                  <span class="w-3 h-3 border border-kymo-rule border-t-kymo-amber rounded-full animate-spin" aria-hidden="true"></span>
+                  Testing {{ buildInput().name }}…
+                </div>
+              } @else if (testError()) {
+                <div class="border border-kymo-danger/50 border-l-2 border-l-kymo-danger px-3 py-2.5 text-xs" role="alert">
+                  <span class="text-kymo-danger font-semibold tracking-[0.08em] mr-2">ERR</span>
+                  <span class="text-kymo-ink">{{ testError() }}</span>
+                </div>
+              } @else if (testResult(); as r) {
+                <ul class="border border-kymo-rule divide-y divide-kymo-rule">
+                  @for (c of r.checks; track $index) {
+                    <li class="flex items-start gap-3 px-3 py-2">
+                      <span class="w-5 h-5 flex-none flex items-center justify-center border text-[11px] font-semibold" [class]="checkClass(c)" aria-hidden="true">{{ checkIcon(c) }}</span>
+                      <div class="min-w-0 flex-1">
+                        <p class="text-xs text-kymo-ink">
+                          {{ c.name }}
+                          <span class="sr-only">: {{ checkTone(c) === 'ok' ? 'passed' : checkTone(c) === 'warn' ? 'warning' : 'failed' }}</span>
+                        </p>
+                        @if (c.detail) {
+                          <p class="text-xs mt-0.5 break-words" [class]="checkTone(c) === 'fail' ? 'text-kymo-danger' : 'text-kymo-muted'">{{ c.detail }}</p>
+                        }
+                      </div>
+                    </li>
+                  } @empty {
+                    <li class="px-3 py-2 text-xs text-kymo-faint">No checks reported.</li>
+                  }
+                </ul>
+                <p class="text-xs mt-3" [class]="r.ok ? 'text-kymo-running' : 'text-kymo-danger'">
+                  @if (r.ok) {
+                    Connection OK. {{ isEdit() ? 'Save to apply the changes.' : 'Save to start recording.' }}
+                  } @else {
+                    The test failed. You can fix the connection, or save anyway — the source keeps retrying in the background.
+                  }
+                </p>
+              }
+            </div>
+
+            <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs border-t border-kymo-rule pt-3">
+              <dt class="k-label">name</dt><dd class="text-kymo-ink">{{ buildInput().name }}</dd>
+              <dt class="k-label">type</dt><dd class="text-kymo-ink">{{ type() }}</dd>
+              @if (type() === 'docker') {
+                <dt class="k-label">socket</dt><dd class="text-kymo-ink break-all">{{ socket() || 'server default' }}</dd>
+              } @else {
+                <dt class="k-label">kubeconfig</dt>
+                <dd class="text-kymo-ink break-all">
+                  @if (kubeMode() === 'path') {
+                    {{ kubeconfigPath() || 'server default' }}
+                  } @else {
+                    {{ kubeconfigText().trim() ? 'uploaded (' + (fileLabel() || 'pasted') + ')' : 'stored upload (unchanged)' }}
+                  }
+                </dd>
+                <dt class="k-label">context</dt><dd class="text-kymo-ink">{{ context() || 'current' }}</dd>
+              }
+              <dt class="k-label">read-only</dt><dd [class]="readOnly() ? 'text-kymo-amber' : 'text-kymo-ink'">{{ readOnly() ? 'yes' : 'no' }}</dd>
+            </dl>
+
+            @if (saveError()) {
+              <div class="border border-kymo-danger/50 border-l-2 border-l-kymo-danger px-3 py-2.5 text-xs" role="alert">
+                <span class="text-kymo-danger font-semibold tracking-[0.08em] mr-2">ERR</span>
+                <span class="text-kymo-ink">{{ saveError() }}</span>
+              </div>
+            }
+          </div>
+        }
+      }
+    </div>
+
+    <!-- Footer -->
+    <div class="px-5 py-3 border-t border-kymo-rule flex items-center gap-2 flex-none">
+      @if (step() > 1 && !(isEdit() && step() === 2)) {
+        <button type="button" class="k-btn" (click)="back()" [disabled]="saving()">← Back</button>
+      }
+      <span class="flex-1"></span>
+      <button type="button" class="k-btn" (click)="closed.emit()">Cancel</button>
+      @switch (step()) {
+        @case (1) {
+          <button type="button" class="k-btn k-btn-primary" [disabled]="!type()" (click)="next()">Next →</button>
+        }
+        @case (2) {
+          <button type="button" class="k-btn k-btn-primary" (click)="next()">Test connection →</button>
+        }
+        @case (3) {
+          @if (canSaveAnyway()) {
+            <button type="button" class="k-btn" (click)="save()" title="Save even though the test failed; the source retries in the background">Save anyway</button>
+          }
+          <button type="button" class="k-btn k-btn-primary" [disabled]="!canSave()" (click)="save()">
+            @if (saving()) {
+              <span class="w-3 h-3 border border-kymo-rule border-t-kymo-amber rounded-full animate-spin" aria-hidden="true"></span>
+            }
+            {{ isEdit() ? 'Save' : 'Save and start' }}
+          </button>
+        }
+      }
+    </div>
+  </div>
+</div>

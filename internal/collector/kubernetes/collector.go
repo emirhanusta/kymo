@@ -6,7 +6,6 @@ package kubernetes
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,9 +19,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/emirhanusta/kymo/internal/collector"
+	"github.com/emirhanusta/kymo/internal/kube"
 	"github.com/emirhanusta/kymo/internal/model"
 )
 
@@ -78,6 +77,7 @@ type Collector struct {
 	log            *zap.Logger
 	sourceName     string
 	kubeconfigPath string
+	kubeconfigData []byte
 	kubeContext    string
 	pollInterval   time.Duration
 
@@ -103,9 +103,10 @@ type Collector struct {
 // New creates a new Kubernetes Collector.
 //   - sourceName: human-readable source identifier (e.g. "prod-k8s"); used to tag every event.
 //   - kubeconfigPath: path to a kubeconfig file, or "" to use in-cluster credentials then ~/.kube/config.
+//   - kubeconfigData: raw kubeconfig content (takes precedence over kubeconfigPath when non-empty).
 //   - kubeContext: named context in the kubeconfig to use, or "" for the current-context.
 //   - pollInterval: how often to query the metrics-server. Pass 0 for the default (30 s).
-func New(log *zap.Logger, sourceName, kubeconfigPath, kubeContext string, pollInterval time.Duration) *Collector {
+func New(log *zap.Logger, sourceName, kubeconfigPath string, kubeconfigData []byte, kubeContext string, pollInterval time.Duration) *Collector {
 	if pollInterval <= 0 {
 		pollInterval = defaultPollInterval
 	}
@@ -113,6 +114,7 @@ func New(log *zap.Logger, sourceName, kubeconfigPath, kubeContext string, pollIn
 		log:            log,
 		sourceName:     sourceName,
 		kubeconfigPath: kubeconfigPath,
+		kubeconfigData: kubeconfigData,
 		kubeContext:    kubeContext,
 		pollInterval:   pollInterval,
 		pods:           make(map[string]*podRecord),
@@ -268,37 +270,10 @@ func (c *Collector) Stats(ctx context.Context, containerID string) (*model.Resou
 // Rest config
 // ---------------------------------------------------------------------------
 
-// buildRestConfig returns a *rest.Config trying in order:
-//  1. Explicit kubeconfigPath / kubeContext combination (if kubeconfigPath non-empty).
-//  2. In-cluster service-account credentials (KUBERNETES_SERVICE_HOST set).
-//  3. Default kubeconfig from KUBECONFIG env var or ~/.kube/config,
-//     optionally selecting kubeContext.
+// buildRestConfig resolves the cluster connection: uploaded kubeconfig content,
+// then an explicit kubeconfig path, then in-cluster credentials / default rules.
 func (c *Collector) buildRestConfig() (*rest.Config, error) {
-	// When a kubeContext is specified, use the deferred-loading client config so
-	// the context override is honoured.
-	if c.kubeconfigPath != "" || c.kubeContext != "" {
-		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-		if c.kubeconfigPath != "" {
-			loadingRules.ExplicitPath = c.kubeconfigPath
-		}
-		overrides := &clientcmd.ConfigOverrides{}
-		if c.kubeContext != "" {
-			overrides.CurrentContext = c.kubeContext
-		}
-		return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			loadingRules, overrides,
-		).ClientConfig()
-	}
-
-	cfg, err := rest.InClusterConfig()
-	if err == nil {
-		return cfg, nil
-	}
-	if !errors.Is(err, rest.ErrNotInCluster) {
-		return nil, err
-	}
-	// Not running inside a cluster – try default kubeconfig.
-	return clientcmd.BuildConfigFromFlags("", "")
+	return kube.RestConfig(c.kubeconfigPath, c.kubeconfigData, c.kubeContext)
 }
 
 // checkMetricsAvailable returns true if the metrics.k8s.io/v1beta1 API group

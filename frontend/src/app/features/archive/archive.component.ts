@@ -122,7 +122,7 @@ export class ArchiveComponent {
         this.toast.success(res?.message || ok);
         this.loadData();
       },
-      error: err => this.toast.error(err?.error?.message || fail),
+      error: err => this.toast.apiError(err, fail),
     });
   }
 }

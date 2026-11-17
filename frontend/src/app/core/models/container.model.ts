@@ -43,6 +43,10 @@ export interface ContainerQuery {
   source?: string;
   q?: string;
   status?: ContainerStatusFilter;
+  /** Exact match on workload_kind (e.g. 'Deployment', 'Compose'). */
+  workload_kind?: string;
+  /** Exact match on workload_name. */
+  workload?: string;
 }
 
 export interface ResourceSample {
@@ -92,6 +96,8 @@ export interface LifecycleEvent {
 
 export interface DeploymentInfo {
   name: string;
+  /** Not sent by every backend version; the UI falls back to the selected / default source. */
+  source_name?: string;
   namespace: string;
   replicas: number;
   ready_replicas: number;
@@ -104,13 +110,84 @@ export interface ActionResult {
   message: string;
 }
 
+export type SourceType = 'docker' | 'kubernetes';
+
+export interface SourceSettings {
+  socket?: string;
+  kubeconfig_path?: string;
+  kube_context?: string;
+  kubeconfig_uploaded: boolean;
+  poll_interval_seconds?: number;
+}
+
 export interface SourceStatus {
   name: string;
-  type: 'docker' | 'kubernetes';
-  status: 'connected' | 'connecting' | 'error';
+  type: SourceType;
+  /** `config` = defined in config.yaml (read-only in the UI); `user` = created through the UI/API. */
+  origin: 'config' | 'user';
+  enabled: boolean;
+  /** Management actions (start/stop/scale/…) are refused for read-only sources. */
+  read_only: boolean;
+  status: 'connecting' | 'connected' | 'error' | 'disabled';
   last_error?: string;
+  connected_at?: string;
   container_count: number;
   running_count: number;
+  settings: SourceSettings;
+}
+
+/** Body for POST /sources, PUT /sources/:name and POST /sources/test. */
+export interface SourceInput {
+  name: string;
+  type: SourceType;
+  enabled?: boolean;
+  read_only: boolean;
+  socket?: string;
+  kubeconfig_path?: string;
+  /** Raw kubeconfig YAML. Omit on update to keep the stored one. */
+  kubeconfig?: string;
+  kube_context?: string;
+  poll_interval_seconds?: number;
+}
+
+export interface SourceCheck {
+  name: string;
+  ok: boolean;
+  warning?: boolean;
+  detail?: string;
+}
+
+export interface SourceTestResult {
+  ok: boolean;
+  checks: SourceCheck[];
+}
+
+export interface KubeContext {
+  name: string;
+  cluster: string;
+  server: string;
+  namespace?: string;
+}
+
+export interface KubeContextList {
+  contexts: KubeContext[];
+  current: string;
+}
+
+export interface ServerMeta {
+  version: string;
+  secret_key_configured: boolean;
+}
+
+/** Lifecycle event types accepted by GET /events/recent?type=. */
+export type LifecycleEventType = 'start' | 'stop' | 'die' | 'crash' | 'oom' | 'pause' | 'resume';
+
+export interface RecentEventsQuery {
+  limit?: number;
+  source?: string;
+  type?: LifecycleEventType | '';
+  /** RFC3339; only events strictly older than this are returned. */
+  before?: string;
 }
 
 export interface CronJobExecution {

@@ -17,6 +17,10 @@ type Config struct {
 	Database  DatabaseConfig  `mapstructure:"database"`
 	Collector CollectorConfig `mapstructure:"collector"`
 	Log       LogConfig       `mapstructure:"log"`
+
+	// SecretKey encrypts kubeconfigs uploaded through the UI (env KYMO_SECRET_KEY).
+	// Without it, Kubernetes sources can only reference kubeconfig files on the server.
+	SecretKey string `mapstructure:"secret_key"`
 }
 
 // ServerConfig controls the HTTP server binding and timeout behaviour.
@@ -78,6 +82,10 @@ type Source struct {
 	// PollInterval overrides the global stats poll interval for this source.
 	// Zero means use the global default.
 	PollInterval time.Duration `mapstructure:"poll_interval"`
+
+	// ReadOnly disables management actions (start/stop/kill, delete pod,
+	// scale, rollout restart) for this source.
+	ReadOnly bool `mapstructure:"read_only"`
 }
 
 // CollectorConfig controls which runtime collectors are enabled and how they behave.
@@ -133,6 +141,7 @@ func Load() (*Config, error) {
 	v.SetDefault("collector.scoring_interval", "60s")
 	v.SetDefault("collector.scoring_window", "24h")
 
+	v.SetDefault("secret_key", "")
 	v.SetDefault("log.level", "info")
 	v.SetDefault("log.format", "json")
 

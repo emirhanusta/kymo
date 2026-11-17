@@ -1,7 +1,7 @@
 import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
 import { DialogDirective } from '../../directives/dialog.directive';
 
-/** Generic confirmation modal (Escape / backdrop = cancel, primary button autofocused). */
+/** Generic confirmation modal (Escape / backdrop = cancel, primary button autofocused). Extra controls can be projected. */
 @Component({
   selector: 'app-confirm-dialog',
   standalone: true,
@@ -19,6 +19,7 @@ import { DialogDirective } from '../../directives/dialog.directive';
           <h3 id="confirm-dialog-title" class="text-sm font-semibold uppercase tracking-[0.08em] text-kymo-ink">{{ title() }}</h3>
           <p class="text-sm text-kymo-muted mt-1.5 whitespace-pre-line">{{ message() }}</p>
         </div>
+        <ng-content />
         <div class="flex justify-end gap-2 pt-1">
           <button type="button" class="k-btn" (click)="cancelled.emit()">
             Cancel

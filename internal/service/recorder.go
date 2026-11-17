@@ -99,29 +99,62 @@ type RecorderService interface {
 	// given source and namespace.
 	ListCronJobs(ctx context.Context, sourceName, namespace string) ([]*model.CronJobExecution, error)
 
-	// GetRecentEvents returns the n most recent lifecycle events across all
-	// containers (optionally one source), ordered by occurred_at descending.
-	// Limit is clamped to [1, 200].
-	GetRecentEvents(ctx context.Context, limit int, sourceName string) ([]*model.LifecycleEvent, error)
+	// GetRecentEvents returns the most recent lifecycle events matching q,
+	// ordered by occurred_at descending. q.Limit is clamped to [1, 200].
+	GetRecentEvents(ctx context.Context, q repository.EventQuery) ([]*model.LifecycleEvent, error)
+
+	// --- Source registry ---
+
+	// AttachSource registers a source and its collector. c may be nil when the
+	// collector could not be built (initErr explains why). If Run is already
+	// active an enabled source starts immediately; otherwise it starts with Run.
+	// An existing source with the same name is detached first.
+	AttachSource(spec model.SourceSpec, c collector.Collector, initErr error)
+	// DetachSource stops a source's collector and removes it from the registry.
+	// Recorded data is kept. It is a no-op for unknown names.
+	DetachSource(name string)
+	// Source returns the registered spec for name.
+	Source(name string) (model.SourceSpec, bool)
+	// IsReadOnly reports whether management actions are disabled for a source.
+	IsReadOnly(name string) bool
+	// PurgeSource permanently deletes every container, event, sample, score and
+	// CronJob execution recorded for a source.
+	PurgeSource(ctx context.Context, name string) error
 }
 
-// SourceStatus holds the live status of a single collector source.
-// It is returned by ListSources and consumed by the frontend's source selector.
+// SourceSettings are the non-secret connection settings of a source.
+type SourceSettings struct {
+	Socket              string `json:"socket,omitempty"`
+	KubeconfigPath      string `json:"kubeconfig_path,omitempty"`
+	KubeContext         string `json:"kube_context,omitempty"`
+	KubeconfigUploaded  bool   `json:"kubeconfig_uploaded"`
+	PollIntervalSeconds int    `json:"poll_interval_seconds,omitempty"`
+}
+
+// SourceStatus holds the configuration and live status of a collector source.
 type SourceStatus struct {
 	// Name is the human-readable source identifier (e.g. "local-docker").
 	Name string `json:"name"`
 	// Type is the runtime type: "docker" or "kubernetes".
 	Type string `json:"type"`
+	// Origin is "config" (config.yaml, locked) or "user" (created via the API).
+	Origin string `json:"origin"`
+	// Enabled is false when the source is paused.
+	Enabled bool `json:"enabled"`
+	// ReadOnly disables management actions (kill, delete pod, scale, …).
+	ReadOnly bool `json:"read_only"`
 	// ContainerCount is the total number of known containers from this source.
 	ContainerCount int `json:"container_count"`
 	// RunningCount is the number of running containers from this source.
 	RunningCount int `json:"running_count"`
-	// Status is the collector connection state: "connecting", "connected" or "error".
+	// Status is "connecting", "connected", "error" or "disabled".
 	Status string `json:"status"`
 	// LastError is the most recent collector start error, if any.
 	LastError string `json:"last_error,omitempty"`
 	// ConnectedAt is when the collector last started successfully.
 	ConnectedAt *time.Time `json:"connected_at,omitempty"`
+	// Settings are the connection settings (never includes kubeconfig content).
+	Settings SourceSettings `json:"settings"`
 }
 
 // Source connection states reported by ListSources.
@@ -129,6 +162,7 @@ const (
 	SourceConnecting = "connecting"
 	SourceConnected  = "connected"
 	SourceError      = "error"
+	SourceDisabled   = "disabled"
 )
 
 // ScoringConfig controls the periodic stability scoring loop.
@@ -148,8 +182,6 @@ const rawResourceRange = 3 * time.Hour
 
 // recorderService is the concrete implementation of RecorderService.
 type recorderService struct {
-	collectors []collector.Collector
-	sources    []SourceStatus // static list built from config at construction time
 	containers repository.ContainerRepository
 	events     repository.EventRepository
 	resources  repository.ResourceRepository
@@ -163,9 +195,27 @@ type recorderService struct {
 	// synchronously by IgnoreContainer / RestoreContainer / HardDeleteContainer.
 	ignoreList sync.Map // map[string]struct{}
 
-	// health tracks the connection state of each collector, indexed like sources.
-	healthMu sync.RWMutex
-	health   []sourceHealth
+	// merged carries events from every running collector to the dispatch loop.
+	merged chan collector.CollectorEvent
+
+	// mu guards entries, order and runCtx.
+	mu      sync.RWMutex
+	entries map[string]*sourceEntry
+	order   []string
+	runCtx  context.Context // non-nil while Run is active
+}
+
+// sourceEntry is one registered source and the lifecycle of its collector.
+type sourceEntry struct {
+	spec      model.SourceSpec
+	collector collector.Collector // nil when it could not be built
+	initErr   error
+
+	cancel context.CancelFunc // non-nil while started
+	done   chan struct{}      // closed when the start/retry goroutine exits
+
+	hmu    sync.Mutex
+	health sourceHealth
 }
 
 type sourceHealth struct {
@@ -174,19 +224,21 @@ type sourceHealth struct {
 	connectedAt *time.Time
 }
 
-// CollectorSource groups a collector with its configured source metadata so the
-// recorder can tag live counts against the right source.
-type CollectorSource struct {
-	Collector collector.Collector
-	Name      string
-	Type      string
+func (e *sourceEntry) setHealth(h sourceHealth) {
+	e.hmu.Lock()
+	e.health = h
+	e.hmu.Unlock()
 }
 
-// NewRecorderService constructs a RecorderService wired to the provided collectors
-// and repository implementations. All dependencies are required; zero values in
-// scoring fall back to a 60s interval and a 24h window.
+func (e *sourceEntry) getHealth() sourceHealth {
+	e.hmu.Lock()
+	defer e.hmu.Unlock()
+	return e.health
+}
+
+// NewRecorderService constructs a RecorderService. Sources are registered with
+// AttachSource. Zero values in scoring fall back to a 60s interval and a 24h window.
 func NewRecorderService(
-	sources []CollectorSource,
 	containers repository.ContainerRepository,
 	events repository.EventRepository,
 	resources repository.ResourceRepository,
@@ -195,14 +247,6 @@ func NewRecorderService(
 	scoring ScoringConfig,
 	log *zap.Logger,
 ) RecorderService {
-	collectors := make([]collector.Collector, len(sources))
-	staticSources := make([]SourceStatus, len(sources))
-	health := make([]sourceHealth, len(sources))
-	for i, s := range sources {
-		collectors[i] = s.Collector
-		staticSources[i] = SourceStatus{Name: s.Name, Type: s.Type}
-		health[i] = sourceHealth{status: SourceConnecting}
-	}
 	if scoring.Interval <= 0 {
 		scoring.Interval = 60 * time.Second
 	}
@@ -210,8 +254,6 @@ func NewRecorderService(
 		scoring.Window = 24 * time.Hour
 	}
 	return &recorderService{
-		collectors: collectors,
-		sources:    staticSources,
 		containers: containers,
 		events:     events,
 		resources:  resources,
@@ -220,83 +262,199 @@ func NewRecorderService(
 		scorer:     stability.NewScorer(events, resources, scores, log),
 		scoring:    scoring,
 		log:        log,
-		health:     health,
+		merged:     make(chan collector.CollectorEvent, 512),
+		entries:    make(map[string]*sourceEntry),
 	}
 }
 
-// Run starts every registered collector, merges their event channels via a fan-in
-// goroutine, and dispatches each CollectorEvent to the appropriate handler.
+// Run starts every registered source, then dispatches collector events until
+// ctx is cancelled. Sources attached while Run is active start immediately.
 //
-// A collector that fails to start (e.g. an unreachable cluster) does not stop the
-// others: it is retried in the background with exponential back-off and its
-// state is reported through ListSources. Run returns when ctx is cancelled.
+// A collector that fails to start (e.g. an unreachable cluster) does not stop
+// the others: it is retried in the background with exponential back-off and
+// its state is reported through ListSources.
 func (s *recorderService) Run(ctx context.Context) error {
+	s.mu.Lock()
+	s.runCtx = ctx
+	for _, name := range s.order {
+		s.startEntry(s.entries[name])
+	}
+	n := len(s.order)
+	s.mu.Unlock()
+
 	s.log.Info("recorder starting",
-		zap.Int("collectors", len(s.collectors)),
+		zap.Int("sources", n),
 		zap.Duration("scoring_interval", s.scoring.Interval),
 		zap.Duration("scoring_window", s.scoring.Window),
 	)
 
-	var startWG sync.WaitGroup
-	for i := range s.collectors {
-		startWG.Add(1)
-		go func(i int) {
-			defer startWG.Done()
-			s.startWithRetry(ctx, i)
-		}(i)
-	}
-
 	defer func() {
-		// Wait for in-flight start attempts to observe cancellation before
-		// stopping, so Stop never races with Start.
-		startWG.Wait()
-		for _, c := range s.collectors {
-			if err := c.Stop(); err != nil {
-				s.log.Warn("error stopping collector", zap.Error(err))
-			}
+		s.mu.Lock()
+		entries := make([]*sourceEntry, 0, len(s.order))
+		for _, name := range s.order {
+			entries = append(entries, s.entries[name])
+		}
+		s.runCtx = nil
+		s.mu.Unlock()
+		for _, e := range entries {
+			s.stopEntry(e)
 		}
 	}()
 
 	go s.scoringLoop(ctx)
 
-	merged := s.fanIn(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			s.log.Info("recorder stopping")
 			return ctx.Err()
-		case event, ok := <-merged:
-			if !ok {
-				return nil
-			}
+		case event := <-s.merged:
 			s.dispatch(ctx, event)
 		}
 	}
 }
 
-// startWithRetry starts collector i, retrying with exponential back-off (5s up
+// AttachSource registers (or replaces) a source; see RecorderService.
+func (s *recorderService) AttachSource(spec model.SourceSpec, c collector.Collector, initErr error) {
+	s.DetachSource(spec.Name)
+
+	e := &sourceEntry{spec: spec, collector: c, initErr: initErr}
+	switch {
+	case !spec.Enabled:
+		e.health = sourceHealth{status: SourceDisabled}
+	case c == nil:
+		msg := "collector unavailable"
+		if initErr != nil {
+			msg = initErr.Error()
+		}
+		e.health = sourceHealth{status: SourceError, lastError: msg}
+	default:
+		e.health = sourceHealth{status: SourceConnecting}
+	}
+
+	s.mu.Lock()
+	s.entries[spec.Name] = e
+	s.order = append(s.order, spec.Name)
+	if s.runCtx != nil {
+		s.startEntry(e)
+	}
+	s.mu.Unlock()
+	s.log.Info("source attached", zap.String("source", spec.Name), zap.String("type", spec.Type),
+		zap.String("origin", spec.Origin), zap.Bool("enabled", spec.Enabled), zap.Bool("read_only", spec.ReadOnly))
+}
+
+// DetachSource stops and unregisters a source; see RecorderService.
+func (s *recorderService) DetachSource(name string) {
+	s.mu.Lock()
+	e, ok := s.entries[name]
+	if ok {
+		delete(s.entries, name)
+		s.order = without(s.order, name)
+	}
+	s.mu.Unlock()
+	if ok {
+		s.stopEntry(e)
+		s.log.Info("source detached", zap.String("source", name))
+	}
+}
+
+// Source returns a copy of the registered spec.
+func (s *recorderService) Source(name string) (model.SourceSpec, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if e, ok := s.entries[name]; ok {
+		return e.spec, true
+	}
+	return model.SourceSpec{}, false
+}
+
+// IsReadOnly reports whether management actions are disabled for a source.
+func (s *recorderService) IsReadOnly(name string) bool {
+	spec, ok := s.Source(name)
+	return ok && spec.ReadOnly
+}
+
+// PurgeSource deletes everything recorded for a source.
+func (s *recorderService) PurgeSource(ctx context.Context, name string) error {
+	n, err := s.containers.DeleteBySource(ctx, name)
+	if err != nil {
+		return err
+	}
+	if _, err := s.cronJobs.DeleteBySource(ctx, name); err != nil {
+		return err
+	}
+	s.log.Info("source history purged", zap.String("source", name), zap.Int64("containers", n))
+	return nil
+}
+
+// startEntry launches an enabled source's collector. Caller holds s.mu and
+// s.runCtx is non-nil.
+func (s *recorderService) startEntry(e *sourceEntry) {
+	if !e.spec.Enabled || e.collector == nil || e.cancel != nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(s.runCtx)
+	e.cancel = cancel
+	e.done = make(chan struct{})
+
+	go s.forward(ctx, e.collector.Events())
+	go func() {
+		defer close(e.done)
+		s.startWithRetry(ctx, e)
+	}()
+}
+
+// stopEntry cancels a source's start/retry loop, waits for it, and stops the
+// collector (which closes its events channel and ends forwarding).
+func (s *recorderService) stopEntry(e *sourceEntry) {
+	if e.cancel == nil {
+		return
+	}
+	e.cancel()
+	<-e.done
+	if err := e.collector.Stop(); err != nil {
+		s.log.Warn("error stopping collector", zap.String("source", e.spec.Name), zap.Error(err))
+	}
+	e.cancel = nil
+}
+
+// forward copies a collector's events onto the merged channel until the
+// collector closes its channel.
+func (s *recorderService) forward(ctx context.Context, ch <-chan collector.CollectorEvent) {
+	for event := range ch {
+		select {
+		case s.merged <- event:
+		case <-ctx.Done():
+			// Drain so the collector never blocks while shutting down.
+			for range ch {
+			}
+			return
+		}
+	}
+}
+
+// startWithRetry starts a collector, retrying with exponential back-off (5s up
 // to 5m) until it succeeds or ctx is cancelled.
-func (s *recorderService) startWithRetry(ctx context.Context, i int) {
+func (s *recorderService) startWithRetry(ctx context.Context, e *sourceEntry) {
 	const (
 		initialDelay = 5 * time.Second
 		maxDelay     = 5 * time.Minute
 	)
-	src := s.sources[i]
 	delay := initialDelay
 	for {
-		err := s.collectors[i].Start(ctx)
+		err := e.collector.Start(ctx)
 		if err == nil {
 			now := time.Now().UTC()
-			s.setHealth(i, sourceHealth{status: SourceConnected, connectedAt: &now})
+			e.setHealth(sourceHealth{status: SourceConnected, connectedAt: &now})
 			return
 		}
 		if ctx.Err() != nil {
 			return
 		}
-		s.setHealth(i, sourceHealth{status: SourceError, lastError: err.Error()})
+		e.setHealth(sourceHealth{status: SourceError, lastError: err.Error()})
 		s.log.Warn("collector failed to start; will retry",
-			zap.String("source", src.Name),
-			zap.String("type", src.Type),
+			zap.String("source", e.spec.Name),
+			zap.String("type", e.spec.Type),
 			zap.Duration("retry_in", delay),
 			zap.Error(err),
 		)
@@ -312,30 +470,14 @@ func (s *recorderService) startWithRetry(ctx context.Context, i int) {
 	}
 }
 
-func (s *recorderService) setHealth(i int, h sourceHealth) {
-	s.healthMu.Lock()
-	s.health[i] = h
-	s.healthMu.Unlock()
-}
-
-// fanIn merges all collector event channels into a single channel using one
-// goroutine per collector.
-func (s *recorderService) fanIn(ctx context.Context) <-chan collector.CollectorEvent {
-	merged := make(chan collector.CollectorEvent, 512)
-
-	for _, c := range s.collectors {
-		go func(ch <-chan collector.CollectorEvent) {
-			for event := range ch {
-				select {
-				case merged <- event:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(c.Events())
+func without(list []string, name string) []string {
+	out := make([]string, 0, len(list))
+	for _, n := range list {
+		if n != name {
+			out = append(out, n)
+		}
 	}
-
-	return merged
+	return out
 }
 
 // dispatch routes a collector event to the correct handler. Events for ignored
@@ -578,15 +720,12 @@ func (s *recorderService) ListContainersPaged(ctx context.Context, f repository.
 }
 
 func (s *recorderService) ListSources(ctx context.Context) ([]SourceStatus, error) {
-	// Get all containers to compute live counts per source.
 	all, err := s.containers.FindAll(ctx, repository.ContainerFilter{})
 	if err != nil {
 		return nil, err
 	}
-
-	// Build count maps.
-	totalCounts := make(map[string]int, len(s.sources))
-	runningCounts := make(map[string]int, len(s.sources))
+	totalCounts := make(map[string]int)
+	runningCounts := make(map[string]int)
 	for _, c := range all {
 		totalCounts[c.SourceName]++
 		if c.CurrentStatus == model.StatusRunning {
@@ -594,20 +733,31 @@ func (s *recorderService) ListSources(ctx context.Context) ([]SourceStatus, erro
 		}
 	}
 
-	s.healthMu.RLock()
-	defer s.healthMu.RUnlock()
-	result := make([]SourceStatus, len(s.sources))
-	for i, src := range s.sources {
-		h := s.health[i]
-		result[i] = SourceStatus{
-			Name:           src.Name,
-			Type:           src.Type,
-			ContainerCount: totalCounts[src.Name],
-			RunningCount:   runningCounts[src.Name],
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]SourceStatus, 0, len(s.order))
+	for _, name := range s.order {
+		e := s.entries[name]
+		h := e.getHealth()
+		result = append(result, SourceStatus{
+			Name:           e.spec.Name,
+			Type:           e.spec.Type,
+			Origin:         e.spec.Origin,
+			Enabled:        e.spec.Enabled,
+			ReadOnly:       e.spec.ReadOnly,
+			ContainerCount: totalCounts[name],
+			RunningCount:   runningCounts[name],
 			Status:         h.status,
 			LastError:      h.lastError,
 			ConnectedAt:    h.connectedAt,
-		}
+			Settings: SourceSettings{
+				Socket:              e.spec.Socket,
+				KubeconfigPath:      e.spec.KubeconfigPath,
+				KubeContext:         e.spec.KubeContext,
+				KubeconfigUploaded:  len(e.spec.Kubeconfig) > 0 || len(e.spec.KubeconfigEnc) > 0,
+				PollIntervalSeconds: int(e.spec.PollInterval / time.Second),
+			},
+		})
 	}
 	return result, nil
 }
@@ -699,9 +849,9 @@ func (s *recorderService) ListCronJobs(ctx context.Context, sourceName, namespac
 	return s.cronJobs.FindLatestPerCronJob(ctx, sourceName, namespace)
 }
 
-func (s *recorderService) GetRecentEvents(ctx context.Context, limit int, sourceName string) ([]*model.LifecycleEvent, error) {
-	if limit <= 0 || limit > 200 {
-		limit = 20
+func (s *recorderService) GetRecentEvents(ctx context.Context, q repository.EventQuery) ([]*model.LifecycleEvent, error) {
+	if q.Limit <= 0 || q.Limit > 200 {
+		q.Limit = 20
 	}
-	return s.events.FindRecent(ctx, limit, sourceName)
+	return s.events.FindRecent(ctx, q)
 }

@@ -12,9 +12,9 @@ export function formatRate(bytesPerSec: number | null | undefined): string {
   return b === '—' ? b : `${b}/s`;
 }
 
-/** Route to a container's detail page; kubernetes containers live under /pods. */
-export function containerRoute(id: string, runtime?: string | null): string[] {
-  return [runtime === 'kubernetes' ? '/pods' : '/containers', id];
+/** Route to a container's detail page (Docker and Kubernetes alike). */
+export function containerRoute(id: string, _runtime?: string | null): string[] {
+  return ['/containers', id];
 }
 
 /** Shorten 64-char docker IDs for display fallbacks. */

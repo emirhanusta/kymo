@@ -146,7 +146,7 @@ export class DashboardComponent {
 
   selectSource(card: SourceCard): void {
     this.sourceSvc.select(card.name);
-    this.router.navigate([card.type === 'kubernetes' ? '/pods' : '/containers']);
+    this.router.navigate(['/containers']);
   }
 
   loadData(): void {

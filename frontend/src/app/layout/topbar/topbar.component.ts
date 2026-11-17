@@ -17,17 +17,27 @@ import { CommandPaletteComponent } from '../command-palette/command-palette.comp
 export interface NavTab {
   path: string;
   label: string;
-  showFor: 'always' | 'docker' | 'kubernetes';
 }
 
-/** Static tab list; also used by the command palette's "pages" section. */
+/** Fixed main navigation (digit hotkeys 1–6 in this order). The source selector only filters data. */
 export const NAV_TABS: NavTab[] = [
-  { path: '/dashboard',   label: 'Overview',    showFor: 'always' },
-  { path: '/containers',  label: 'Containers',  showFor: 'docker' },
-  { path: '/pods',        label: 'Pods',        showFor: 'kubernetes' },
-  { path: '/cronjobs',    label: 'CronJobs',    showFor: 'kubernetes' },
-  { path: '/deployments', label: 'Deployments', showFor: 'kubernetes' },
-  { path: '/archive',     label: 'Archive',     showFor: 'always' },
+  { path: '/dashboard',  label: 'Overview' },
+  { path: '/containers', label: 'Containers' },
+  { path: '/workloads',  label: 'Workloads' },
+  { path: '/events',     label: 'Events' },
+  { path: '/sources',    label: 'Sources' },
+  { path: '/archive',    label: 'Archive' },
+];
+
+/** Command palette "pages": the tabs plus deep links into sub-views. */
+export const PALETTE_PAGES: NavTab[] = [
+  ...NAV_TABS,
+  { path: '/containers?runtime=docker',     label: 'Docker containers' },
+  { path: '/containers?runtime=kubernetes', label: 'Kubernetes containers' },
+  { path: '/workloads?view=deployments',    label: 'Deployments' },
+  { path: '/workloads?view=cronjobs',       label: 'CronJobs' },
+  { path: '/workloads?view=compose',        label: 'Compose projects' },
+  { path: '/sources?add=1',                 label: 'Add source' },
 ];
 
 /** True when a keystroke should be left alone (typing in a field, or a modal is open). */
@@ -64,12 +74,8 @@ export class TopbarComponent {
 
   readonly isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
-  /** Hide Docker-only / Kubernetes-only tabs when a source of the other type is selected. */
-  tabs = computed(() => {
-    const type = this.sourceState.selectedSourceInfo()?.type;
-    if (!type) return NAV_TABS;
-    return NAV_TABS.filter(t => t.showFor === 'always' || t.showFor === type);
-  });
+  readonly tabs = NAV_TABS;
+  readonly palettePages = PALETTE_PAGES;
 
   updatedLabel = computed(() => {
     const last = this.refreshSvc.lastUpdated();
@@ -147,10 +153,10 @@ export class TopbarComponent {
       return;
     }
 
-    // 1–6: switch tabs (by position among the visible tabs).
+    // 1–6: switch tabs.
     if (ev.ctrlKey || ev.metaKey || ev.altKey || !/^[1-6]$/.test(ev.key)) return;
     if (isTypingOrModal(ev)) return;
-    const tab = this.tabs()[+ev.key - 1];
+    const tab = this.tabs[+ev.key - 1];
     if (!tab) return;
     ev.preventDefault();
     this.router.navigateByUrl(tab.path);

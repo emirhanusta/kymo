@@ -3,9 +3,9 @@
   <!-- Left panel: deployment list (always visible) -->
   <div class="space-y-4 transition-all duration-300 w-full min-w-0" [class.lg:w-1/3]="selectedDeployment()">
 
-    <!-- Header + namespace selector -->
-    <app-page-header title="Deployments">
-      <ng-container subtitle>
+    <!-- Toolbar: count + namespace selector -->
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <p class="text-xs text-kymo-muted" aria-live="polite">
         @if (loading()) {
           Loading…
         } @else if (deployments().length > 0) {
@@ -13,13 +13,13 @@
         } @else {
           No deployments
         }
-      </ng-container>
+      </p>
       <app-namespace-selector
         [sourceName]="sourceSvc.selectedSource()"
         [selected]="selectedNamespace()"
         (namespaceChange)="onNamespaceChange($event)"
       />
-    </app-page-header>
+    </div>
 
     @if (error()) {
       <app-error-state message="Failed to load deployments" (retry)="loadData()" />
@@ -99,6 +99,8 @@
                       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
                     </svg>
                   </button>
+                } @else if (isReadOnly(dep)) {
+                  <app-read-only-tag />
                 } @else {
                   <button
                     type="button"
@@ -166,6 +168,12 @@
       </div>
 
       <!-- Actions row -->
+      @if (isReadOnly(selectedDeployment()!)) {
+      <div class="flex items-center gap-3 flex-wrap border-y border-kymo-rule py-3 text-xs text-kymo-muted">
+        <app-read-only-tag />
+        <span>Scaling and rollout restart are disabled for this source.</span>
+      </div>
+      } @else {
       <div class="flex items-center gap-2 flex-wrap border-y border-kymo-rule py-3">
         <span class="k-label mr-1">Replicas</span>
         <div class="flex items-stretch h-[1.875rem] border border-kymo-rule bg-kymo-deep" role="group" aria-label="Replica count">
@@ -205,6 +213,7 @@
           Restart
         </button>
       </div>
+      }
 
       @if (detailLoading()) {
         <app-skeleton [rows]="3" />

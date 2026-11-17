@@ -117,7 +117,9 @@
       </div>
     } @else if (!error()) {
       <div class="k-panel">
-        <app-empty-state icon="box" message="No sources configured" hint="Configure a Docker or Kubernetes source in the backend to start recording." />
+        <app-empty-state icon="box" message="No sources configured" hint="Add a Docker engine or Kubernetes cluster to start recording.">
+          <a routerLink="/sources" [queryParams]="{ add: 1 }" class="k-btn k-btn-primary k-btn-sm mt-4">Add a source</a>
+        </app-empty-state>
       </div>
     }
 

@@ -59,6 +59,9 @@ func (h *Handler) dockerAction(
 	if container == nil {
 		return
 	}
+	if h.guardReadOnly(c, sourceFor(c, container)) {
+		return
+	}
 	if container.Runtime != model.RuntimeDocker {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -106,6 +109,9 @@ func (h *Handler) RestartContainer(c *gin.Context) {
 		return
 	}
 	source := sourceFor(c, container)
+	if h.guardReadOnly(c, source) {
+		return
+	}
 
 	switch container.Runtime {
 	case model.RuntimeDocker:
@@ -268,7 +274,10 @@ func (h *Handler) ScaleDeployment(c *gin.Context) {
 	}
 	ns := c.Param("namespace")
 	name := c.Param("name")
-	source := c.Query("source")
+	source, ok := h.k8sTarget(c)
+	if !ok {
+		return
+	}
 	if err := h.mgmt.ScaleDeployment(c.Request.Context(), source, ns, name, body.Replicas); err != nil {
 		h.log.Error("scale deployment failed", zap.String("ns", ns), zap.String("name", name), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
@@ -283,7 +292,10 @@ func (h *Handler) ScaleDeployment(c *gin.Context) {
 func (h *Handler) RestartDeployment(c *gin.Context) {
 	ns := c.Param("namespace")
 	name := c.Param("name")
-	source := c.Query("source")
+	source, ok := h.k8sTarget(c)
+	if !ok {
+		return
+	}
 	if err := h.mgmt.RestartDeployment(c.Request.Context(), source, ns, name); err != nil {
 		h.log.Error("restart deployment failed", zap.String("ns", ns), zap.String("name", name), zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
@@ -425,6 +437,21 @@ func (h *Handler) GetDeploymentDetail(c *gin.Context) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// k8sTarget resolves the cluster a deployment action targets (?source= or the
+// first cluster) and rejects read-only sources. It writes the error response
+// and returns ok=false on failure.
+func (h *Handler) k8sTarget(c *gin.Context) (string, bool) {
+	source, err := h.mgmt.ResolveK8sSource(c.Query("source"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": err.Error()})
+		return "", false
+	}
+	if h.guardReadOnly(c, source) {
+		return "", false
+	}
+	return source, true
+}
 
 // parseK8sID splits a Kubernetes container ID "namespace/pod-name/container-name"
 // into its three components.

@@ -12,18 +12,17 @@ import (
 	"syscall"
 	"time"
 
-	dockerclient "github.com/docker/docker/client"
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
+	"github.com/emirhanusta/kymo/internal/collector"
 	dockercollector "github.com/emirhanusta/kymo/internal/collector/docker"
 	k8scollector "github.com/emirhanusta/kymo/internal/collector/kubernetes"
 	"github.com/emirhanusta/kymo/internal/config"
 	httphandler "github.com/emirhanusta/kymo/internal/handler/http"
+	"github.com/emirhanusta/kymo/internal/model"
 	"github.com/emirhanusta/kymo/internal/repository/timescale"
+	"github.com/emirhanusta/kymo/internal/secret"
 	"github.com/emirhanusta/kymo/internal/service"
 	"github.com/emirhanusta/kymo/migrations"
 )
@@ -68,54 +67,9 @@ func main() {
 	}
 
 	// -------------------------------------------------------------------------
-	// Collectors — one per configured source
-	// -------------------------------------------------------------------------
-	var sources []service.CollectorSource
-
-	// Build clients for the management service, keyed by source name.
-	dockerClients := make(map[string]*dockerclient.Client)
-	k8sClients := make(map[string]kubernetes.Interface)
-	var dockerOrder, k8sOrder []string
-
-	for _, src := range cfg.Collector.Sources {
-		interval := src.PollInterval
-		if interval <= 0 {
-			interval = cfg.Collector.StatsPollInterval
-		}
-
-		switch src.Type {
-		case "docker":
-			c := dockercollector.New(log, src.Name, src.Socket, interval)
-			sources = append(sources, service.CollectorSource{Collector: c, Name: src.Name, Type: src.Type})
-			log.Info("docker collector configured", zap.String("source", src.Name))
-			if cli := buildDockerClientWithSocket(src.Socket, log); cli != nil {
-				dockerClients[src.Name] = cli
-				dockerOrder = append(dockerOrder, src.Name)
-			}
-
-		case "kubernetes":
-			c := k8scollector.New(log, src.Name, src.KubeconfigPath, src.KubeContext, interval)
-			sources = append(sources, service.CollectorSource{Collector: c, Name: src.Name, Type: src.Type})
-			log.Info("kubernetes collector configured", zap.String("source", src.Name))
-			if cli := buildK8sClient(src.KubeconfigPath, src.KubeContext, log); cli != nil {
-				k8sClients[src.Name] = cli
-				k8sOrder = append(k8sOrder, src.Name)
-			}
-
-		default:
-			log.Warn("unknown source type; skipping", zap.String("source", src.Name), zap.String("type", src.Type))
-		}
-	}
-
-	if len(sources) == 0 {
-		log.Warn("no sources configured; the service will start but collect no data")
-	}
-
-	// -------------------------------------------------------------------------
-	// Recorder Service
+	// Recorder + management + sources
 	// -------------------------------------------------------------------------
 	svc := service.NewRecorderService(
-		sources,
 		db.Containers(),
 		db.Events(),
 		db.Resources(),
@@ -127,11 +81,47 @@ func main() {
 		},
 		log,
 	)
+	mgmt := service.NewManagementService(log)
 
-	// -------------------------------------------------------------------------
-	// Management Service
-	// -------------------------------------------------------------------------
-	mgmt := service.NewManagementService(dockerClients, dockerOrder, k8sClients, k8sOrder, log)
+	box, err := secret.New(cfg.SecretKey)
+	if err != nil {
+		log.Fatal("invalid secret key", zap.Error(err))
+	}
+	if !box.Configured() {
+		log.Info("KYMO_SECRET_KEY not set; uploading kubeconfigs through the UI is disabled")
+	}
+
+	factory := func(spec model.SourceSpec) collector.Collector {
+		interval := spec.PollInterval
+		if interval <= 0 {
+			interval = cfg.Collector.StatsPollInterval
+		}
+		if spec.Type == model.SourceTypeKubernetes {
+			return k8scollector.New(log, spec.Name, spec.KubeconfigPath, spec.Kubeconfig, spec.KubeContext, interval)
+		}
+		return dockercollector.New(log, spec.Name, spec.Socket, interval)
+	}
+	sources := service.NewSourceManager(db.Sources(), box, svc, mgmt, factory, log)
+
+	configSpecs := make([]model.SourceSpec, 0, len(cfg.Collector.Sources))
+	for _, src := range cfg.Collector.Sources {
+		configSpecs = append(configSpecs, model.SourceSpec{
+			Name:           src.Name,
+			Type:           src.Type,
+			Enabled:        true,
+			ReadOnly:       src.ReadOnly,
+			Socket:         src.Socket,
+			KubeconfigPath: src.KubeconfigPath,
+			KubeContext:    src.KubeContext,
+			PollInterval:   src.PollInterval,
+		})
+	}
+	bootCtx, bootCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	err = sources.Bootstrap(bootCtx, configSpecs)
+	bootCancel()
+	if err != nil {
+		log.Fatal("loading sources failed", zap.Error(err))
+	}
 
 	// -------------------------------------------------------------------------
 	// HTTP Server
@@ -155,7 +145,7 @@ func main() {
 		}
 		c.Next()
 	})
-	httphandler.New(svc, mgmt, db, log, router)
+	httphandler.New(svc, mgmt, sources, db, log, router)
 	if cfg.Server.StaticDir != "" {
 		if err := httphandler.ServeSPA(router, cfg.Server.StaticDir); err != nil {
 			log.Fatal("cannot serve frontend", zap.String("static_dir", cfg.Server.StaticDir), zap.Error(err))
@@ -208,63 +198,6 @@ func main() {
 	}
 
 	log.Info("kymo stopped cleanly")
-}
-
-// buildDockerClientWithSocket creates a Docker API client, optionally targeting
-// the given socket path. Pass "" to use the DOCKER_HOST env var.
-// Returns nil (with a warning) if the daemon is unreachable.
-func buildDockerClientWithSocket(socketPath string, log *zap.Logger) *dockerclient.Client {
-	opts := []dockerclient.Opt{
-		dockerclient.FromEnv,
-		dockerclient.WithAPIVersionNegotiation(),
-	}
-	if socketPath != "" {
-		opts = append(opts, dockerclient.WithHost(socketPath))
-	}
-	cli, err := dockerclient.NewClientWithOpts(opts...)
-	if err != nil {
-		log.Warn("docker management client unavailable", zap.Error(err))
-		return nil
-	}
-	return cli
-}
-
-// buildK8sClient creates a Kubernetes clientset using the given kubeconfig path
-// and optional context name (falling back to in-cluster credentials then ~/.kube/config).
-// Returns nil (with a warning) when no valid configuration is found.
-func buildK8sClient(kubeconfigPath, kubeContext string, log *zap.Logger) kubernetes.Interface {
-	var restCfg *rest.Config
-	var err error
-
-	if kubeconfigPath != "" || kubeContext != "" {
-		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
-		if kubeconfigPath != "" {
-			loadingRules.ExplicitPath = kubeconfigPath
-		}
-		overrides := &clientcmd.ConfigOverrides{}
-		if kubeContext != "" {
-			overrides.CurrentContext = kubeContext
-		}
-		restCfg, err = clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-			loadingRules, overrides,
-		).ClientConfig()
-	} else {
-		restCfg, err = rest.InClusterConfig()
-		if errors.Is(err, rest.ErrNotInCluster) {
-			restCfg, err = clientcmd.BuildConfigFromFlags("", "")
-		}
-	}
-	if err != nil {
-		log.Warn("kubernetes management client unavailable", zap.Error(err))
-		return nil
-	}
-
-	cli, err := kubernetes.NewForConfig(restCfg)
-	if err != nil {
-		log.Warn("failed to create kubernetes management client", zap.Error(err))
-		return nil
-	}
-	return cli
 }
 
 // buildLogger constructs a zap.Logger from the provided LogConfig.

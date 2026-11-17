@@ -20,6 +20,10 @@ type ContainerFilter struct {
 	Query string
 	// Status restricts results to a single current_status value.
 	Status model.ContainerStatus
+	// WorkloadKind restricts results to a workload kind (e.g. "Deployment", "Compose").
+	WorkloadKind string
+	// Workload restricts results to an exact workload name.
+	Workload string
 }
 
 // ContainerRepository defines the persistence operations for Container records.
@@ -98,6 +102,10 @@ type ContainerRepository interface {
 	// Returns the number of rows deleted.
 	HardDeleteDeleted(ctx context.Context, sourceName string) (int64, error)
 
+	// DeleteBySource permanently removes every container recorded for the source
+	// (and, via CASCADE, its events, samples and scores). Returns rows deleted.
+	DeleteBySource(ctx context.Context, sourceName string) (int64, error)
+
 	// HardDeleteIgnored permanently removes all ignored (non-deleted) containers
 	// (and all their related records via CASCADE), optionally filtered by sourceName.
 	// Returns the number of rows deleted.
@@ -117,4 +125,7 @@ type CronJobRepository interface {
 	// FindLatestPerCronJob returns the single most recent execution for each
 	// distinct CronJob within the given source and namespace.
 	FindLatestPerCronJob(ctx context.Context, sourceName, namespace string) ([]*model.CronJobExecution, error)
+
+	// DeleteBySource removes every execution recorded for the source.
+	DeleteBySource(ctx context.Context, sourceName string) (int64, error)
 }
