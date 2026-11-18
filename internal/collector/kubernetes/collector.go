@@ -1121,6 +1121,13 @@ func (c *Collector) emit(ctx context.Context, event collector.CollectorEvent) {
 // always holds it, this is guaranteed.
 func buildContainerModel(sourceName string, pod *corev1.Pod, containerName, image string, snap *containerSnapshot, wl WorkloadInfo) *model.Container {
 	status := containerStateToStatus(snap.state)
+	if status == model.StatusCrashing && (pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded) {
+		// A pod in a terminal phase (typically a Job pod with restartPolicy
+		// Never/OnFailure that gave up) will never restart: it is finished,
+		// not crash looping. The failed run itself is reported by the Job
+		// execution data.
+		status = model.StatusStopped
+	}
 	return &model.Container{
 		ID:            containerID(pod.Namespace, pod.Name, containerName),
 		Runtime:       model.RuntimeKubernetes,

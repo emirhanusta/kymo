@@ -17,19 +17,18 @@ import { Issue } from '../../../core/models/issue.model';
 import { ErrorSignature } from '../../../core/models/error-log.model';
 import { ErrorLogService } from '../../../core/services/error-log.service';
 import { WorkloadErrorsComponent } from './workload-errors.component';
-import { IssueChipsComponent } from '../../../shared/components/issue-chips/issue-chips.component';
-import { statusReason } from '../../../shared/utils/issues';
+import { statusReason, severityLedClass, severityTextClass } from '../../../shared/utils/issues';
+import { imageNameTag } from '../../../shared/utils/format';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import {
   CronJobExecution, DeploymentDetail, K8sEvent, ResourceSample, WorkloadDetail, WorkloadScore,
 } from '../../../core/models/container.model';
-import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
+import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
 import { LastCrashCardComponent } from '../../../shared/components/last-crash-card/last-crash-card.component';
 import { WorkloadTimelineComponent } from './workload-timeline.component';
 import { WorkloadPodsComponent } from './workload-pods.component';
 import { WorkloadBadgeComponent } from '../../../shared/components/workload-badge/workload-badge.component';
-import { StabilityGaugeComponent } from '../../../shared/components/stability-gauge/stability-gauge.component';
 import { ResourceChartsComponent } from '../../../shared/components/resource-charts/resource-charts.component';
 import { READ_ONLY_HINT, REMOVED_HINT } from '../../../shared/utils/source';
 import { ReadOnlyTagComponent } from '../../../shared/components/read-only-tag/read-only-tag.component';
@@ -53,16 +52,18 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   { key: '7d',  ms: 7 * 24 * HOUR },
 ];
 
-type TabKey = 'timeline' | 'pods' | 'resources' | 'runs' | 'errors';
+/** `timeline` is the old key of `activity`; `?tab=timeline` keeps working as an alias. */
+type TabKey = 'activity' | 'pods' | 'resources' | 'runs' | 'errors';
+const TAB_ALIASES: Record<string, TabKey> = { timeline: 'activity' };
 
 @Component({
   selector: 'app-workload-detail',
   standalone: true,
   imports: [
-    RouterLink, DecimalPipe, DatePipe, PageHeaderComponent, StatusBadgeComponent, WorkloadBadgeComponent,
-    StabilityGaugeComponent, ResourceChartsComponent, ReadOnlyTagComponent, EmptyStateComponent,
+    RouterLink, DecimalPipe, DatePipe, StatusBadgeComponent, WorkloadBadgeComponent,
+    ResourceChartsComponent, ReadOnlyTagComponent, EmptyStateComponent, ConfirmDialogComponent,
     ErrorStateComponent, TimeagoPipe, ScoreClassPipe, LastCrashCardComponent, WorkloadTimelineComponent,
-    WorkloadPodsComponent, IssueChipsComponent, WorkloadErrorsComponent,
+    WorkloadPodsComponent, WorkloadErrorsComponent,
   ],
   templateUrl: './workload-detail.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -79,6 +80,8 @@ export class WorkloadDetailComponent {
   private issueSvc   = inject(IssuesService);
   private errorSvc   = inject(ErrorLogService);
   readonly statusReason = statusReason;
+  readonly ledClass = severityLedClass;
+  readonly textClass = severityTextClass;
 
   readonly ranges = RANGES;
 
@@ -114,10 +117,11 @@ export class WorkloadDetailComponent {
   /** Newest crash/OOM events, crash-log snapshots and revisions (Last crash card, timeline markers, pods). */
   ctx = signal<CrashContext>({ crashEvents: [], logs: [], revisions: [] });
   private requestedTab = signal<string | null>(null);
-  /** The `?tab=` value if that tab exists for this workload, else Timeline. */
+  /** The `?tab=` value (aliases resolved) if that tab exists for this workload, else Activity. */
   tab = computed<TabKey>(() => {
-    const want = this.requestedTab();
-    return this.tabs().find(t => t.key === want)?.key ?? 'timeline';
+    const raw = this.requestedTab();
+    const want = raw ? (TAB_ALIASES[raw] ?? raw) : null;
+    return this.tabs().find(t => t.key === want)?.key ?? 'activity';
   });
 
   resources        = signal<ResourceSample[]>([]);
@@ -129,6 +133,12 @@ export class WorkloadDetailComponent {
   deployment     = signal<DeploymentDetail | null>(null);
   scaleValue     = signal<number | null>(null);
   busy           = signal<'scale' | 'restart' | null>(null);
+  scaleOpen      = signal(false);
+  menuOpen       = signal(false);
+  restartConfirm = signal(false);
+  scoreOpen      = signal(false);
+  /** Error-log capture on (null = not known yet). */
+  captureOn      = signal<boolean | null>(null);
   // CronJob runs
   executions     = signal<CronJobExecution[]>([]);
 
@@ -193,16 +203,38 @@ export class WorkloadDetailComponent {
   instanceLabel  = computed(() => (this.isJob() ? 'Run' : 'Pod'));
 
   /** Cron/Job runs live in the Runs tab; a Job's pods are its runs, so it has no separate Pods tab. */
-  tabs = computed<{ key: TabKey; label: string; badge?: number; dot?: boolean }[]>(() => {
-    const t: { key: TabKey; label: string; badge?: number; dot?: boolean }[] = [{ key: 'timeline', label: 'Timeline' }];
-    if (!this.isJob()) t.push({ key: 'pods', label: 'Pods' });
-    t.push({ key: 'resources', label: 'Resources' });
+  tabs = computed<{ key: TabKey; label: string; badge?: number; dot?: boolean; muted?: boolean }[]>(() => {
+    const t: { key: TabKey; label: string; badge?: number; dot?: boolean; muted?: boolean }[] = [{ key: 'activity', label: 'Activity' }];
+    const w = this.workload();
+    if (!this.isJob()) t.push({ key: 'pods', label: 'Pods', badge: w?.active_instances || undefined });
     if (this.isJobKind()) t.push({ key: 'runs', label: 'Runs' });
-    if (this.workload()?.runtime !== 'docker') {
-      t.push({ key: 'errors', label: 'Errors', badge: this.errors24h().length, dot: this.hasNewError() });
+    if (w?.runtime !== 'docker') {
+      const n = this.errors24h().length;
+      t.push({ key: 'errors', label: 'Errors', badge: n || undefined, dot: this.hasNewError(), muted: this.captureOn() === false && n === 0 });
     }
+    t.push({ key: 'resources', label: 'Resources' });
     return t;
   });
+
+  // ── header / summary ──────────────────────────────────────────────────────
+
+  /** Cluster is only worth showing when there is more than one to tell apart. */
+  showCluster = computed(() => this.sources.sources().length > 1 || this.isRemovedCluster());
+  /** "argocd:v2.11.3" (+N for more images); the full references go in the tooltip. */
+  imageLine = computed(() => {
+    const imgs = this.workload()?.images ?? [];
+    if (!imgs.length) return '';
+    return imageNameTag(imgs[0]) + (imgs.length > 1 ? ` +${imgs.length - 1}` : '');
+  });
+  imageTitle = computed(() => (this.workload()?.images ?? []).join('\n'));
+
+  /** Scale / rollout restart: Deployments only, with live state, on a writable cluster. */
+  canAct = computed(() => this.isDeployment() && !this.readOnly() && !!this.deployment()?.deployment);
+
+  readyCount   = computed(() => this.deployment()?.deployment?.ready_replicas ?? this.workload()?.running_instances ?? 0);
+  desiredCount = computed(() => this.deployment()?.deployment?.replicas ?? this.workload()?.active_instances ?? 0);
+  readyPct     = computed(() => (this.desiredCount() > 0 ? Math.min(100, Math.round((this.readyCount() / this.desiredCount()) * 100)) : 0));
+  notReady     = computed(() => Math.max(0, this.desiredCount() - this.readyCount()));
 
   /** Aggregated network counters are not available: hide the chart when everything is zero. */
   noNetwork = computed(() =>
@@ -255,6 +287,8 @@ export class WorkloadDetailComponent {
     this.warnings1h.set(0);
     this.openIssues.set([]);
     this.errors24h.set([]);
+    this.captureOn.set(null);
+    this.scaleOpen.set(false); this.menuOpen.set(false); this.restartConfirm.set(false); this.scoreOpen.set(false);
     this.resources.set([]);
     this.deployment.set(null);
     this.scaleValue.set(null);
@@ -278,8 +312,10 @@ export class WorkloadDetailComponent {
       k8s:     this.svc.getWorkloadK8sEvents(id, { since: hourAgoIso(), limit: 500 }).pipe(catchError(() => of([] as K8sEvent[]))),
       issues:  this.issueSvc.forWorkload(id, 'open').pipe(catchError(() => of([] as Issue[]))),
       errors:  this.errorSvc.forWorkload(id, '24h').pipe(catchError(() => of([] as ErrorSignature[]))),
+      capture: this.errorSvc.captureState(id).pipe(map((c): boolean | null => !!(c.enabled && c.global_enabled)), catchError(() => of(null))),
     }).subscribe({
-      next: ({ detail, history, ctx, k8s, issues, errors }) => {
+      next: ({ detail, history, ctx, k8s, issues, errors, capture }) => {
+        this.captureOn.set(capture);
         this.errors24h.set(errors);
         this.warnings1h.set(warningsLastHour(k8s));
         this.openIssues.set(issues);
@@ -306,7 +342,7 @@ export class WorkloadDetailComponent {
 
   setTab(t: TabKey): void {
     this.router.navigate([], {
-      relativeTo: this.route, queryParams: { tab: t === 'timeline' ? null : t },
+      relativeTo: this.route, queryParams: { tab: t === 'activity' ? null : t },
       queryParamsHandling: 'merge', replaceUrl: true,
     });
   }
@@ -368,6 +404,16 @@ export class WorkloadDetailComponent {
 
   // ── deployment actions ────────────────────────────────────────────────────
 
+  openScale(): void {
+    const d = this.deployment()?.deployment;
+    if (d) this.scaleValue.set(d.replicas);
+    this.menuOpen.set(false);
+    this.scaleOpen.set(true);
+  }
+  closePopovers(): void { this.scaleOpen.set(false); this.menuOpen.set(false); this.scoreOpen.set(false); }
+  askRestart(): void { this.menuOpen.set(false); this.scaleOpen.set(false); this.restartConfirm.set(true); }
+  confirmRestart(): void { this.restartConfirm.set(false); this.restart(); }
+
   decrement(): void { this.scaleValue.update(v => Math.max(0, (v ?? 0) - 1)); }
   increment(): void { this.scaleValue.update(v => Math.min(50, (v ?? 0) + 1)); }
 
@@ -380,6 +426,7 @@ export class WorkloadDetailComponent {
       next: res => {
         this.busy.set(null);
         if (res.success) {
+          this.scaleOpen.set(false);
           this.toast.success(res.message || `${w.name} scaled to ${replicas}`);
           this.loadKindPanel(false);
         } else {

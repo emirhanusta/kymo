@@ -10,13 +10,13 @@ import { K8sEvent, LifecycleEvent, Revision } from '../../../core/models/contain
 import { CrashLogInlineComponent } from '../../../shared/components/crash-log-inline/crash-log-inline.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
-import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import {
   eventContainerName, eventDotClass, eventLabel, eventReason, eventTextClass, hasCrashLogs, isPodReplaced, showsExitCode,
 } from '../../../shared/utils/events';
 import { isWarning, k8sObject, occurrences, spansTime } from '../../../shared/utils/k8s-events';
 import { podNameFromId } from '../../../shared/utils/source';
-import { TimelineFilter, TimelineRow, buildTimeline, shortRev } from '../../../shared/utils/timeline';
+import { Rollout, TimelineFilter, TimelineRow, buildTimeline, shortRev } from '../../../shared/utils/timeline';
+import { imageNameTag, imageTagOf } from '../../../shared/utils/format';
 
 const PAGE = 30;
 const FILTERS: { key: TimelineFilter; label: string }[] = [
@@ -28,104 +28,121 @@ const FILTERS: { key: TimelineFilter; label: string }[] = [
 /** Cap for the Kubernetes events fetched alongside the loaded lifecycle pages. */
 const K8S_LIMIT = 500;
 
-/** Timeline tab: workload events (paged) merged with rollout markers from the revisions, newest first. */
+/** Activity tab: workload events (paged) merged with rollout markers from the revisions, newest first. */
 @Component({
   selector: 'app-workload-timeline',
   standalone: true,
-  imports: [RouterLink, DatePipe, CrashLogInlineComponent, EmptyStateComponent, ErrorStateComponent, TimeagoPipe],
+  imports: [RouterLink, DatePipe, CrashLogInlineComponent, EmptyStateComponent, ErrorStateComponent],
   template: `
     <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
-      <div class="flex border border-kymo-rule" role="group" aria-label="Filter timeline">
-        @for (f of filters; track f.key) {
+      <div class="flex border border-kymo-rule h-[1.875rem]" role="group" aria-label="Filter activity">
+        @for (f of filters(); track f.key) {
           <button type="button"
-            class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule last:border-r-0"
-            [class]="filter() === f.key ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
-            [attr.aria-pressed]="filter() === f.key" (click)="filter.set(f.key)">{{ f.label }}</button>
+            class="px-3 text-xs whitespace-nowrap transition-colors border-r border-kymo-rule last:border-r-0 inline-flex items-center gap-1.5"
+            [class]="filter() === f.key ? 'bg-kymo-raised text-kymo-ink' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+            [attr.aria-pressed]="filter() === f.key" (click)="filter.set(f.key)">
+            {{ f.label }}
+            @if (!loading()) { <span class="tabular-nums text-kymo-faint">{{ counts()[f.key] }}</span> }
+          </button>
         }
       </div>
       <span class="text-[11px] text-kymo-faint">newest first</span>
     </div>
 
     @if (error()) {
-      <app-error-state message="Failed to load the timeline" (retry)="load(false)" />
+      <app-error-state message="Failed to load activity" (retry)="load(false)" />
     } @else if (loading()) {
-      <div class="h-48 bg-kymo-panel border border-kymo-rule animate-pulse" aria-busy="true" aria-label="Loading timeline"></div>
+      <div class="k-panel divide-y divide-kymo-rule animate-pulse" aria-busy="true" aria-label="Loading activity">
+        @for (i of [1, 2, 3, 4]; track i) {
+          <div class="px-4 py-3 flex items-center gap-3"><div class="h-2.5 w-10 bg-kymo-raised"></div><div class="h-2.5 w-2/5 bg-kymo-raised"></div></div>
+        }
+      </div>
     } @else if (rows().length === 0) {
       <div class="k-panel">
-        @if (events().length || revisions().length || k8s().length) {
-          <app-empty-state icon="events" [compact]="true" message="Nothing matches this filter"
-            [hint]="hasMore() ? 'Older events are not loaded yet — load more below.' : 'Try another filter.'" />
+        @if (counts().all === 0) {
+          <app-empty-state icon="events" message="No activity recorded yet"
+            hint="Lifecycle events, rollouts and Kubernetes events will appear here." />
         } @else {
-          <app-empty-state icon="events" message="No events recorded" hint="Start, stop and crash events of every pod and container will appear here." />
+          <app-empty-state icon="events" [compact]="true" [message]="'No ' + filterNoun() + ' in this period'"
+            [hint]="hasMore() ? 'Older events are not loaded yet.' : ''">
+            <button type="button" class="k-btn k-btn-sm mt-3" (click)="filter.set('all')">Show all</button>
+          </app-empty-state>
         }
       </div>
     } @else {
-      <ol class="k-panel divide-y divide-kymo-rule">
-        @for (r of rows(); track r.key) {
-          @if (r.kind === 'rollout') {
-            <li class="flex items-start gap-3 px-4 py-2.5 bg-kymo-raised/40">
-              <span class="w-2 h-2 mt-1.5 flex-none rotate-45 bg-kymo-paused" aria-hidden="true"></span>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-xs font-medium uppercase tracking-wide text-kymo-paused">Rollout</span>
-                  <span class="text-xs text-kymo-ink">→ rev {{ short(r.rollout.revision.revision) }}</span>
-                  <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="r.at">{{ r.at | timeago }}</span>
-                </div>
-                <p class="text-xs text-kymo-muted mt-0.5 break-words">
-                  @if (r.rollout.imageChange) { image {{ r.rollout.imageChange }}, }{{ r.rollout.revision.pods }} pod{{ r.rollout.revision.pods === 1 ? '' : 's' }}
-                </p>
-              </div>
-            </li>
-          } @else if (r.kind === 'k8s') {
-            @let k = r.k8s;
-            @let warn = isWarn(k);
-            <li class="flex items-start gap-3 px-4 py-2.5" [class.opacity-70]="!warn">
-              <span class="w-3 mt-px flex-none text-center text-xs leading-4" [class]="warn ? 'text-kymo-amber' : 'text-kymo-faint'" aria-hidden="true">{{ warn ? '⚠' : '·' }}</span>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="sr-only">{{ k.type }} Kubernetes event:</span>
-                  <span class="text-xs font-medium" [class]="warn ? 'text-kymo-amber' : 'text-kymo-muted'">{{ k.reason }}</span>
-                  @if (times(k) > 1) { <span class="text-xs tabular-nums" [class]="warn ? 'text-kymo-amber' : 'text-kymo-muted'">×{{ times(k) }}</span> }
-                  <span class="text-[10px] uppercase tracking-wide text-kymo-faint border border-kymo-rule px-1">k8s</span>
-                  <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="k.last_seen">{{ r.at | timeago }}</span>
-                </div>
-                <p class="text-[11px] text-kymo-muted truncate" [title]="object(k)">
-                  {{ object(k) }}@if (spans(k)) { · <span class="tabular-nums">{{ k.first_seen | date:'HH:mm:ss' }} → {{ k.last_seen | date:'HH:mm:ss' }}</span> }
-                </p>
-                @if (k.message) {
-                  <p class="text-xs text-kymo-muted mt-0.5 break-words line-clamp-3" [title]="k.message">{{ k.message }}</p>
+      <div class="k-panel">
+        @for (g of groups(); track g.key) {
+          <section [attr.aria-label]="g.label">
+            <h3 class="sticky top-12 z-10 px-4 py-1.5 bg-kymo-raised border-y border-kymo-rule first:border-t-0 flex items-center gap-2">
+              <span class="k-label !text-kymo-muted">{{ g.label }}</span>
+              <span class="text-[11px] tabular-nums text-kymo-faint">{{ g.rows.length }}</span>
+            </h3>
+            <ol class="divide-y divide-kymo-rule">
+              @for (r of g.rows; track r.key) {
+                @if (r.kind === 'rollout') {
+                  <li class="flex items-start gap-3 px-4 py-2">
+                    <span class="w-11 flex-none text-[11px] leading-5 tabular-nums text-kymo-faint" [title]="r.at">{{ r.at | date:'HH:mm' }}</span>
+                    <span class="w-2 h-2 mt-1.5 flex-none rotate-45 bg-kymo-paused" aria-hidden="true"></span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs leading-5 text-kymo-ink">Rollout <span class="text-kymo-muted">to rev {{ short(r.rollout.revision.revision) }}</span></p>
+                      <p class="text-[11px] text-kymo-muted break-words">
+                        @if (change(r.rollout); as c) { <span class="tabular-nums">{{ c }}</span> · }{{ r.rollout.revision.pods }} pod{{ r.rollout.revision.pods === 1 ? '' : 's' }}
+                      </p>
+                    </div>
+                  </li>
+                } @else if (r.kind === 'k8s') {
+                  @let k = r.k8s;
+                  @let warn = isWarn(k);
+                  <li class="flex items-start gap-3 px-4 py-2">
+                    <span class="w-11 flex-none text-[11px] leading-5 tabular-nums text-kymo-faint" [title]="k.last_seen">{{ r.at | date:'HH:mm' }}</span>
+                    <span class="w-2 mt-px flex-none text-center text-xs leading-5" [class]="warn ? 'text-kymo-amber' : 'text-kymo-faint'" aria-hidden="true">{{ warn ? '⚠' : '·' }}</span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs leading-5">
+                        <span class="sr-only">{{ k.type }} Kubernetes event:</span>
+                        <span [class]="warn ? 'text-kymo-amber' : 'text-kymo-ink'">{{ k.reason }}</span>
+                        @if (times(k) > 1) { <span class="tabular-nums text-kymo-muted"> ×{{ times(k) }}</span> }
+                        <span class="text-kymo-faint"> · k8s</span>
+                      </p>
+                      <p class="text-[11px] text-kymo-muted truncate" [title]="object(k)">
+                        {{ object(k) }}@if (spans(k)) { · <span class="tabular-nums">{{ k.first_seen | date:'HH:mm:ss' }} → {{ k.last_seen | date:'HH:mm:ss' }}</span> }
+                      </p>
+                      @if (k.message) {
+                        <p class="text-[11px] text-kymo-muted break-words line-clamp-2" [title]="k.message">{{ k.message }}</p>
+                      }
+                    </div>
+                  </li>
+                } @else {
+                  @let ev = r.ev;
+                  @let replaced = podReplaced(ev);
+                  <li class="flex items-start gap-3 px-4 py-2" [class.opacity-60]="replaced">
+                    <span class="w-11 flex-none text-[11px] leading-5 tabular-nums text-kymo-faint" [title]="r.count > 1 ? r.firstAt + ' → ' + r.at : r.at">{{ r.at | date:'HH:mm' }}</span>
+                    <span class="w-2 flex-none flex items-center h-5"><span class="k-led" [class]="replaced ? 'bg-kymo-stopped' : dot(ev)" aria-hidden="true"></span></span>
+                    <div class="flex-1 min-w-0">
+                      <p class="text-xs leading-5 flex items-center gap-2 flex-wrap">
+                        <span [class]="replaced ? 'text-kymo-muted' : text(ev)">
+                          {{ replaced ? 'Stopped (pod replaced)' : label(ev) }}@if (r.count > 1) { <span class="tabular-nums"> ×{{ r.count }}</span> }
+                        </span>
+                        @if (showsExit(ev)) {
+                          <span class="text-[11px] border px-1.5 tabular-nums" [class]="ev.exit_code === 0 ? 'text-kymo-muted border-kymo-rule' : 'text-kymo-danger border-kymo-danger/40'">exit {{ ev.exit_code }}</span>
+                        }
+                      </p>
+                      <p class="text-[11px] text-kymo-muted truncate">
+                        @if (pod(ev); as p) { {{ p }} · }<a [routerLink]="['/containers', ev.container_id]" class="hover:text-kymo-amber hover:underline underline-offset-4">{{ container(ev) }}</a>
+                      </p>
+                      @if (!replaced && reason(ev); as rs) {
+                        <p class="text-[11px] text-kymo-muted break-words">{{ rs }}</p>
+                      }
+                      @if (crashLogs(ev)) {
+                        <app-crash-log-inline class="mt-1" [containerId]="ev.container_id" [occurredAt]="ev.occurred_at" />
+                      }
+                    </div>
+                  </li>
                 }
-              </div>
-            </li>
-          } @else {
-            @let ev = r.ev;
-            @let replaced = podReplaced(ev);
-            <li class="flex items-start gap-3 px-4 py-2.5" [class.opacity-60]="replaced">
-              <span class="k-led mt-1.5 flex-none" [class]="replaced ? 'bg-kymo-stopped' : dot(ev)" aria-hidden="true"></span>
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-xs font-medium uppercase tracking-wide" [class]="replaced ? 'text-kymo-muted' : text(ev)">
-                    {{ replaced ? 'Stopped (pod replaced)' : label(ev) }}@if (r.count > 1) { <span class="tabular-nums"> ×{{ r.count }}</span> }
-                  </span>
-                  @if (showsExit(ev)) {
-                    <span class="text-[11px] text-kymo-danger border border-kymo-danger/40 px-1.5 tabular-nums">exit {{ ev.exit_code }}</span>
-                  }
-                  <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="r.count > 1 ? r.firstAt + ' → ' + r.at : r.at">{{ r.at | timeago }}</span>
-                </div>
-                <p class="text-[11px] text-kymo-muted truncate">
-                  @if (pod(ev); as p) { {{ p }} · }<a [routerLink]="['/containers', ev.container_id]" class="hover:text-kymo-amber hover:underline underline-offset-4">{{ container(ev) }}</a>
-                </p>
-                @if (!replaced && reason(ev); as rs) {
-                  <p class="text-xs text-kymo-muted mt-0.5 break-words">{{ rs }}</p>
-                }
-                @if (crashLogs(ev)) {
-                  <app-crash-log-inline class="mt-1" [containerId]="ev.container_id" [occurredAt]="ev.occurred_at" />
-                }
-              </div>
-            </li>
-          }
+              }
+            </ol>
+          </section>
         }
-      </ol>
+      </div>
       @if (hasMore()) {
         <div class="mt-3 text-center">
           <button type="button" class="k-btn k-btn-sm" [disabled]="loadingMore()" (click)="loadMore()">
@@ -145,7 +162,8 @@ export class WorkloadTimelineComponent {
   private refresh = inject(RefreshService);
   private toast   = inject(ToastService);
 
-  readonly filters = FILTERS;
+  /** Job runs are not rollouts: without revisions the Rollouts chip is hidden. */
+  readonly filters = computed(() => this.revisions().length ? FILTERS : FILTERS.filter(f => f.key !== 'rollouts'));
   readonly label = eventLabel;
   readonly reason = eventReason;
   readonly dot = eventDotClass;
@@ -171,6 +189,47 @@ export class WorkloadTimelineComponent {
   error       = signal(false);
 
   rows = computed<TimelineRow[]>(() => buildTimeline(this.events(), this.revisions(), this.filter(), this.hasMore(), this.k8s()));
+
+  /** Row count per filter (chips). */
+  counts = computed<Record<TimelineFilter, number>>(() => {
+    const out = {} as Record<TimelineFilter, number>;
+    for (const f of FILTERS) out[f.key] = buildTimeline(this.events(), this.revisions(), f.key, this.hasMore(), this.k8s()).length;
+    return out;
+  });
+
+  filterNoun = computed(() => ({ all: 'activity', problems: 'problems', rollouts: 'rollouts', k8s: 'K8s events' }[this.filter()]));
+
+  /** Rows grouped by local calendar day, newest first. */
+  groups = computed(() => {
+    const out: { key: string; label: string; rows: TimelineRow[] }[] = [];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    for (const r of this.rows()) {
+      const d = new Date(r.at);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      let g = out[out.length - 1];
+      if (!g || g.key !== key) {
+        const day = new Date(d); day.setHours(0, 0, 0, 0);
+        const diff = Math.round((today.getTime() - day.getTime()) / 86_400_000);
+        const label = diff === 0 ? 'Today' : diff === 1 ? 'Yesterday'
+          : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
+        g = { key, label, rows: [] };
+        out.push(g);
+      }
+      g.rows.push(r);
+    }
+    return out;
+  });
+
+  /** "v2.11.2 → v2.11.3" (same image, new tag) or "api:1.0 → worker:2.0". */
+  change(r: Rollout): string {
+    const prev = r.prev.images ?? [], cur = r.revision.images ?? [];
+    const removed = prev.filter(i => !cur.includes(i)), added = cur.filter(i => !prev.includes(i));
+    if (!removed.length || !added.length) return '';
+    if (removed.length === 1 && added.length === 1 && imageNameTag(removed[0]).split(':')[0] === imageNameTag(added[0]).split(':')[0]) {
+      return `${imageTagOf(removed[0])} → ${imageTagOf(added[0])}`;
+    }
+    return `${removed.map(imageNameTag).join(', ')} → ${added.map(imageNameTag).join(', ')}`;
+  }
 
   private sub?: Subscription;
   private moreSub?: Subscription;

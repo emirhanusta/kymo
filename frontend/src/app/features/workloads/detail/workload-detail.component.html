@@ -1,15 +1,21 @@
-<div class="space-y-6">
+<div class="flex flex-col gap-5" (keydown.escape)="closePopovers()">
   @if (loading()) {
-    <div class="space-y-6 animate-pulse" aria-busy="true" aria-label="Loading workload">
-      <div class="space-y-2">
+    <div class="space-y-5" aria-busy="true" aria-label="Loading workload">
+      <div class="space-y-2 animate-pulse border-b border-kymo-rule pb-3">
+        <div class="h-2.5 bg-kymo-raised w-20"></div>
         <div class="h-5 bg-kymo-raised w-64 max-w-full"></div>
-        <div class="h-3 bg-kymo-raised w-96 max-w-full"></div>
+        <div class="h-3 bg-kymo-raised w-80 max-w-full"></div>
       </div>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div class="h-72 bg-kymo-panel border border-kymo-rule"></div>
-        <div class="h-72 bg-kymo-panel border border-kymo-rule"></div>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-kymo-rule border border-kymo-rule animate-pulse">
+        @for (i of [1, 2, 3, 4]; track i) {
+          <div class="bg-kymo-panel px-4 py-4 space-y-3">
+            <div class="h-2.5 w-1/3 bg-kymo-raised"></div>
+            <div class="h-6 w-1/2 bg-kymo-raised"></div>
+            <div class="h-2 w-2/3 bg-kymo-raised"></div>
+          </div>
+        }
       </div>
-      <div class="h-64 bg-kymo-panel border border-kymo-rule"></div>
+      <div class="k-panel h-64 animate-pulse"></div>
     </div>
   } @else if (loadError() === 'not-found') {
     <div class="k-panel">
@@ -23,94 +29,195 @@
     @let w = workload()!;
 
     <!-- Header -->
-    <app-page-header [title]="w.name" [crumbLabel]="isJobKind() ? 'Jobs' : 'Workloads'" [crumbLink]="isJobKind() ? '/jobs' : '/workloads'">
-      <span subtitle class="flex items-center gap-x-3 gap-y-1 flex-wrap">
-        <app-status-badge [status]="w.status" [text]="statusReason(w)" />
-        <app-workload-badge [kind]="w.kind" />
-        @if (w.is_system) {
-          <span class="text-[11px] px-1.5 py-px border border-kymo-rule text-kymo-muted">SYS</span>
-        }
-        @if (readOnly()) {
-          <app-read-only-tag [hint]="readOnlyHint()" />
-        }
-        @if (warnings1h() > 0) {
-          <span class="inline-flex items-center gap-1 text-[11px] px-1.5 py-px border border-kymo-amber/50 text-kymo-amber tabular-nums"
-              title="Kubernetes Warning events in the last hour (including repeats)">
-          <span aria-hidden="true">⚠</span> {{ warnings1h() }} warning{{ warnings1h() === 1 ? '' : 's' }} (1h)
-        </span>
-        }
-        <app-issue-chips [issues]="openIssues()" />
-      </span>
-    </app-page-header>
-
-    <dl class="flex items-start gap-x-6 gap-y-1 flex-wrap text-xs -mt-3">
-      @if (w.namespace) {
-        <div class="flex gap-2"><dt class="k-label">ns</dt><dd class="text-kymo-ink">{{ w.namespace }}</dd></div>
-      }
-      <div class="flex gap-2"><dt class="k-label">cluster</dt><dd class="text-kymo-ink">{{ w.source_name }}</dd></div>
-      <div class="flex gap-2">
-        <dt class="k-label">{{ isCronJob() ? 'pods' : instanceLabel().toLowerCase() + 's' }}</dt>
-        <dd class="text-kymo-ink tabular-nums" [title]="w.instances + ' ever recorded'">{{ w.running_instances }}/{{ w.active_instances }} <span class="text-kymo-faint">({{ w.instances }})</span></dd>
+    <header class="border-b border-kymo-rule pb-3 flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <nav class="k-label mb-1.5 flex items-center gap-1.5" aria-label="Breadcrumb">
+          <a [routerLink]="isJobKind() ? '/jobs' : '/workloads'" class="hover:text-kymo-amber transition-colors">{{ isJobKind() ? 'Jobs' : 'Workloads' }}</a>
+          <span class="text-kymo-faint" aria-hidden="true">/</span>
+        </nav>
+        <div class="flex items-center gap-x-3 gap-y-1 flex-wrap">
+          <h1 class="text-lg font-semibold text-kymo-ink tracking-tight break-all" [title]="w.name">{{ w.name }}</h1>
+          <span [title]="'First seen ' + (w.first_seen_at | timeago) + ' · last seen ' + (w.last_seen_at | timeago)">
+            <app-status-badge [status]="w.status" [text]="statusReason(w)" />
+          </span>
+          <app-workload-badge [kind]="w.kind" />
+          @if (w.is_system) {
+            <span class="text-[11px] px-1.5 py-px border border-kymo-rule text-kymo-muted">SYS</span>
+          }
+          @if (readOnly()) {
+            <app-read-only-tag [hint]="readOnlyHint()" />
+          }
+        </div>
+        <p class="mt-1.5 text-xs text-kymo-muted flex items-center gap-x-2 flex-wrap min-h-4">
+          @if (w.namespace) { <span>{{ w.namespace }}</span> }
+          @if (showCluster()) {
+            @if (w.namespace) { <span class="text-kymo-faint" aria-hidden="true">·</span> }
+            <span>{{ w.source_name }}</span>
+          }
+          @if (imageLine()) {
+            @if (w.namespace || showCluster()) { <span class="text-kymo-faint" aria-hidden="true">·</span> }
+            <span class="truncate max-w-[24rem]" [title]="imageTitle()">{{ imageLine() }}</span>
+          }
+          @if (warnings1h() > 0) {
+            <span class="text-kymo-faint" aria-hidden="true">·</span>
+            <span class="text-kymo-amber tabular-nums" title="Kubernetes Warning events in the last hour (including repeats)">{{ warnings1h() }} warning{{ warnings1h() === 1 ? '' : 's' }} · 1h</span>
+          }
+        </p>
       </div>
-      @if (w.images.length) {
-        <div class="flex gap-2 min-w-0">
-          <dt class="k-label">{{ w.images.length > 1 ? 'images' : 'image' }}</dt>
-          <dd class="text-kymo-ink min-w-0 break-all">{{ w.images.join(', ') }}</dd>
-        </div>
-      }
-      <div class="flex gap-2" [title]="w.first_seen_at"><dt class="k-label">first seen</dt><dd class="text-kymo-ink">{{ w.first_seen_at | timeago }}</dd></div>
-      <div class="flex gap-2" [title]="w.last_seen_at"><dt class="k-label">last seen</dt><dd class="text-kymo-ink">{{ w.last_seen_at | timeago }}</dd></div>
-      @if (score(); as s) {
-        <div class="flex gap-2"><dt class="k-label">score</dt><dd class="font-semibold tabular-nums" [class]="s.score | scoreClass">{{ s.score | number:'1.0-0' }}</dd></div>
-      }
-    </dl>
 
-    <!-- Kind-specific: Deployment -->
-    @if (isDeployment()) {
-      <section class="k-panel" aria-labelledby="wl-deploy-title">
-        <div class="px-5 py-2.5 border-b border-kymo-rule flex items-center justify-between gap-3">
-          <h2 id="wl-deploy-title" class="k-label">Deployment</h2>
-          @if (readOnly()) { <app-read-only-tag [hint]="readOnlyHint()" /> }
-        </div>
-        @if (!deployment()?.deployment) {
-          <p class="px-5 py-6 text-center text-xs text-kymo-faint">— live deployment state unavailable (not found on the cluster, or the cluster is offline) —</p>
-        } @else {
-          @let d = deployment()!.deployment!;
-          <div class="px-5 py-4 flex items-center gap-x-8 gap-y-3 flex-wrap">
-            <div>
-              <p class="k-label">Ready / desired</p>
-              <p class="text-2xl font-semibold tabular-nums mt-1"
-                 [class.text-kymo-running]="replicaState() === 'ok'"
-                 [class.text-kymo-amber]="replicaState() === 'partial'"
-                 [class.text-kymo-danger]="replicaState() === 'down'">{{ d.ready_replicas }}/{{ d.replicas }}</p>
-            </div>
-            @if (readOnly()) {
-              <p class="text-xs text-kymo-muted">Scaling and rollout restart are disabled for this cluster.</p>
-            } @else {
-              <div class="flex items-center gap-2 flex-wrap" role="group" aria-label="Deployment actions">
-                <span class="k-label mr-1">Replicas</span>
-                <div class="flex items-stretch h-[1.875rem] border border-kymo-rule bg-kymo-deep" role="group" aria-label="Replica count">
-                  <button type="button" aria-label="Decrease replicas"
-                    class="w-7 text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    [disabled]="busy() !== null || (scaleValue() ?? 0) <= 0 || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="decrement()">−</button>
-                  <span class="min-w-[2.5rem] px-2 flex items-center justify-center border-x border-kymo-rule text-sm font-semibold text-kymo-amber tabular-nums select-none" aria-live="polite">{{ scaleValue() ?? d.replicas }}</span>
-                  <button type="button" aria-label="Increase replicas"
-                    class="w-7 text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    [disabled]="busy() !== null || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="increment()">+</button>
-                </div>
-                <button type="button" class="k-btn k-btn-primary" [disabled]="busy() !== null || scaleValue() === d.replicas || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="scale()">Scale</button>
-                <button type="button" class="k-btn" [disabled]="busy() !== null || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="restart()">
-                  <svg class="w-3 h-3" [class.animate-spin]="busy() === 'restart'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                  </svg>
-                  Rollout restart
-                </button>
+      @if (canAct()) {
+        <div class="relative flex-none">
+          <!-- ≥ sm: compact buttons -->
+          <div class="hidden sm:flex items-center gap-2" role="group" aria-label="Deployment actions">
+            <button type="button" class="k-btn" aria-haspopup="dialog" [attr.aria-expanded]="scaleOpen()"
+                    [disabled]="busy() !== null || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="scaleOpen() ? scaleOpen.set(false) : openScale()">Scale</button>
+            <button type="button" class="k-btn" [disabled]="busy() !== null || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="askRestart()">
+              @if (busy() === 'restart') { <span class="w-3 h-3 border border-kymo-rule border-t-kymo-amber rounded-full animate-spin" aria-hidden="true"></span> }
+              Rollout restart
+            </button>
+          </div>
+          <!-- < sm: "…" menu -->
+          <div class="sm:hidden">
+            <button type="button" class="k-btn k-btn-icon" aria-label="Workload actions" aria-haspopup="menu" [attr.aria-expanded]="menuOpen()"
+                    [disabled]="busy() !== null || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage') || 'Actions'" (click)="menuOpen.set(!menuOpen()); scaleOpen.set(false)">
+              <svg class="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+            </button>
+            @if (menuOpen()) {
+              <button type="button" class="fixed inset-0 z-20 cursor-default" tabindex="-1" aria-hidden="true" (click)="closePopovers()"></button>
+              <div class="absolute right-0 top-full mt-1 z-30 k-panel w-44 py-1" role="menu">
+                <button type="button" role="menuitem" class="w-full text-left px-3 py-2 text-xs text-kymo-ink hover:bg-kymo-raised" (click)="openScale()">Scale…</button>
+                <button type="button" role="menuitem" class="w-full text-left px-3 py-2 text-xs text-kymo-ink hover:bg-kymo-raised" (click)="askRestart()">Rollout restart</button>
               </div>
             }
           </div>
+
+          @if (scaleOpen()) {
+            @let d = deployment()!.deployment!;
+            <button type="button" class="fixed inset-0 z-20 cursor-default" tabindex="-1" aria-hidden="true" (click)="closePopovers()"></button>
+            <div class="absolute right-0 top-full mt-1 z-30 k-panel p-4 w-64" role="dialog" aria-label="Scale deployment">
+              <p class="k-label">Replicas</p>
+              <p class="text-[11px] text-kymo-muted mt-1 tabular-nums">Currently {{ d.replicas }} desired · {{ d.ready_replicas }} ready</p>
+              <div class="mt-3 flex items-center gap-2">
+                <div class="flex items-stretch h-[1.875rem] border border-kymo-rule bg-kymo-deep" role="group" aria-label="Replica count">
+                  <button type="button" aria-label="Decrease replicas"
+                    class="w-7 text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    [disabled]="busy() !== null || (scaleValue() ?? 0) <= 0" (click)="decrement()">−</button>
+                  <span class="min-w-[2.5rem] px-2 flex items-center justify-center border-x border-kymo-rule text-sm font-semibold text-kymo-amber tabular-nums select-none" aria-live="polite">{{ scaleValue() ?? d.replicas }}</span>
+                  <button type="button" aria-label="Increase replicas"
+                    class="w-7 text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    [disabled]="busy() !== null" (click)="increment()">+</button>
+                </div>
+                <button type="button" class="k-btn k-btn-primary ml-auto" [disabled]="busy() !== null || scaleValue() === d.replicas || !auth.can('workloads:manage')"
+                        [title]="auth.denyHint('workloads:manage')" (click)="scale()">{{ busy() === 'scale' ? 'Scaling…' : 'Apply' }}</button>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </header>
+
+    <!-- Open issues -->
+    @if (openIssues().length > 0) {
+      <section class="k-panel divide-y divide-kymo-rule" aria-label="Open issues of this workload">
+        @for (i of openIssues().slice(0, 3); track i.id; let first = $first) {
+          <div class="px-4 py-2 flex items-center gap-3 min-w-0 text-xs">
+            <span class="k-led flex-none" [class]="ledClass(i.severity)" aria-hidden="true"></span>
+            <span class="sr-only">{{ i.severity }}</span>
+            <span class="font-medium flex-none max-w-[60%] truncate" [class]="textClass(i.severity)" [title]="i.title">{{ i.title }}</span>
+            @if (i.detail) { <span class="text-kymo-muted truncate hidden md:inline min-w-0" [title]="i.detail">{{ i.detail }}</span> }
+            <span class="text-kymo-faint ml-auto flex-none whitespace-nowrap tabular-nums" [title]="i.first_seen">since {{ i.first_seen | timeago }}</span>
+            @if (first) {
+              <a routerLink="/issues" class="text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4 whitespace-nowrap flex-none">Issues →</a>
+            }
+          </div>
+        }
+        @if (openIssues().length > 3) {
+          <div class="px-4 py-1.5 text-[11px] text-kymo-muted"><a routerLink="/issues" class="hover:text-kymo-amber hover:underline underline-offset-4">+{{ openIssues().length - 3 }} more open issues →</a></div>
         }
       </section>
     }
+
+    <!-- Summary strip -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-kymo-rule border border-kymo-rule">
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+        <div class="k-label">{{ instanceLabel() }}s ready</div>
+        <div class="mt-1.5 text-2xl font-medium text-kymo-ink tabular-nums">{{ readyCount() }}<span class="text-sm text-kymo-faint"> / {{ desiredCount() }}</span></div>
+        <div class="mt-2 h-1 bg-kymo-rule" role="progressbar" [attr.aria-label]="instanceLabel() + 's ready'" [attr.aria-valuenow]="readyPct()" aria-valuemin="0" aria-valuemax="100">
+          <div class="h-full" [class]="notReady() > 0 ? 'bg-kymo-amber' : 'bg-kymo-muted'" [style.width.%]="readyPct()"></div>
+        </div>
+        <div class="mt-1 text-[11px] tabular-nums" [class]="notReady() > 0 ? 'text-kymo-amber' : 'text-kymo-muted'">
+          {{ desiredCount() === 0 ? 'none desired' : notReady() > 0 ? notReady() + ' not ready' : 'all ready' }}
+        </div>
+      </div>
+
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+        <div class="k-label">Crashes · 24h</div>
+        @if (score(); as s) {
+          <div class="mt-1.5 text-2xl font-medium tabular-nums" [class]="s.crashes > 0 ? 'text-kymo-danger' : 'text-kymo-ink'">{{ s.crashes }}</div>
+          <div class="mt-1 text-[11px] text-kymo-muted tabular-nums">{{ s.restarts }} restart{{ s.restarts === 1 ? '' : 's' }}</div>
+        } @else {
+          <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+          <div class="mt-1 text-[11px] text-kymo-muted">not scored yet</div>
+        }
+      </div>
+
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+        <div class="k-label">OOM kills · 24h</div>
+        @if (score(); as s) {
+          <div class="mt-1.5 text-2xl font-medium tabular-nums" [class]="s.ooms > 0 ? 'text-kymo-amber' : 'text-kymo-ink'">{{ s.ooms }}</div>
+          <div class="mt-1 text-[11px] text-kymo-muted">{{ s.ooms > 0 ? 'memory limit hit' : 'none' }}</div>
+        } @else {
+          <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+          <div class="mt-1 text-[11px] text-kymo-muted">not scored yet</div>
+        }
+      </div>
+
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0 relative">
+        <div class="k-label">Stability</div>
+        @if (score(); as s) {
+          <div class="mt-1.5 text-2xl font-medium tabular-nums" [class]="s.score < 90 ? (s.score | scoreClass) : 'text-kymo-ink'">{{ s.score | number:'1.0-0' }}<span class="text-sm text-kymo-faint"> / 100</span></div>
+          <button type="button" class="mt-1 text-[11px] text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4 text-left"
+                  aria-haspopup="dialog" [attr.aria-expanded]="scoreOpen()" (click)="scoreOpen.set(!scoreOpen())">How is this calculated?</button>
+          @if (scoreOpen()) {
+            <button type="button" class="fixed inset-0 z-20 cursor-default" tabindex="-1" aria-hidden="true" (click)="closePopovers()"></button>
+            <div class="absolute right-0 top-full mt-px z-30 k-panel p-4 w-[min(22rem,calc(100vw-1.5rem))] space-y-3" role="dialog" aria-label="Stability score breakdown">
+              <p class="text-[11px] text-kymo-muted">Starts at 100; penalties for restarts, crashes, OOM kills, flapping and unavailability in the last 24h are subtracted.</p>
+              <div class="space-y-2 bg-kymo-deep border border-kymo-rule p-3">
+                @for (p of penalties(); track p.name) {
+                  <div class="flex items-center justify-between">
+                    <span class="k-label">{{ p.name }}</span>
+                    <span class="text-xs tabular-nums" [class]="p.value > 0 ? 'text-kymo-ink' : 'text-kymo-faint'">{{ p.value > 0 ? '−' : '' }}{{ p.value | number:'1.2-2' }}</span>
+                  </div>
+                }
+                <div class="border-t border-kymo-rule pt-2 flex items-baseline justify-between">
+                  <span class="k-label !text-kymo-ink">Final score</span>
+                  <span class="text-lg font-semibold tabular-nums" [class]="s.score | scoreClass">{{ s.score | number:'1.1-1' }}</span>
+                </div>
+              </div>
+              @if (spark(); as sp) {
+                <div>
+                  <div class="flex items-baseline justify-between mb-1">
+                    <span class="k-label">History</span>
+                    <span class="text-[11px] text-kymo-faint tabular-nums">{{ sp.count }} pt{{ sp.count === 1 ? '' : 's' }} · {{ sp.min | number:'1.0-0' }}–{{ sp.max | number:'1.0-0' }}</span>
+                  </div>
+                  <svg viewBox="0 0 200 44" class="w-full h-11 bg-kymo-deep border border-kymo-rule" preserveAspectRatio="none" role="img"
+                       [attr.aria-label]="'Score history, oldest to newest, ' + sp.count + ' points, latest ' + (s.score | number:'1.0-0')">
+                    <line x1="0" y1="22" x2="200" y2="22" stroke="var(--color-kymo-grid)" stroke-width="1" vector-effect="non-scaling-stroke" />
+                    @if (!sp.single) {
+                      <polyline [attr.points]="sp.points" fill="none" [attr.stroke]="sp.color" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+                    }
+                    <circle [attr.cx]="sp.lastX" [attr.cy]="sp.lastY" r="2" [attr.fill]="sp.color" />
+                  </svg>
+                </div>
+              }
+            </div>
+          }
+        } @else {
+          <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+          <div class="mt-1 text-[11px] text-kymo-muted">not scored yet</div>
+        }
+      </div>
+    </div>
 
     <!-- Last crash -->
     <app-last-crash-card [crashEvents]="ctx().crashEvents" [logs]="ctx().logs" [revisions]="ctx().revisions" />
@@ -121,7 +228,7 @@
         <button type="button" role="tab" [id]="'wl-tab-' + t.key" [attr.aria-selected]="tab() === t.key" [attr.aria-controls]="'wl-panel-' + t.key"
           [attr.tabindex]="tab() === t.key ? 0 : -1"
           class="px-4 h-9 text-xs font-medium whitespace-nowrap border-b-2 -mb-px transition-colors"
-          [class]="tab() === t.key ? 'border-kymo-amber text-kymo-amber' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
+          [class]="tab() === t.key ? 'border-kymo-amber text-kymo-amber' : t.muted ? 'border-transparent text-kymo-faint hover:text-kymo-ink' : 'border-transparent text-kymo-muted hover:text-kymo-ink'"
           (click)="setTab(t.key)">{{ t.label }}
           @if (t.badge) { <span class="ml-1.5 tabular-nums text-kymo-faint">{{ t.badge }}</span> }
           @if (t.dot) { <span class="k-led bg-kymo-amber ml-1 align-middle" title="New error message in the last 24h" aria-label="new errors"></span> }
@@ -131,53 +238,8 @@
 
     <div role="tabpanel" [id]="'wl-panel-' + tab()" [attr.aria-labelledby]="'wl-tab-' + tab()" tabindex="0" class="outline-none">
       @switch (tab()) {
-        @case ('timeline') {
-          <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_20rem] gap-6 items-start">
-            <app-workload-timeline [workloadId]="id()" [revisions]="ctx().revisions" />
-            <section class="k-panel k-paper p-4" aria-labelledby="wl-score-title">
-              <h2 id="wl-score-title" class="k-label mb-5">Stability score</h2>
-              @if (score(); as s) {
-                <div class="flex flex-col items-center gap-5">
-                  <app-stability-gauge [score]="s.score" [size]="140" />
-                  <div class="w-full grid grid-cols-3 border border-kymo-rule divide-x divide-kymo-rule bg-kymo-panel text-center" aria-label="Counts in the scoring window (24h)">
-                    <div class="py-2"><p class="k-label">Restarts 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.restarts ? 'text-kymo-ink' : 'text-kymo-faint'">{{ s.restarts }}</p></div>
-                    <div class="py-2"><p class="k-label">Crashes 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.crashes ? 'text-kymo-danger' : 'text-kymo-faint'">{{ s.crashes }}</p></div>
-                    <div class="py-2"><p class="k-label">OOMs 24h</p><p class="text-lg font-semibold tabular-nums mt-1" [class]="s.ooms ? 'text-kymo-amber' : 'text-kymo-faint'">{{ s.ooms }}</p></div>
-                  </div>
-                  <div class="w-full space-y-2.5 bg-kymo-panel border border-kymo-rule p-3">
-                    @for (p of penalties(); track p.name) {
-                      <div class="flex items-center justify-between">
-                        <span class="k-label">{{ p.name }} penalty</span>
-                        <span class="text-xs tabular-nums" [class]="p.value > 0 ? 'text-kymo-ink' : 'text-kymo-faint'">{{ p.value > 0 ? '−' : '' }}{{ p.value | number:'1.2-2' }}</span>
-                      </div>
-                    }
-                    <div class="border-t border-kymo-rule pt-2.5 flex items-baseline justify-between">
-                      <span class="k-label !text-kymo-ink">Final score</span>
-                      <span class="text-2xl font-semibold tabular-nums" [class]="s.score | scoreClass">{{ s.score | number:'1.1-1' }}</span>
-                    </div>
-                  </div>
-                  @if (spark(); as sp) {
-                    <div class="w-full">
-                      <div class="flex items-baseline justify-between mb-1">
-                        <span class="k-label">History</span>
-                        <span class="text-[11px] text-kymo-faint tabular-nums">{{ sp.count }} pt{{ sp.count === 1 ? '' : 's' }} · {{ sp.min | number:'1.0-0' }}–{{ sp.max | number:'1.0-0' }}</span>
-                      </div>
-                      <svg viewBox="0 0 200 44" class="w-full h-11 bg-kymo-panel border border-kymo-rule" preserveAspectRatio="none" role="img"
-                           [attr.aria-label]="'Score history, oldest to newest, ' + sp.count + ' points, latest ' + (s.score | number:'1.0-0')">
-                        <line x1="0" y1="22" x2="200" y2="22" stroke="var(--color-kymo-grid)" stroke-width="1" vector-effect="non-scaling-stroke" />
-                        @if (!sp.single) {
-                          <polyline [attr.points]="sp.points" fill="none" [attr.stroke]="sp.color" stroke-width="1.5" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
-                        }
-                        <circle [attr.cx]="sp.lastX" [attr.cy]="sp.lastY" r="2" [attr.fill]="sp.color" />
-                      </svg>
-                    </div>
-                  }
-                </div>
-              } @else {
-                <app-empty-state icon="chart" message="No score yet" hint="Workload stability scores are computed periodically from lifecycle history." />
-              }
-            </section>
-          </div>
+        @case ('activity') {
+          <app-workload-timeline [workloadId]="id()" [revisions]="isJobKind() ? [] : ctx().revisions" />
         }
         @case ('pods') {
           <app-workload-pods [workloadId]="id()" [instances]="detail()!.instances" [revisions]="ctx().revisions" [label]="instanceLabel()" />
@@ -213,7 +275,7 @@
     </section>
         }
         @case ('errors') {
-          <app-workload-errors [workloadId]="id()" [namespace]="w.namespace ?? ''" [historyOnly]="isRemovedCluster()" />
+          <app-workload-errors [workloadId]="id()" [namespace]="w.namespace ?? ''" [historyOnly]="isRemovedCluster()" (captureChange)="captureOn.set($event)" />
         }
         @case ('runs') {
           @if (isCronJob()) {
@@ -269,5 +331,13 @@
         }
       }
     </div>
+
+    <p class="text-[11px] text-kymo-faint" [title]="w.first_seen_at + ' → ' + w.last_seen_at">First seen {{ w.first_seen_at | timeago }} · last seen {{ w.last_seen_at | timeago }}</p>
+
+    @if (restartConfirm()) {
+      <app-confirm-dialog title="Rollout restart?" [danger]="false" confirmLabel="Restart"
+        [message]="'Triggers a rolling restart of ' + w.name + '. Its pods are replaced one by one.'"
+        (confirmed)="confirmRestart()" (cancelled)="restartConfirm.set(false)" />
+    }
   }
 </div>

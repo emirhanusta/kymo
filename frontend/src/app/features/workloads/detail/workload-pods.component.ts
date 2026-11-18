@@ -59,71 +59,60 @@ interface Section {
         <table class="k-table">
           <thead>
             <tr>
-              <th><span class="sr-only">Expand</span></th>
               <th>{{ label() }}</th>
-              <th class="hidden lg:table-cell">Node</th>
               <th>Status</th>
-              <th>Containers</th>
-              <th class="text-right hidden sm:table-cell">Restarts</th>
-              <th class="text-right hidden sm:table-cell">Crashes</th>
-              <th class="text-right hidden md:table-cell">First seen</th>
-              <th class="text-right">Last seen</th>
+              <th class="text-right">Restarts</th>
+              <th class="text-right hidden sm:table-cell">Age</th>
+              <th class="hidden lg:table-cell">Node</th>
               <th class="text-right"><span class="sr-only">Actions</span></th>
             </tr>
           </thead>
           <tbody>
             @for (p of pods; track p.key) {
               <tr class="hover:bg-kymo-raised/60 transition-colors">
-                <td class="pl-4 pr-0 py-2.5 w-6">
-                  <button type="button" class="text-kymo-amber w-4" [attr.aria-expanded]="isExpanded(p.key)" [attr.aria-controls]="'pod-' + p.key"
-                          [attr.aria-label]="(isExpanded(p.key) ? 'Collapse ' : 'Expand ') + p.name" (click)="toggleRow(p.key)">{{ isExpanded(p.key) ? '▾' : '▸' }}</button>
-                </td>
-                <td class="px-4 py-2.5 max-w-[16rem]"><div class="truncate text-kymo-ink" [title]="p.name">{{ p.name }}</div></td>
-                <td class="px-4 py-2.5 text-xs text-kymo-muted hidden lg:table-cell"><div class="truncate max-w-[12rem]" [title]="p.node">{{ p.node || '—' }}</div></td>
-                <td class="px-4 py-2.5"><app-status-badge [status]="p.status" /></td>
-                <td class="px-4 py-2.5">
-                  <div class="flex flex-wrap gap-1.5">
-                    @for (c of p.containers; track c.id) {
-                      <span class="inline-flex items-stretch h-5 text-[11px] border border-kymo-rule">
-                        <a [routerLink]="['/containers', c.id]"
-                           class="inline-flex items-center gap-1.5 px-1.5 text-kymo-ink hover:text-kymo-amber transition-colors"
-                           [title]="c.name + ' · ' + c.current_status">
-                          <span class="k-led" [class]="dotClass(c.current_status)"></span>{{ c.name }}
-                        </a>
-                        @if (isActive(c) || hasSnapshots(c)) {
-                        <button type="button" class="px-1 border-l border-kymo-rule text-kymo-muted hover:text-kymo-amber transition-colors"
-                                [attr.aria-label]="(isActive(c) ? 'Logs of ' : 'Crash logs of ') + c.name" [title]="isActive(c) ? 'Live logs' : 'Crash logs'" (click)="openLogs(p, c)">
-                          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" /></svg>
-                        </button>
-                        }
-                      </span>
-                    }
+                <td class="px-4 py-2.5 max-w-[22rem]">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <button type="button" class="text-kymo-amber w-4 flex-none" [attr.aria-expanded]="isExpanded(p.key)" [attr.aria-controls]="'pod-' + p.key"
+                            [attr.aria-label]="(isExpanded(p.key) ? 'Collapse ' : 'Expand ') + p.name" (click)="toggleRow(p.key)">{{ isExpanded(p.key) ? '▾' : '▸' }}</button>
+                    <span class="truncate text-kymo-ink" [title]="p.name">{{ p.name }}</span>
+                    @if (p.containers.length > 1) { <span class="text-[11px] text-kymo-faint flex-none tabular-nums">{{ p.containers.length }} containers</span> }
                   </div>
                 </td>
-                <td class="px-4 py-2.5 text-right text-xs tabular-nums text-kymo-muted hidden sm:table-cell">{{ p.restarts }}</td>
-                <td class="px-4 py-2.5 text-right text-xs tabular-nums hidden sm:table-cell" [class]="p.crashes > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ p.crashes }}</td>
-                <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell" [title]="p.firstSeen">{{ p.firstSeen | timeago }}</td>
-                <td class="px-4 py-2.5 text-right text-xs text-kymo-muted whitespace-nowrap" [title]="p.lastSeen">{{ p.lastSeen | timeago }}</td>
+                <td class="px-4 py-2.5"><app-status-badge [status]="p.status" /></td>
+                <td class="px-4 py-2.5 text-right text-xs tabular-nums" [class]="p.crashes + p.ooms > 0 ? 'text-kymo-danger' : 'text-kymo-muted'"
+                    [title]="p.crashes + ' crash' + (p.crashes === 1 ? '' : 'es') + ', ' + p.ooms + ' OOM kill' + (p.ooms === 1 ? '' : 's')">{{ p.restarts }}</td>
+                <td class="px-4 py-2.5 text-right text-xs tabular-nums text-kymo-muted whitespace-nowrap hidden sm:table-cell"
+                    [title]="'First seen ' + p.firstSeen + ' · last seen ' + p.lastSeen">{{ age(p) }}</td>
+                <td class="px-4 py-2.5 text-xs text-kymo-muted hidden lg:table-cell"><div class="truncate max-w-[12rem]" [title]="p.node">{{ p.node || '—' }}</div></td>
                 <td class="px-4 py-2.5 text-right whitespace-nowrap">
-                  @if (p.current && !frozen()) {
-                    <button type="button" class="k-btn k-btn-sm" [attr.aria-label]="'Logs of ' + p.name" (click)="openLogs(p)">
-                      @if (p.status === 'running') { <span class="k-led bg-kymo-running animate-pulse" aria-hidden="true"></span> }
-                      Logs
-                    </button>
-                  } @else if (p.crashes + p.ooms > 0) {
-                    <button type="button" class="k-btn k-btn-sm" [attr.aria-label]="'Crash logs of ' + p.name" (click)="openLogs(p)">Crash logs</button>
-                  }
+                  <span class="inline-flex gap-1">
+                    @if (p.current && !frozen()) {
+                      <button type="button" class="k-btn k-btn-sm k-btn-icon" [attr.aria-label]="'Live logs of ' + p.name" title="Live logs" (click)="openLogs(p)">
+                        @if (p.status === 'running') { <span class="k-led bg-kymo-running animate-pulse" aria-hidden="true"></span> }
+                        @else { <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h7" /></svg> }
+                      </button>
+                    } @else if (p.crashes + p.ooms > 0) {
+                      <button type="button" class="k-btn k-btn-sm k-btn-icon" [attr.aria-label]="'Crash logs of ' + p.name" title="Crash logs" (click)="openLogs(p)">
+                        <svg class="w-3 h-3 text-kymo-danger" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" /></svg>
+                      </button>
+                    }
+                    @if (p.containers.length === 1) {
+                      <a [routerLink]="['/containers', p.containers[0].id]" class="k-btn k-btn-sm k-btn-icon" [attr.aria-label]="'Open container of ' + p.name" title="Container detail">
+                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+                      </a>
+                    }
+                  </span>
                 </td>
               </tr>
               @if (isExpanded(p.key)) {
                 <tr [id]="'pod-' + p.key" class="bg-kymo-deep/60">
-                  <td></td>
-                  <td colspan="9" class="px-4 py-3">
+                  <td colspan="6" class="px-4 py-3">
                     <dl class="flex gap-x-6 gap-y-1 flex-wrap text-xs mb-3">
                       <div class="flex gap-2"><dt class="k-label">node</dt><dd class="text-kymo-ink">{{ p.node || '—' }}</dd></div>
                       <div class="flex gap-2"><dt class="k-label">revision</dt><dd class="text-kymo-ink">{{ p.revision ? short(p.revision) : 'unknown' }}</dd></div>
                       <div class="flex gap-2"><dt class="k-label">first seen</dt><dd class="text-kymo-ink" [title]="p.firstSeen">{{ p.firstSeen | timeago }}</dd></div>
                       <div class="flex gap-2"><dt class="k-label">last seen</dt><dd class="text-kymo-ink" [title]="p.lastSeen">{{ p.lastSeen | timeago }}</dd></div>
+                      <div class="flex gap-2"><dt class="k-label">crashes</dt><dd class="text-kymo-ink tabular-nums">{{ p.crashes }}</dd></div>
                     </dl>
                     <table class="k-table">
                       <thead><tr>
@@ -217,6 +206,7 @@ export class WorkloadPodsComponent {
   readonly isActive = (c: Container) => !this.sources.isRemoved(c.source_name) && normalizeStatus(c.current_status) !== 'stopped';
   /** Stopped containers keep crash-time snapshots only when they crashed or were OOM-killed. */
   readonly hasSnapshots = (c: Container) => c.crash_count + c.oom_count > 0;
+  readonly age = (p: PodRow) => formatSpan(Date.now() - time(p.firstSeen));
   readonly restartsOf = (c: Container) => Math.max(0, c.start_count - 1);
 
   /** Pods of a removed cluster no longer exist: only crash snapshots can be opened. */
