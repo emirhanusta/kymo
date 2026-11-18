@@ -17,6 +17,7 @@ import { CONFIG_ORIGIN_HINT } from '../../../shared/utils/source';
 import { SettingsNavComponent } from '../settings-nav.component';
 import { ChannelDialogComponent } from './channel-dialog/channel-dialog.component';
 import { channelFilterSummary, channelTestMessage } from './channel-utils';
+import { AuthService } from '../../../core/services/auth.service';
 
 const TYPE_LABEL = { slack: 'Slack', discord: 'Discord', webhook: 'Webhook' } as const;
 
@@ -32,6 +33,7 @@ const TYPE_LABEL = { slack: 'Slack', discord: 'Discord', webhook: 'Webhook' } as
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class NotificationsComponent {
+  readonly auth = inject(AuthService);
   private api     = inject(NotificationService);
   private sources = inject(SourceService);
   private toast   = inject(ToastService);

@@ -13,7 +13,7 @@ RUN npx ng build --configuration production
 # ---------------------------------------------------------------------------
 # Stage 2: build the Go service
 # ---------------------------------------------------------------------------
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /app
 

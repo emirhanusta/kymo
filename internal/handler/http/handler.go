@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/emirhanusta/kymo/internal/auth"
 	"github.com/emirhanusta/kymo/internal/model"
 	"github.com/emirhanusta/kymo/internal/repository"
 	"github.com/emirhanusta/kymo/internal/service"
@@ -34,6 +35,7 @@ type Handler struct {
 	errlogs      ErrorLogAPI
 	publicURL    string
 	notifEnabled bool
+	auth         *auth.Service
 }
 
 // New creates a Handler, registers all API routes on r, and returns the Handler.
@@ -47,105 +49,112 @@ func New(svc service.RecorderService, mgmt service.ManagementService, sources *s
 	return h
 }
 
-// registerRoutes mounts all KYMO endpoints under /api/v1.
+// registerRoutes mounts all KYMO endpoints under /api/v1. Every route is
+// guarded with an explicit minimum role (viewer for reads); the only public
+// ones are /healthz and the /auth endpoints needed to sign in.
 func (h *Handler) registerRoutes(r *gin.Engine) {
 	v1 := r.Group("/api/v1")
+	if h.auth != nil {
+		v1.Use(h.auth.Middleware())
+	}
+	viewer, operator, admin := h.require(model.RoleViewer), h.require(model.RoleOperator), h.require(model.RoleAdmin)
 	{
 		v1.GET("/healthz", h.Healthz)
+		h.registerAuthRoutes(v1)
 
-		v1.GET("/meta", h.Meta)
+		v1.GET("/meta", viewer, h.Meta)
 
 		// Sources
-		v1.GET("/sources", h.ListSources)
-		v1.POST("/sources", h.CreateSource)
-		v1.GET("/sources/removed", h.ListRemovedSources)
-		v1.DELETE("/sources/removed/:name", h.PurgeRemovedSource)
-		v1.POST("/sources/test", h.TestSource)
-		v1.POST("/sources/reload", h.ReloadSources)
-		v1.POST("/sources/contexts", h.SourceContexts)
-		v1.PUT("/sources/:name", h.UpdateSource)
-		v1.DELETE("/sources/:name", h.DeleteSource)
+		v1.GET("/sources", viewer, h.ListSources)
+		v1.POST("/sources", admin, h.CreateSource)
+		v1.GET("/sources/removed", viewer, h.ListRemovedSources)
+		v1.DELETE("/sources/removed/:name", admin, h.PurgeRemovedSource)
+		v1.POST("/sources/test", admin, h.TestSource)
+		v1.POST("/sources/reload", admin, h.ReloadSources)
+		v1.POST("/sources/contexts", admin, h.SourceContexts)
+		v1.PUT("/sources/:name", admin, h.UpdateSource)
+		v1.DELETE("/sources/:name", admin, h.DeleteSource)
 
 		// Read-only container endpoints
-		v1.GET("/containers", h.ListContainers)
-		v1.GET("/containers/:id", h.GetContainer)
-		v1.GET("/containers/:id/score", h.GetStabilityScore)
-		v1.GET("/containers/:id/score/history", h.GetScoreHistory)
-		v1.GET("/containers/:id/events", h.GetLifecycleEvents)
-		v1.GET("/containers/:id/resources", h.GetResourceSamples)
-		v1.GET("/containers/:id/logs", h.GetContainerLogs)
-		v1.GET("/containers/:id/crash-logs", h.GetContainerCrashLogs)
+		v1.GET("/containers", viewer, h.ListContainers)
+		v1.GET("/containers/:id", viewer, h.GetContainer)
+		v1.GET("/containers/:id/score", viewer, h.GetStabilityScore)
+		v1.GET("/containers/:id/score/history", viewer, h.GetScoreHistory)
+		v1.GET("/containers/:id/events", viewer, h.GetLifecycleEvents)
+		v1.GET("/containers/:id/resources", viewer, h.GetResourceSamples)
+		v1.GET("/containers/:id/logs", viewer, h.GetContainerLogs)
+		v1.GET("/containers/:id/crash-logs", viewer, h.GetContainerCrashLogs)
 
 		// Container management endpoints
-		v1.POST("/containers/:id/restart", h.RestartContainer)
+		v1.POST("/containers/:id/restart", operator, h.RestartContainer)
 
-		// Soft-delete / ignore / restore / hard-delete endpoints
-		v1.DELETE("/containers/:id", h.DeleteContainer)
-		v1.POST("/containers/:id/restore", h.RestoreContainer)
-		v1.DELETE("/containers/:id/permanent", h.HardDeleteContainer)
+		// Ignore / restore (operator); permanent deletion and purges (admin)
+		v1.DELETE("/containers/:id", operator, h.DeleteContainer)
+		v1.POST("/containers/:id/restore", operator, h.RestoreContainer)
+		v1.DELETE("/containers/:id/permanent", admin, h.HardDeleteContainer)
 
 		// Archive and ignored listings + bulk purge
-		v1.GET("/archive", h.GetArchive)
-		v1.DELETE("/archive", h.PurgeArchive)
-		v1.GET("/ignored", h.GetIgnored)
-		v1.DELETE("/ignored", h.PurgeIgnored)
+		v1.GET("/archive", viewer, h.GetArchive)
+		v1.DELETE("/archive", admin, h.PurgeArchive)
+		v1.GET("/ignored", viewer, h.GetIgnored)
+		v1.DELETE("/ignored", admin, h.PurgeIgnored)
 
 		// Namespace listing endpoint (Kubernetes)
-		v1.GET("/namespaces", h.ListNamespaces)
+		v1.GET("/namespaces", viewer, h.ListNamespaces)
 
 		// Deployment management endpoints (Kubernetes)
-		v1.GET("/deployments", h.ListDeployments)
-		v1.GET("/deployments/:namespace/:name", h.GetDeploymentDetail)
-		v1.POST("/deployments/:namespace/:name/scale", h.ScaleDeployment)
-		v1.POST("/deployments/:namespace/:name/restart", h.RestartDeployment)
+		v1.GET("/deployments", viewer, h.ListDeployments)
+		v1.GET("/deployments/:namespace/:name", viewer, h.GetDeploymentDetail)
+		v1.POST("/deployments/:namespace/:name/scale", operator, h.ScaleDeployment)
+		v1.POST("/deployments/:namespace/:name/restart", operator, h.RestartDeployment)
 
 		// Pod detail endpoint (Kubernetes)
-		v1.GET("/pods/:namespace/:name", h.GetPodContainers)
+		v1.GET("/pods/:namespace/:name", viewer, h.GetPodContainers)
 
 		// CronJob tracking endpoints (Kubernetes)
-		v1.GET("/cronjobs", h.ListCronJobs)
-		v1.GET("/cronjobs/:namespace/:name/executions", h.GetCronJobExecutions)
+		v1.GET("/cronjobs", viewer, h.ListCronJobs)
+		v1.GET("/cronjobs/:namespace/:name/executions", viewer, h.GetCronJobExecutions)
 
 		// Workloads (all instances of a Deployment / StatefulSet / … aggregated)
-		v1.GET("/workloads", h.ListWorkloads)
-		v1.GET("/workloads/:id", h.GetWorkload)
-		v1.GET("/workloads/:id/events", h.GetWorkloadEvents)
-		v1.GET("/workloads/:id/resources", h.GetWorkloadResources)
-		v1.GET("/workloads/:id/crash-logs", h.GetWorkloadCrashLogs)
-		v1.GET("/workloads/:id/revisions", h.GetWorkloadRevisions)
-		v1.GET("/workloads/:id/k8s-events", h.GetWorkloadK8sEvents)
-		v1.GET("/k8s-events", h.ListK8sEvents)
-		v1.GET("/k8s-events/reasons", h.GetK8sEventReasons)
-		v1.GET("/workloads/:id/score/history", h.GetWorkloadScoreHistory)
+		v1.GET("/workloads", viewer, h.ListWorkloads)
+		v1.GET("/workloads/:id", viewer, h.GetWorkload)
+		v1.GET("/workloads/:id/events", viewer, h.GetWorkloadEvents)
+		v1.GET("/workloads/:id/resources", viewer, h.GetWorkloadResources)
+		v1.GET("/workloads/:id/crash-logs", viewer, h.GetWorkloadCrashLogs)
+		v1.GET("/workloads/:id/revisions", viewer, h.GetWorkloadRevisions)
+		v1.GET("/workloads/:id/k8s-events", viewer, h.GetWorkloadK8sEvents)
+		v1.GET("/k8s-events", viewer, h.ListK8sEvents)
+		v1.GET("/k8s-events/reasons", viewer, h.GetK8sEventReasons)
+		v1.GET("/workloads/:id/score/history", viewer, h.GetWorkloadScoreHistory)
 
 		// Issues (server-side derived problems)
-		v1.GET("/issues", h.ListIssues)
-		v1.GET("/issues/summary", h.IssueSummary)
-		v1.GET("/issues/:id", h.GetIssue)
-		v1.GET("/workloads/:id/issues", h.GetWorkloadIssues)
+		v1.GET("/issues", viewer, h.ListIssues)
+		v1.GET("/issues/summary", viewer, h.IssueSummary)
+		v1.GET("/issues/:id", viewer, h.GetIssue)
+		v1.GET("/workloads/:id/issues", viewer, h.GetWorkloadIssues)
 
 		// Notification channels
-		v1.GET("/notifications/channels", h.ListChannels)
-		v1.POST("/notifications/channels", h.CreateChannel)
-		v1.PUT("/notifications/channels/:id", h.UpdateChannel)
-		v1.DELETE("/notifications/channels/:id", h.DeleteChannel)
-		v1.POST("/notifications/channels/:id/test", h.TestChannel)
-		v1.GET("/notifications/deliveries", h.ListDeliveries)
+		v1.GET("/notifications/channels", viewer, h.ListChannels)
+		v1.POST("/notifications/channels", admin, h.CreateChannel)
+		v1.PUT("/notifications/channels/:id", admin, h.UpdateChannel)
+		v1.DELETE("/notifications/channels/:id", admin, h.DeleteChannel)
+		v1.POST("/notifications/channels/:id/test", admin, h.TestChannel)
+		v1.GET("/notifications/deliveries", viewer, h.ListDeliveries)
 
 		// Opt-in error-log capture and the captured error signatures
-		v1.GET("/log-capture/targets", h.ListLogCaptureTargets)
-		v1.POST("/log-capture/targets", h.CreateLogCaptureTarget)
-		v1.DELETE("/log-capture/targets/:id", h.DeleteLogCaptureTarget)
-		v1.GET("/log-capture/status", h.LogCaptureStatus)
-		v1.GET("/workloads/:id/log-capture", h.GetWorkloadLogCapture)
-		v1.PUT("/workloads/:id/log-capture", h.SetWorkloadLogCapture)
-		v1.GET("/workloads/:id/errors", h.GetWorkloadErrors)
-		v1.GET("/errors", h.ListErrors)
-		v1.GET("/errors/:id", h.GetError)
-		v1.GET("/errors/:id/occurrences", h.ListErrorOccurrences)
+		v1.GET("/log-capture/targets", viewer, h.ListLogCaptureTargets)
+		v1.POST("/log-capture/targets", operator, h.CreateLogCaptureTarget)
+		v1.DELETE("/log-capture/targets/:id", operator, h.DeleteLogCaptureTarget)
+		v1.GET("/log-capture/status", viewer, h.LogCaptureStatus)
+		v1.GET("/workloads/:id/log-capture", viewer, h.GetWorkloadLogCapture)
+		v1.PUT("/workloads/:id/log-capture", operator, h.SetWorkloadLogCapture)
+		v1.GET("/workloads/:id/errors", viewer, h.GetWorkloadErrors)
+		v1.GET("/errors", viewer, h.ListErrors)
+		v1.GET("/errors/:id", viewer, h.GetError)
+		v1.GET("/errors/:id/occurrences", viewer, h.ListErrorOccurrences)
 
 		// Recent events endpoint (cross-container)
-		v1.GET("/events/recent", h.GetRecentEvents)
+		v1.GET("/events/recent", viewer, h.GetRecentEvents)
 	}
 }
 
@@ -427,6 +436,7 @@ func (h *Handler) DeleteContainer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
+	h.audit(c, "container."+body.Mode, "container", id, nil)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": message})
 }
 
@@ -440,6 +450,7 @@ func (h *Handler) RestoreContainer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
+	h.audit(c, "container.restore", "container", id, nil)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Container restored"})
 }
 
@@ -458,6 +469,7 @@ func (h *Handler) HardDeleteContainer(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
+	h.audit(c, "container.hard_delete", "container", id, nil)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Container permanently deleted"})
 }
 
@@ -521,6 +533,7 @@ func (h *Handler) PurgeArchive(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
+	h.audit(c, "container.purge_archive", "source", sourceName, map[string]any{"deleted": count})
 	c.JSON(http.StatusOK, gin.H{"success": true, "deleted": count, "message": "All archived containers permanently deleted"})
 }
 
@@ -544,6 +557,7 @@ func (h *Handler) PurgeIgnored(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
 		return
 	}
+	h.audit(c, "container.purge_ignored", "source", sourceName, map[string]any{"deleted": count})
 	c.JSON(http.StatusOK, gin.H{"success": true, "deleted": count, "message": "All ignored containers permanently deleted"})
 }
 

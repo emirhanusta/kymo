@@ -56,7 +56,7 @@
           @if (item.kind === 'page') {
             <span class="text-kymo-faint w-3" aria-hidden="true">#</span>
             <span class="flex-1 text-kymo-ink">{{ item.label }}</span>
-            <span class="text-kymo-faint">{{ item.path }}</span>
+            <span class="text-kymo-faint">{{ item.path === '#signout' ? '' : item.path }}</span>
           } @else if (item.kind === 'workload') {
             <app-status-badge [status]="item.workload.status" compact />
             <app-workload-badge [kind]="item.workload.kind" />

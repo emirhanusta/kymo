@@ -7,6 +7,7 @@ import { Subject, forkJoin, of } from 'rxjs';
 import { catchError, debounceTime, map, switchMap } from 'rxjs/operators';
 
 import { ContainerService } from '../../core/services/container.service';
+import { AuthService } from '../../core/services/auth.service';
 import { SourceStateService } from '../../core/services/source-state.service';
 import { Container, WorkloadSummary } from '../../core/models/container.model';
 import { DialogDirective } from '../../shared/directives/dialog.directive';
@@ -41,6 +42,7 @@ export class CommandPaletteComponent {
   private svc    = inject(ContainerService);
   private router = inject(Router);
   private scope  = inject(SourceStateService);
+  private auth   = inject(AuthService);
 
   query      = signal('');
   private foundContainers = signal<Container[]>([]);
@@ -57,7 +59,7 @@ export class CommandPaletteComponent {
 
   pages = computed(() => {
     const q = this.query().trim().toLowerCase();
-    return this.tabs().filter(t => !q || t.label.toLowerCase().includes(q) || t.path.includes(q));
+    return this.tabs().filter(t => !q || t.label.toLowerCase().includes(q) || (t.path.includes(q) && t.path !== '#signout'));
   });
 
   items = computed<PaletteItem[]>(() => [
@@ -124,6 +126,10 @@ export class CommandPaletteComponent {
   open(item: PaletteItem): void {
     this.closed.emit();
     if (item.kind === 'page') {
+      if (item.path === '#signout') {
+        this.auth.logout().subscribe({ complete: () => this.router.navigate(['/login']), error: () => this.router.navigate(['/login']) });
+        return;
+      }
       // Page paths may carry a query string (e.g. /workloads?kind=CronJob).
       this.router.navigateByUrl(item.path);
     } else if (item.kind === 'workload') {

@@ -17,6 +17,7 @@ import { EmptyStateComponent } from '../../../shared/components/empty-state/empt
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { CAPTURE_PRIVACY_NOTE, ERROR_WINDOWS, captureLockReason } from '../../../shared/utils/error-logs';
+import { AuthService } from '../../../core/services/auth.service';
 
 const PAGE = 50;
 
@@ -45,7 +46,7 @@ interface OccState {
             <button type="button" role="switch" [attr.aria-checked]="c.enabled" aria-label="Capture error logs"
               class="relative w-8 h-4 border transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-none"
               [class]="c.enabled ? 'border-kymo-amber bg-kymo-amber/20' : 'border-kymo-rule bg-kymo-deep'"
-              [disabled]="toggleDisabled()" [title]="lockReason() || disabledReason()" (click)="toggle()">
+              [disabled]="toggleDisabled()" [title]="auth.denyHint('logcapture:manage') || lockReason() || disabledReason()" (click)="toggle()">
               <span class="absolute top-0.5 w-2.5 h-2.5 transition-all" [class]="c.enabled ? 'left-[1.1rem] bg-kymo-amber' : 'left-0.5 bg-kymo-faint'"></span>
             </button>
             <span class="text-xs text-kymo-ink">Capture error logs</span>
@@ -161,6 +162,7 @@ interface OccState {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class WorkloadErrorsComponent {
+  readonly auth = inject(AuthService);
   private api   = inject(ErrorLogService);
   private toast = inject(ToastService);
 
@@ -184,7 +186,7 @@ export class WorkloadErrorsComponent {
 
   lockReason = computed(() => captureLockReason(this.capture(), this.namespace()));
   disabledReason = computed(() => (this.historyOnly() ? 'read-only (removed cluster)' : ''));
-  toggleDisabled = computed(() => this.capBusy() || this.historyOnly() || !!this.lockReason() || !this.capture()?.global_enabled);
+  toggleDisabled = computed(() => !this.auth.can('logcapture:manage') || this.capBusy() || this.historyOnly() || !!this.lockReason() || !this.capture()?.global_enabled);
 
   private sigSub?: Subscription;
   private seq = 0;

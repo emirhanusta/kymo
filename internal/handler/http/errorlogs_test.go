@@ -88,7 +88,7 @@ func errRouter(f *fakeErrAPI) *gin.Engine {
 	r := gin.New()
 	r.UseRawPath = true
 	r.UnescapePathValues = true
-	New(nil, nil, nil, nil, zap.NewNop(), r, WithErrorLogs(f))
+	New(nil, nil, nil, nil, zap.NewNop(), r, WithErrorLogs(f), WithAuth(disabledAuth()))
 	return r
 }
 
@@ -243,7 +243,7 @@ func TestErrorEndpoints(t *testing.T) {
 func TestErrorEndpointsUnavailableWithoutService(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	New(nil, nil, nil, nil, zap.NewNop(), r)
+	New(nil, nil, nil, nil, zap.NewNop(), r, WithAuth(disabledAuth()))
 	if w := request(r, "GET", "/api/v1/errors", nil); w.Code != http.StatusServiceUnavailable {
 		t.Errorf("without service: %d", w.Code)
 	}

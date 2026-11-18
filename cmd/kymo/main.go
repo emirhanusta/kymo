@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"slices"
 	"strings"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/emirhanusta/kymo/internal/auth"
 	"github.com/emirhanusta/kymo/internal/collector"
 	k8scollector "github.com/emirhanusta/kymo/internal/collector/kubernetes"
 	"github.com/emirhanusta/kymo/internal/config"
@@ -32,6 +34,9 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 {
+		os.Exit(runCLI(os.Args[1:]))
+	}
 	// -------------------------------------------------------------------------
 	// Configuration
 	// -------------------------------------------------------------------------
@@ -69,6 +74,15 @@ func main() {
 			log.Fatal("database migration failed", zap.Error(err))
 		}
 	}
+
+	// -------------------------------------------------------------------------
+	// Accounts & access control
+	// -------------------------------------------------------------------------
+	authSvc, err := auth.New(db.Auth(), auth.OptionsFromConfig(cfg), log)
+	if err != nil {
+		log.Fatal("invalid auth configuration", zap.Error(err))
+	}
+	setupAuth(authSvc, log)
 
 	// -------------------------------------------------------------------------
 	// Recorder + management + sources
@@ -187,18 +201,17 @@ func main() {
 	// c.Param("id") returns the logical ID (e.g. "namespace/pod/container").
 	router.UseRawPath = true
 	router.UnescapePathValues = true
-	router.Use(gin.Recovery())
-	router.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Content-Type")
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
+	if len(cfg.Server.TrustedProxies) > 0 {
+		if err := router.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+			log.Fatal("invalid server.trusted_proxies", zap.Error(err))
 		}
-		c.Next()
-	})
+	}
+	router.Use(gin.Recovery())
+	// Same-origin by default; only server.allowed_origins get CORS (with credentials).
+	router.Use(auth.CORS(cfg.Server.AllowedOrigins))
+	router.Use(auth.CSRF(cfg.Server.PublicURL, cfg.Server.AllowedOrigins))
 	httphandler.New(svc, mgmt, sources, db, log, router,
+		httphandler.WithAuth(authSvc),
 		httphandler.WithIssues(db.Issues()),
 		httphandler.WithNotifications(notifier),
 		httphandler.WithErrorLogs(errorSvc),
@@ -247,6 +260,10 @@ func main() {
 			log.Error("config.yaml reload failed; keeping current sources", zap.Error(err))
 			return
 		}
+		if len(res.Added)+len(res.Removed)+len(res.Updated) > 0 {
+			authSvc.Record(rootCtx, auth.SystemActor, "source.config_reload", "config", cfg.File,
+				map[string]any{"added": res.Added, "removed": res.Removed, "updated": res.Updated})
+		}
 		log.Info("config.yaml sources reloaded",
 			zap.Strings("added", res.Added), zap.Strings("removed", res.Removed),
 			zap.Strings("updated", res.Updated), zap.Strings("unchanged", res.Unchanged),
@@ -255,6 +272,8 @@ func main() {
 	if err := config.Watch(rootCtx, cfg.File, 500*time.Millisecond, reload); err != nil {
 		log.Warn("cannot watch config file; use POST /api/v1/sources/reload", zap.String("file", cfg.File), zap.Error(err))
 	}
+
+	go authSvc.Cleanup(rootCtx)
 
 	// Issue engine and notification workers.
 	notifier.Start(rootCtx)
@@ -283,8 +302,11 @@ func main() {
 // channels and log_capture (except retention) are applied live.
 func restartOnlyChanges(old, fresh *config.Config) string {
 	var changed []string
-	if old.Server != fresh.Server {
+	if !reflect.DeepEqual(old.Server, fresh.Server) {
 		changed = append(changed, "server")
+	}
+	if !reflect.DeepEqual(old.Auth, fresh.Auth) {
+		changed = append(changed, "auth")
 	}
 	if old.Database != fresh.Database {
 		changed = append(changed, "database")
@@ -357,4 +379,38 @@ func buildLogger(cfg config.LogConfig) (*zap.Logger, error) {
 	zapCfg.Level = level
 
 	return zapCfg.Build()
+}
+
+// setupAuth logs the auth mode and performs first-run bootstrap: when no users
+// exist yet the initial admin is created from KYMO_ADMIN_* (or with a random
+// password that is logged once). The variables are ignored once users exist.
+func setupAuth(a *auth.Service, log *zap.Logger) {
+	if !a.Enabled() {
+		log.Warn("AUTHENTICATION IS DISABLED (auth.enabled: false): every request acts as the owner. Use this for local development only and never expose KYMO like this")
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	opts := auth.BootstrapOptions{
+		Username:   os.Getenv("KYMO_ADMIN_USERNAME"),
+		Email:      os.Getenv("KYMO_ADMIN_EMAIL"),
+		Name:       os.Getenv("KYMO_ADMIN_NAME"),
+		Password:   os.Getenv("KYMO_ADMIN_PASSWORD"),
+		MustChange: envBool("KYMO_ADMIN_MUST_CHANGE_PASSWORD"),
+	}
+	if _, err := a.BootstrapAdmin(ctx, opts); err != nil {
+		log.Fatal("creating the initial admin account failed", zap.Error(err))
+	}
+	if a.OIDC != nil {
+		log.Info("single sign-on enabled; register this redirect URL at the identity provider", zap.String("redirect_url", a.OIDC.RedirectURL()))
+	}
+}
+
+// envBool reads a boolean environment variable (1/true/yes/on).
+func envBool(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }

@@ -76,6 +76,7 @@ func (h *Handler) RestartContainer(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
 			return
 		}
+		h.audit(c, "pod.restart", "pod", container.ID, map[string]any{"source": source})
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "pod deleted; its controller will recreate it"})
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"success": false, "message": "unsupported runtime"})
@@ -246,6 +247,7 @@ func (h *Handler) ScaleDeployment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
 		return
 	}
+	h.audit(c, "deployment.scale", "deployment", ns+"/"+name, map[string]any{"source": source, "replicas": body.Replicas})
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": fmt.Sprintf("scaled to %d replicas", body.Replicas)})
 }
 
@@ -264,6 +266,7 @@ func (h *Handler) RestartDeployment(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"success": false, "message": err.Error()})
 		return
 	}
+	h.audit(c, "deployment.restart", "deployment", ns+"/"+name, map[string]any{"source": source})
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "rolling restart triggered"})
 }
 

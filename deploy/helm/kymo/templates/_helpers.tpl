@@ -74,6 +74,23 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if and .Values.timescaledb.enabled (or .Values.database.dsn .Values.database.existingSecret) }}
 {{- fail "timescaledb.enabled=true builds the DSN automatically; unset database.dsn / database.existingSecret or set timescaledb.enabled=false" }}
 {{- end }}
+{{- if and .Values.auth.admin.password (lt (len .Values.auth.admin.password) 12) }}
+{{- fail "auth.admin.password must be at least 12 characters (or leave it empty to generate one)" }}
+{{- end }}
+{{- if and .Values.auth.admin.username (not (regexMatch "^[a-z0-9][a-z0-9._-]{1,63}$" .Values.auth.admin.username)) }}
+{{- fail "auth.admin.username must be 2-64 characters: lower-case letters, digits, '.', '_' or '-'" }}
+{{- end }}
+{{- if and .Values.auth.enabled .Values.auth.oidc.enabled }}
+{{- if not .Values.server.publicUrl }}
+{{- fail "auth.oidc.enabled=true requires server.publicUrl (the redirect URL is <publicUrl>/api/v1/auth/oidc/callback)" }}
+{{- end }}
+{{- if or (not .Values.auth.oidc.issuer) (not .Values.auth.oidc.clientId) }}
+{{- fail "auth.oidc.enabled=true requires auth.oidc.issuer and auth.oidc.clientId" }}
+{{- end }}
+{{- if and (not .Values.auth.oidc.clientSecret) (not .Values.auth.oidc.existingSecret) }}
+{{- fail "auth.oidc.enabled=true requires auth.oidc.clientSecret or auth.oidc.existingSecret" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.ingress.enabled (not .Values.ingress.hosts) }}
 {{- fail "ingress.enabled=true requires at least one entry in ingress.hosts" }}
 {{- end }}
@@ -100,6 +117,14 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- if .Values.secretKey.existingSecret }}{{ .Values.secretKey.existingSecretKey }}{{ else }}secret-key{{ end }}
 {{- end }}
 
+{{- define "kymo.oidcSecretName" -}}
+{{- default (include "kymo.secretName" .) .Values.auth.oidc.existingSecret }}
+{{- end }}
+
+{{- define "kymo.oidcSecretKey" -}}
+{{- if .Values.auth.oidc.existingSecret }}{{ .Values.auth.oidc.existingSecretKey }}{{ else }}oidc-client-secret{{ end }}
+{{- end }}
+
 {{/* Name of the object (ConfigMap or Secret) holding config.yaml. */}}
 {{- define "kymo.configName" -}}
 {{- printf "%s-config" (include "kymo.fullname" .) }}
@@ -122,7 +147,21 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $k8sEvents := dict "enabled" $c.k8sEvents.enabled "exclude_namespaces" ($c.k8sEvents.excludeNamespaces | default list) -}}
 {{- if $c.k8sEvents.normalReasons }}{{- $_ := set $k8sEvents "normal_reasons" $c.k8sEvents.normalReasons -}}{{- end -}}
 {{- $cfg := dict
-  "server" (dict "address" (printf ":%v" .Values.containerPort) "read_timeout" .Values.server.readTimeout "public_url" (.Values.server.publicUrl | default ""))
+  "server" (dict "address" (printf ":%v" .Values.containerPort) "read_timeout" .Values.server.readTimeout "public_url" (.Values.server.publicUrl | default "")
+    "allowed_origins" (.Values.auth.allowedOrigins | default list) "trusted_proxies" (.Values.auth.trustedProxies | default list))
+  "auth" (dict "enabled" .Values.auth.enabled "session_idle_timeout" .Values.auth.sessionIdleTimeout "session_max_age" .Values.auth.sessionMaxAge
+    "oidc" (dict
+      "enabled" .Values.auth.oidc.enabled
+      "name" .Values.auth.oidc.name
+      "issuer" .Values.auth.oidc.issuer
+      "client_id" .Values.auth.oidc.clientId
+      "scopes" .Values.auth.oidc.scopes
+      "allowed_domains" (.Values.auth.oidc.allowedDomains | default list)
+      "groups_claim" .Values.auth.oidc.groupsClaim
+      "role_mapping" (.Values.auth.oidc.roleMapping | default dict)
+      "default_role" .Values.auth.oidc.defaultRole
+      "auto_create" .Values.auth.oidc.autoCreate
+      "disable_password_login" .Values.auth.oidc.disablePasswordLogin))
   "database" (dict "max_conns" .Values.database.maxConns "auto_migrate" .Values.database.autoMigrate)
   "collector" (dict
     "stats_poll_interval" $c.statsPollInterval

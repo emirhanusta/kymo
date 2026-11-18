@@ -19,8 +19,24 @@ Check it is healthy:
   helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
 IMPORTANT
-  * KYMO has no authentication. Do not expose it publicly without an
-    authenticating proxy in front.
+{{- if not .Values.auth.enabled }}
+  * AUTHENTICATION IS DISABLED (auth.enabled=false): everyone who can reach KYMO
+    is the owner. Do not expose it.
+{{- else }}
+  * Initial admin account: username "{{ .Values.auth.admin.username | default "admin" }}". Read its password with:
+{{- if .Values.auth.admin.existingSecret }}
+      kubectl -n {{ .Release.Namespace }} get secret {{ .Values.auth.admin.existingSecret }} -o jsonpath='{.data.{{ .Values.auth.admin.existingSecretKeys.password }}}' | base64 -d
+{{- else }}
+      kubectl -n {{ .Release.Namespace }} get secret {{ include "kymo.secretName" . }} -o jsonpath='{.data.admin-password}' | base64 -d
+{{- end }}
+    It only works until the first password change{{ if .Values.auth.admin.mustChangePassword }} (KYMO asks for the change at first sign-in){{ end }}; after that the
+    stored value is no longer valid, and it is ignored once any user exists.
+{{- end }}
+{{- if and .Values.auth.enabled .Values.auth.oidc.enabled }}
+  * SSO is enabled. Register this redirect URL at your identity provider:
+      {{ .Values.server.publicUrl }}/api/v1/auth/oidc/callback
+{{- end }}
+  * Lockout recovery: kubectl -n {{ .Release.Namespace }} exec -it deploy/{{ include "kymo.fullname" . }} -- /kymo admin reset-password --username admin
   * KYMO_SECRET_KEY lives in Secret "{{ include "kymo.keySecretName" . }}" (key "{{ include "kymo.keySecretKey" . }}"). Back it up:
     stored kubeconfigs and notification URLs cannot be decrypted without it.
 {{- if .Values.timescaledb.enabled }}

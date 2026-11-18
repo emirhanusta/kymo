@@ -99,6 +99,8 @@ func (h *Handler) CreateLogCaptureTarget(c *gin.Context) {
 		h.errorLogsError(c, "create log capture target", err)
 		return
 	}
+	h.audit(c, "logcapture.target_create", "log_capture_target", strconv.FormatInt(t.ID, 10),
+		map[string]any{"source": in.SourceName, "namespace": in.Namespace, "workload_id": in.WorkloadID})
 	c.JSON(http.StatusCreated, t)
 }
 
@@ -118,6 +120,7 @@ func (h *Handler) DeleteLogCaptureTarget(c *gin.Context) {
 		h.errorLogsError(c, "delete log capture target", err)
 		return
 	}
+	h.audit(c, "logcapture.target_delete", "log_capture_target", strconv.FormatInt(id, 10), nil)
 	c.Status(http.StatusNoContent)
 }
 
@@ -155,6 +158,7 @@ func (h *Handler) SetWorkloadLogCapture(c *gin.Context) {
 		h.errorLogsError(c, "set workload log capture", err)
 		return
 	}
+	h.audit(c, "logcapture.workload_toggle", "workload", c.Param("id"), map[string]any{"enabled": *in.Enabled})
 	c.JSON(http.StatusOK, st)
 }
 

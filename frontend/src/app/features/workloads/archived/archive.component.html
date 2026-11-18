@@ -4,8 +4,8 @@
     @if (tab() === 'archived' && archived().length > 0) {
       <button
         class="k-btn k-btn-danger"
-        (click)="deleteAllArchived()"
-        title="Permanently delete all archived containers"
+        [disabled]="!auth.can('sources:manage')" (click)="deleteAllArchived()"
+        [title]="auth.denyHint('sources:manage') || 'Permanently delete all archived containers'"
       >
         ✕ Delete All Archived
       </button>
@@ -13,8 +13,8 @@
     @if (tab() === 'ignored' && ignored().length > 0) {
       <button
         class="k-btn k-btn-danger"
-        (click)="deleteAllIgnored()"
-        title="Permanently delete all ignored containers"
+        [disabled]="!auth.can('sources:manage')" (click)="deleteAllIgnored()"
+        [title]="auth.denyHint('sources:manage') || 'Permanently delete all ignored containers'"
       >
         ✕ Delete All Ignored
       </button>
@@ -82,8 +82,8 @@
                     <div class="flex items-center justify-end gap-2">
                       <button
                         class="k-btn k-btn-primary k-btn-sm"
-                        (click)="restore(c)"
-                        title="Restore container"
+                        [disabled]="!auth.can('workloads:manage')" (click)="restore(c)"
+                        [title]="auth.denyHint('workloads:manage') || 'Restore container'"
                       >
                         <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                           <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
@@ -93,8 +93,8 @@
                       </button>
                       <button
                         class="k-btn k-btn-danger k-btn-sm"
-                        (click)="hardDelete(c)"
-                        title="Permanently delete all data"
+                        [disabled]="!auth.can('sources:manage')" (click)="hardDelete(c)"
+                        [title]="auth.denyHint('sources:manage') || 'Permanently delete all data'"
                       >
                         ✕ Delete Forever
                       </button>
@@ -143,8 +143,8 @@
                     <div class="flex items-center justify-end">
                       <button
                         class="k-btn k-btn-primary k-btn-sm"
-                        (click)="restore(c)"
-                        title="Restore and resume tracking"
+                        [disabled]="!auth.can('workloads:manage')" (click)="restore(c)"
+                        [title]="auth.denyHint('workloads:manage') || 'Restore and resume tracking'"
                       >
                         ↩ Restore
                       </button>

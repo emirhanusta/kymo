@@ -13,11 +13,11 @@
       }
     </ng-container>
     @if (meta()?.config_file) {
-      <button type="button" class="k-btn" [disabled]="reloading()" (click)="reloadConfig()" title="Re-read config.yaml and apply its clusters now">
+      <button type="button" class="k-btn" [disabled]="reloading() || !auth.can('sources:manage')" (click)="reloadConfig()" [title]="auth.denyHint('sources:manage') || 'Re-read config.yaml and apply its clusters now'">
         {{ reloading() ? 'Reloading…' : 'Reload config.yaml' }}
       </button>
     }
-    <button type="button" class="k-btn k-btn-primary" (click)="openAdd()">
+    <button type="button" class="k-btn k-btn-primary" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="openAdd()">
       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M12 5v14M5 12h14" /></svg>
       Add cluster
     </button>
@@ -32,7 +32,7 @@
   } @else if (sources().length === 0 && !state.sourcesError()) {
     <div class="k-panel">
       <app-empty-state icon="box" message="No clusters yet" hint="Add a Kubernetes cluster to start recording workload and pod lifecycles.">
-        <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" (click)="openAdd()">Add cluster</button>
+        <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="openAdd()">Add cluster</button>
       </app-empty-state>
     </div>
   } @else if (sources().length > 0) {
@@ -117,12 +117,13 @@
                     <span class="lg:hidden inline-flex items-center h-5 px-1.5 text-[10px] tracking-[0.06em] border border-kymo-rule text-kymo-muted cursor-help" tabindex="0" [title]="configHint" [attr.aria-label]="'config.yaml. ' + configHint">config.yaml</span>
                     <span class="hidden lg:inline text-[11px] text-kymo-faint" [title]="configHint">managed in config.yaml</span>
                   } @else {
-                    <button type="button" class="k-btn k-btn-sm" [disabled]="busyName() === src.name" (click)="openEdit(src)" [attr.aria-label]="'Edit ' + src.name">Edit</button>
+                    <button type="button" class="k-btn k-btn-sm" [disabled]="busyName() === src.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="openEdit(src)" [attr.aria-label]="'Edit ' + src.name">Edit</button>
                     <button
                       type="button"
                       class="k-btn k-btn-sm"
                       [class.k-btn-go]="!src.enabled"
-                      [disabled]="busyName() === src.name"
+                      [disabled]="busyName() === src.name || !auth.can('sources:manage')"
+                      [title]="auth.denyHint('sources:manage')"
                       [attr.aria-pressed]="src.enabled"
                       [attr.aria-label]="(src.enabled ? 'Disable ' : 'Enable ') + src.name"
                       (click)="toggleEnabled(src)"
@@ -130,9 +131,9 @@
                     <button
                       type="button"
                       class="k-btn k-btn-sm k-btn-icon text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50"
-                      [disabled]="busyName() === src.name"
+                      [disabled]="busyName() === src.name || !auth.can('sources:manage')"
                       [attr.aria-label]="'Delete ' + src.name"
-                      title="Delete cluster"
+                      [title]="auth.denyHint('sources:manage') || 'Delete cluster'"
                       (click)="askDelete(src)"
                     >
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -200,8 +201,8 @@
                 <td class="px-4 py-3 align-top">
                   <div class="flex items-center justify-end gap-1.5 flex-wrap">
                     <button type="button" class="k-btn k-btn-sm" [disabled]="purgingName() === r.name" (click)="viewHistory(r)" [attr.aria-label]="'View history of ' + r.name">View history</button>
-                    <button type="button" class="k-btn k-btn-sm k-btn-primary" [disabled]="purgingName() === r.name" (click)="readd(r)" [attr.aria-label]="'Re-add ' + r.name">Re-add</button>
-                    <button type="button" class="k-btn k-btn-sm text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50" [disabled]="purgingName() === r.name" (click)="purgeTarget.set(r)" [attr.aria-label]="'Delete history of ' + r.name">Delete history</button>
+                    <button type="button" class="k-btn k-btn-sm k-btn-primary" [disabled]="purgingName() === r.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="readd(r)" [attr.aria-label]="'Re-add ' + r.name">Re-add</button>
+                    <button type="button" class="k-btn k-btn-sm text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50" [disabled]="purgingName() === r.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="purgeTarget.set(r)" [attr.aria-label]="'Delete history of ' + r.name">Delete history</button>
                   </div>
                 </td>
               </tr>

@@ -92,6 +92,7 @@ func (h *Handler) CreateChannel(c *gin.Context) {
 		h.notifError(c, "create channel", err)
 		return
 	}
+	h.audit(c, "channel.create", "channel", strconv.FormatInt(v.ID, 10), map[string]any{"name": in.Name, "type": in.Type})
 	c.JSON(http.StatusCreated, v)
 }
 
@@ -116,6 +117,7 @@ func (h *Handler) UpdateChannel(c *gin.Context) {
 		h.notifError(c, "update channel", err)
 		return
 	}
+	h.audit(c, "channel.update", "channel", strconv.FormatInt(id, 10), nil)
 	c.JSON(http.StatusOK, v)
 }
 
@@ -134,6 +136,7 @@ func (h *Handler) DeleteChannel(c *gin.Context) {
 		h.notifError(c, "delete channel", err)
 		return
 	}
+	h.audit(c, "channel.delete", "channel", strconv.FormatInt(id, 10), nil)
 	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Channel deleted"})
 }
 
@@ -153,6 +156,7 @@ func (h *Handler) TestChannel(c *gin.Context) {
 		h.notifError(c, "test channel", err)
 		return
 	}
+	h.audit(c, "channel.test", "channel", strconv.FormatInt(id, 10), nil)
 	c.JSON(http.StatusOK, res)
 }
 

@@ -1,6 +1,8 @@
 import { inject } from '@angular/core';
-import { CanActivateFn, Router, Routes } from '@angular/router';
+import { CanActivateFn, Route, Router, Routes } from '@angular/router';
 import { ShellComponent } from './layout/shell/shell.component';
+import { AuthLayoutComponent } from './layout/auth-layout/auth-layout.component';
+import { publicOnly, requirePasswordChange, requirePermission, requireUser } from './core/guards/auth.guards';
 
 /** Old top-level workload pages now live under /workloads. */
 const workloadRedirect = (queryParams: Record<string, string>) => () =>
@@ -16,10 +18,22 @@ const jobsKindRedirect: CanActivateFn = route => {
   return inject(Router).createUrlTree(['/jobs'], { queryParams: qp });
 };
 
+function authPage(path: string, loadComponent: Route['loadComponent'], canActivate: CanActivateFn[] = []): Route {
+  return { path, component: AuthLayoutComponent, canActivate, children: [{ path: '', loadComponent }] };
+}
+
 export const routes: Routes = [
+  // Public auth pages: minimal layout, no topbar / event tape. Each page is its
+  // own top-level route so the empty path always belongs to the app shell.
+  authPage('login', () => import('./features/auth/login.component').then(m => m.LoginComponent), [publicOnly('login')]),
+  { path: 'setup', redirectTo: 'login', pathMatch: 'full' },
+  authPage('change-password', () => import('./features/auth/change-password.component').then(m => m.ChangePasswordComponent), [requirePasswordChange]),
+  authPage('invite/:token', () => import('./features/auth/link.component').then(m => m.LinkComponent)),
+  authPage('reset/:token', () => import('./features/auth/link.component').then(m => m.LinkComponent)),
   {
     path: '',
     component: ShellComponent,
+    canActivate: [requireUser],
     children: [
       { path: '', redirectTo: 'dashboard', pathMatch: 'full' },
       {
@@ -84,6 +98,23 @@ export const routes: Routes = [
             path: 'log-capture',
             loadComponent: () =>
               import('./features/settings/log-capture/log-capture.component').then(m => m.LogCaptureComponent),
+          },
+          {
+            path: 'users',
+            canActivate: [requirePermission('users:manage')],
+            loadComponent: () =>
+              import('./features/settings/users/users.component').then(m => m.UsersComponent),
+          },
+          {
+            path: 'tokens',
+            loadComponent: () =>
+              import('./features/settings/tokens/tokens.component').then(m => m.TokensComponent),
+          },
+          {
+            path: 'audit',
+            canActivate: [requirePermission('audit:read')],
+            loadComponent: () =>
+              import('./features/settings/audit/audit.component').then(m => m.AuditComponent),
           },
         ],
       },
