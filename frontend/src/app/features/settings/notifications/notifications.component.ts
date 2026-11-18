@@ -1,3 +1,4 @@
+import { RouterLink } from '@angular/router';
 import { Component, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
 
 import { NotificationService, channelToInput } from '../../../core/services/notification.service';
@@ -14,7 +15,7 @@ import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { CONFIG_ORIGIN_HINT } from '../../../shared/utils/source';
-import { SettingsNavComponent } from '../settings-nav.component';
+import { ActionsMenuComponent } from '../actions-menu.component';
 import { ChannelDialogComponent } from './channel-dialog/channel-dialog.component';
 import { channelFilterSummary, channelTestMessage } from './channel-utils';
 import { AuthService } from '../../../core/services/auth.service';
@@ -27,7 +28,7 @@ const TYPE_LABEL = { slack: 'Slack', discord: 'Discord', webhook: 'Webhook' } as
   standalone: true,
   imports: [
     TimeagoPipe, PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
-    ConfirmDialogComponent, ChannelDialogComponent, SettingsNavComponent,
+    ConfirmDialogComponent, ChannelDialogComponent, ActionsMenuComponent, RouterLink,
   ],
   templateUrl: './notifications.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -56,7 +57,14 @@ export class NotificationsComponent {
   deliveries      = signal<NotificationDelivery[]>([]);
   deliveriesLoaded = signal(false);
   deliveriesError = signal(false);
-  filterChannel   = signal<number | null>(null);
+  deliveryFilter  = signal<'all' | 'failed'>('all');
+  /** How many deliveries are listed (compact panel: 10, "Show more" adds 10). */
+  shown           = signal(10);
+  readonly filters = [{ value: 'all', label: 'All' }, { value: 'failed', label: 'Failed' }] as const;
+  readonly menuItem = 'w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised disabled:opacity-40 disabled:cursor-not-allowed';
+
+  filteredDeliveries = computed(() => this.deliveryFilter() === 'failed' ? this.deliveries().filter(d => !d.ok) : this.deliveries());
+  visibleDeliveries  = computed(() => this.filteredDeliveries().slice(0, this.shown()));
 
   /** Channels need KYMO_SECRET_KEY (webhook URLs are stored encrypted). */
   canAdd = computed(() => this.meta()?.secret_key_configured !== false);
@@ -93,16 +101,15 @@ export class NotificationsComponent {
   }
 
   loadDeliveries(): void {
-    this.api.deliveries(this.filterChannel()).subscribe({
+    this.api.deliveries(null, 100).subscribe({
       next: list => { this.deliveries.set(list); this.deliveriesError.set(false); this.deliveriesLoaded.set(true); },
       error: () => { this.deliveriesError.set(true); this.deliveriesLoaded.set(true); },
     });
   }
 
-  setFilter(value: string): void {
-    this.filterChannel.set(value ? +value : null);
-    this.deliveriesLoaded.set(false);
-    this.loadDeliveries();
+  setDeliveryFilter(v: 'all' | 'failed'): void {
+    this.deliveryFilter.set(v);
+    this.shown.set(10);
   }
 
   onSaved(): void { this.load(); }
