@@ -38,7 +38,11 @@
         <div class="flex items-center gap-x-3 gap-y-1 flex-wrap">
           <h1 class="text-lg font-semibold text-kymo-ink tracking-tight break-all" [title]="w.name">{{ w.name }}</h1>
           <span [title]="'First seen ' + (w.first_seen_at | timeago) + ' · last seen ' + (w.last_seen_at | timeago)">
-            <app-status-badge [status]="w.status" [text]="statusReason(w)" />
+            @if (isJobKind()) {
+              <app-status-badge [status]="jobStatus(jobRow()).status" [text]="jobStatus(jobRow()).text" />
+            } @else {
+              <app-status-badge [status]="w.status" [text]="statusReason(w)" />
+            }
           </span>
           <app-workload-badge [kind]="w.kind" />
           @if (w.is_system) {

@@ -19,7 +19,7 @@ import { ErrorLogService } from '../../../core/services/error-log.service';
 import { WorkloadErrorsComponent } from './workload-errors.component';
 import { statusReason, severityLedClass, severityTextClass } from '../../../shared/utils/issues';
 import { imageNameTag } from '../../../shared/utils/format';
-import { buildJobRow } from '../../../shared/utils/jobs';
+import { buildJobRow, jobStatus } from '../../../shared/utils/jobs';
 import { describeSchedule, untilLabel } from '../../../shared/utils/cron';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import {
@@ -161,6 +161,7 @@ export class WorkloadDetailComponent {
   isCronJob    = computed(() => this.workload()?.kind === 'CronJob');
   isJob        = computed(() => this.workload()?.kind === 'Job');
   isJobKind    = computed(() => this.isCronJob() || this.isJob());
+  readonly jobStatus = jobStatus;
 
   /** Container name used to link a CronJob run to its container detail page. */
   runContainer = computed(() => this.workload()?.containers?.[0] ?? '');

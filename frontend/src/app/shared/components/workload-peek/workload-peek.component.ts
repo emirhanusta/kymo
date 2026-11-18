@@ -1,7 +1,7 @@
 import { Component, ChangeDetectionStrategy, input, output, signal, computed, inject, effect, untracked, DestroyRef } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Subscription, forkJoin, of } from 'rxjs';
-import { catchError } from 'rxjs/operators';
+import { catchError, switchMap, map } from 'rxjs/operators';
 
 import { ContainerService } from '../../../core/services/container.service';
 import { RefreshService } from '../../../core/services/refresh.service';
@@ -11,7 +11,7 @@ import { Issue } from '../../../core/models/issue.model';
 import { IssueChipsComponent } from '../issue-chips/issue-chips.component';
 import { statusReason } from '../../utils/issues';
 import { CrashContext } from '../../../core/services/container.service';
-import { K8sEvent, LifecycleEvent, WorkloadDetail } from '../../../core/models/container.model';
+import { CronJobExecution, K8sEvent, LifecycleEvent, WorkloadDetail } from '../../../core/models/container.model';
 import { DialogDirective } from '../../directives/dialog.directive';
 import { StatusBadgeComponent } from '../status-badge/status-badge.component';
 import { WorkloadBadgeComponent } from '../workload-badge/workload-badge.component';
@@ -24,6 +24,9 @@ import { hourAgoIso, warningsLastHour } from '../../utils/k8s-events';
 import { formatScore } from '../../utils/score';
 import { podNameFromId } from '../../utils/source';
 import { normalizeStatus } from '../../utils/status';
+import { buildJobRow, jobStatus } from '../../utils/jobs';
+import { formatDuration } from '../../utils/format';
+import { TimeagoPipe } from '../../pipes/timeago.pipe';
 
 /**
  * Right-hand drawer for the Workloads / Jobs / Issues lists: status, last crash, 24h strip, pods ready, score.
@@ -35,7 +38,7 @@ import { normalizeStatus } from '../../utils/status';
   standalone: true,
   imports: [
     RouterLink, DialogDirective, StatusBadgeComponent, WorkloadBadgeComponent, LastCrashCardComponent,
-    MiniTimelineComponent, SkeletonComponent, ScoreClassPipe, LogViewerComponent, IssueChipsComponent,
+    MiniTimelineComponent, SkeletonComponent, ScoreClassPipe, LogViewerComponent, IssueChipsComponent, TimeagoPipe,
   ],
   template: `
     <div class="fixed inset-0 bg-kymo-deep/70 z-[39] lg:hidden" (click)="closed.emit()" aria-hidden="true"></div>
@@ -47,7 +50,11 @@ import { normalizeStatus } from '../../utils/status';
           <h2 id="peek-title" class="text-sm font-semibold text-kymo-ink truncate" [title]="w()?.name ?? ''">{{ w()?.name ?? 'Loading…' }}</h2>
           @if (w(); as wl) {
             <div class="flex items-center gap-x-3 gap-y-1 flex-wrap mt-1.5 text-xs">
-              <app-status-badge [status]="wl.status" [text]="statusReason(wl)" />
+              @if (jobRow(); as jr) {
+                <app-status-badge [status]="jobStatus(jr).status" [text]="jobStatus(jr).text" />
+              } @else {
+                <app-status-badge [status]="wl.status" [text]="statusReason(wl)" />
+              }
               <app-workload-badge [kind]="wl.kind" />
               @if (warnings1h() > 0) {
                 <span class="inline-flex items-center gap-1 text-[11px] px-1.5 py-px border border-kymo-amber/50 text-kymo-amber tabular-nums"
@@ -75,20 +82,40 @@ import { normalizeStatus } from '../../utils/status';
           <app-skeleton [rows]="4" />
         } @else {
           @let wl = w()!;
-          <dl class="grid grid-cols-3 border border-kymo-rule divide-x divide-kymo-rule bg-kymo-panel text-center">
-            <div class="py-2"><dt class="k-label">Pods ready</dt>
-              <dd class="text-lg font-semibold tabular-nums mt-1" [class]="wl.running_instances === wl.active_instances && wl.active_instances > 0 ? 'text-kymo-running' : wl.running_instances === 0 ? 'text-kymo-muted' : 'text-kymo-amber'">{{ wl.running_instances }}/{{ wl.active_instances }}</dd></div>
-            <div class="py-2"><dt class="k-label">Score</dt>
-              <dd class="text-lg font-semibold tabular-nums mt-1" [class]="wl.score | scoreClass">{{ score(wl.score) }}</dd></div>
-            <div class="py-2"><dt class="k-label">Restarts</dt>
-              <dd class="text-lg font-semibold tabular-nums mt-1 text-kymo-ink">{{ wl.restart_count }}</dd></div>
-          </dl>
+          @if (jobRow(); as jr) {
+            <dl class="grid grid-cols-3 border border-kymo-rule divide-x divide-kymo-rule bg-kymo-panel text-center">
+              <div class="py-2 px-1 min-w-0"><dt class="k-label">Last run</dt>
+                @if (jr.last; as l) {
+                  <dd class="text-lg font-semibold tabular-nums mt-1 truncate" [class]="l.state === 'failed' ? 'text-kymo-danger' : l.state === 'running' ? 'text-kymo-amber' : 'text-kymo-ink'">{{ l.state === 'running' ? 'running' : (l.at | timeago) }}</dd>
+                  @if (l.state === 'failed' && l.exitCode != null) { <p class="text-[11px] tabular-nums text-kymo-danger">exit {{ l.exitCode }}</p> }
+                } @else {
+                  <dd class="text-lg font-semibold mt-1 text-kymo-faint">—</dd>
+                }</div>
+              <div class="py-2 px-1"><dt class="k-label">Success</dt>
+                @if (jr.rate !== null) {
+                  <dd class="text-lg font-semibold tabular-nums mt-1" [class]="jr.rate < 0.5 ? 'text-kymo-danger' : jr.rate < 0.9 ? 'text-kymo-amber' : 'text-kymo-ink'">{{ jr.ok }}/{{ jr.finished }}</dd>
+                } @else {
+                  <dd class="text-lg font-semibold mt-1 text-kymo-faint">—</dd>
+                }</div>
+              <div class="py-2 px-1"><dt class="k-label">Avg duration</dt>
+                <dd class="text-lg font-semibold tabular-nums mt-1" [class]="jr.avgDuration !== null ? 'text-kymo-ink' : 'text-kymo-faint'">{{ formatDuration(jr.avgDuration) }}</dd></div>
+            </dl>
+          } @else {
+            <dl class="grid grid-cols-3 border border-kymo-rule divide-x divide-kymo-rule bg-kymo-panel text-center">
+              <div class="py-2"><dt class="k-label">Pods ready</dt>
+                <dd class="text-lg font-semibold tabular-nums mt-1" [class]="wl.running_instances === wl.active_instances && wl.active_instances > 0 ? 'text-kymo-running' : wl.running_instances === 0 ? 'text-kymo-muted' : 'text-kymo-amber'">{{ wl.running_instances }}/{{ wl.active_instances }}</dd></div>
+              <div class="py-2"><dt class="k-label">Score</dt>
+                <dd class="text-lg font-semibold tabular-nums mt-1" [class]="wl.score | scoreClass">{{ score(wl.score) }}</dd></div>
+              <div class="py-2"><dt class="k-label">Restarts</dt>
+                <dd class="text-lg font-semibold tabular-nums mt-1 text-kymo-ink">{{ wl.restart_count }}</dd></div>
+            </dl>
+          }
 
-          <app-last-crash-card [crashEvents]="ctx().crashEvents" [logs]="ctx().logs" [revisions]="ctx().revisions" />
+          <app-last-crash-card [crashEvents]="ctx().crashEvents" [logs]="ctx().logs" [revisions]="jobRow() ? [] : ctx().revisions" />
 
           <section aria-labelledby="peek-strip">
             <h3 id="peek-strip" class="k-label mb-1.5">Last 24 hours</h3>
-            <app-mini-timeline [events]="recent()" [revisions]="ctx().revisions" />
+            <app-mini-timeline [events]="recent()" [revisions]="jobRow() ? [] : ctx().revisions" [showRollouts]="!jobRow()" />
           </section>
 
           <div class="relative">
@@ -138,10 +165,13 @@ export class WorkloadPeekComponent {
   protected sources = inject(SourceStateService);
 
   readonly score = formatScore;
+  readonly jobStatus = jobStatus;
+  readonly formatDuration = formatDuration;
 
   detail = signal<WorkloadDetail | null>(null);
   ctx    = signal<CrashContext>({ crashEvents: [], logs: [], revisions: [] });
   events = signal<LifecycleEvent[]>([]);
+  executions = signal<CronJobExecution[]>([]);
   error  = signal(false);
   warnings1h = signal(0);
   openIssues = signal<Issue[]>([]);
@@ -149,6 +179,16 @@ export class WorkloadPeekComponent {
   w = computed(() => {
     const d = this.detail();
     return d ? { ...d.workload, images: d.workload.images ?? [], containers: d.workload.containers ?? [] } : null;
+  });
+  /** Run summary for Job/CronJob workloads; null for everything else. */
+  jobRow = computed(() => {
+    const d = this.detail();
+    if (!d || (d.workload.kind !== 'CronJob' && d.workload.kind !== 'Job')) return null;
+    return buildJobRow({
+      workload: d.workload,
+      executions: d.workload.kind === 'CronJob' ? this.executions() : [],
+      instances: d.workload.kind === 'Job' ? d.instances ?? [] : [],
+    });
   });
   recent = computed(() => this.events());
 
@@ -187,7 +227,7 @@ export class WorkloadPeekComponent {
   constructor() {
     effect(() => {
       this.id();
-      untracked(() => { this.detail.set(null); this.ctx.set({ crashEvents: [], logs: [], revisions: [] }); this.events.set([]); this.warnings1h.set(0); this.openIssues.set([]); this.load(); });
+      untracked(() => { this.detail.set(null); this.executions.set([]); this.ctx.set({ crashEvents: [], logs: [], revisions: [] }); this.events.set([]); this.warnings1h.set(0); this.openIssues.set([]); this.load(); });
     });
     const rs = this.refresh.refresh$.subscribe(() => this.load(true));
     inject(DestroyRef).onDestroy(() => { this.sub?.unsubscribe(); rs.unsubscribe(); });
@@ -198,13 +238,19 @@ export class WorkloadPeekComponent {
     this.sub?.unsubscribe();
     if (!silent) this.error.set(false);
     this.sub = forkJoin({
-      detail: this.svc.getWorkload(id),
+      detail: this.svc.getWorkload(id).pipe(switchMap(d => {
+        const w = d.workload;
+        if (w.kind !== 'CronJob') return of({ d, ex: [] as CronJobExecution[] });
+        return this.svc.getCronJobExecutions(w.namespace ?? '', w.name, 50, w.source_name).pipe(
+          catchError(() => of([] as CronJobExecution[])), map(ex => ({ d, ex })));
+      })),
       ctx: this.svc.getCrashContext(id),
       events: this.svc.getWorkloadEvents(id, { limit: 100 }).pipe(catchError(() => of([] as LifecycleEvent[]))),
       k8s: this.svc.getWorkloadK8sEvents(id, { since: hourAgoIso(), limit: 500 }).pipe(catchError(() => of([] as K8sEvent[]))),
       issues: this.issueSvc.forWorkload(id, 'open').pipe(catchError(() => of([] as Issue[]))),
     }).subscribe({
-      next: ({ detail, ctx, events, k8s, issues }) => {
+      next: ({ detail: { d: detail, ex }, ctx, events, k8s, issues }) => {
+        this.executions.set(ex ?? []);
         this.warnings1h.set(warningsLastHour(k8s));
         this.openIssues.set(issues);
         this.detail.set(detail);

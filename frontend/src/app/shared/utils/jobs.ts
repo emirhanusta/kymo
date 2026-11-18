@@ -113,3 +113,11 @@ export const HEALTH_DOT: Record<JobHealth, string> = {
 export const RUN_CELL_CLASS: Record<RunState, string> = {
   ok: 'bg-kymo-running', failed: 'bg-kymo-danger', running: 'bg-kymo-amber animate-pulse',
 };
+
+/** Header badge for a Job/CronJob, derived from its runs rather than pod status. */
+export function jobStatus(row: JobRow): { status: string; text: string } {
+  if (row.last?.state === 'running') return { status: 'running', text: 'Running' };
+  if (!row.lastFinished) return { status: 'unknown', text: 'No runs' };
+  if (row.lastFinished.state === 'failed') return { status: 'crashing', text: 'Last run failed' };
+  return { status: 'stopped', text: row.w.kind === 'CronJob' ? 'Idle' : 'Succeeded' };
+}

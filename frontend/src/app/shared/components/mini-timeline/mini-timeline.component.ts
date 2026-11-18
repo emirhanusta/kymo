@@ -31,7 +31,9 @@ const COLOR: Record<MarkKind, string> = { crash: 'bg-kymo-danger', oom: 'bg-kymo
     <p class="flex items-center gap-3 text-[11px] text-kymo-muted mt-1 flex-wrap">
       <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-kymo-danger" aria-hidden="true"></span>{{ counts().crash }} crash{{ counts().crash === 1 ? '' : 'es' }}</span>
       <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-kymo-amber" aria-hidden="true"></span>{{ counts().oom }} OOM</span>
-      <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rotate-45 bg-kymo-paused" aria-hidden="true"></span>{{ counts().rollout }} rollout{{ counts().rollout === 1 ? '' : 's' }}</span>
+      @if (showRollouts()) {
+        <span class="inline-flex items-center gap-1"><span class="w-2 h-2 rotate-45 bg-kymo-paused" aria-hidden="true"></span>{{ counts().rollout }} rollout{{ counts().rollout === 1 ? '' : 's' }}</span>
+      }
     </p>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -40,6 +42,8 @@ export class MiniTimelineComponent {
   events    = input<LifecycleEvent[]>([]);
   revisions = input<Revision[]>([]);
   hours     = input(24);
+  /** Hide the rollout count (Jobs/CronJobs have runs, not rollouts). */
+  showRollouts = input(true);
   /** Time reference; fixed per render so the strip is stable between refreshes. */
   now       = input(Date.now());
 
