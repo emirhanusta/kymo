@@ -244,7 +244,7 @@ export class JobsComponent {
     return this.peek.id() === r.id ? 'shadow-[inset_2px_0_0_var(--color-kymo-amber)]' : r.failing ? 'shadow-[inset_2px_0_0_var(--color-kymo-danger)]' : '';
   }
 
-  /** Whole-row click / Enter opens the Runs tab of the job; links and buttons inside keep their own behaviour. */
+  /** Whole-row click / Enter opens the quick view (again = close); links and buttons inside keep their own behaviour. */
   openRow(ev: Event, r: Row): void {
     if (ev.type === 'keydown') {
       if (ev.target !== ev.currentTarget) return;
@@ -252,12 +252,8 @@ export class JobsComponent {
     } else if ((ev.target as HTMLElement).closest('a, button, input, select, textarea, label')) {
       return;
     }
-    this.router.navigate(['/workloads', r.id], { queryParams: { tab: 'runs' } });
-  }
-
-  peekRow(ev: Event, r: Row): void {
-    ev.stopPropagation();
-    this.peek.open(r.id);
+    if (this.peek.id() === r.id) this.peek.close();
+    else this.peek.open(r.id);
   }
 
   /** "Jun 3, 14:02:11 · succeeded · 6.2s · exit 1" */

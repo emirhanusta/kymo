@@ -177,9 +177,9 @@
                     } @else {
                       <span class="text-kymo-faint">—</span>
                     }
-                    <button type="button" class="k-btn k-btn-icon opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label="Quick view" title="Quick view" (click)="peekRow($event, r)">
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 5h16v14H4zM15 5v14" /></svg>
-                    </button>
+                    <a [routerLink]="['/workloads', r.id]" [queryParams]="{ tab: 'runs' }" class="k-btn k-btn-icon opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label="Open details" title="Open details">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M5 12h14M13 6l6 6-6 6" /></svg>
+                    </a>
                   </span>
                 </td>
               </tr>
