@@ -101,6 +101,7 @@ func main() {
 			Window:   cfg.Collector.ScoringWindow,
 		},
 		log,
+		service.WithOverview(db.Overview()),
 	)
 	mgmt := service.NewManagementService(log)
 

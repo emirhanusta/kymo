@@ -7,6 +7,9 @@ import { SourceService } from './source.service';
 import { ToastService } from './toast.service';
 import { RefreshService } from './refresh.service';
 import { RemovedSource, SourceStatus } from '../models/container.model';
+import { readStorage, writeStorage } from '../../shared/utils/storage';
+
+const SCOPE_KEY = 'kymo.scope';
 
 /**
  * Clusters (API: sources) and the app-wide cluster scope.
@@ -31,8 +34,19 @@ export class SourceStateService {
   readonly sourcesError = signal(false);
   /** True once the first /sources request has finished (successfully or not). */
   readonly loaded = signal(false);
-  /** Empty string means "all clusters". */
-  readonly selectedSource = signal<string>('');
+  /** What the user (or a link / the stored preference) asked for; not yet validated. Only `select()` writes it. */
+  private requested = signal<string>(readStorage<string>(SCOPE_KEY, ''));
+  /**
+   * THE cluster scope, single source of truth (empty string = "all clusters"). Always validated against the known
+   * clusters: until the registry has loaded, and whenever the requested cluster is neither registered nor a removed
+   * one with history, it reads as "all clusters" — so pages, the scope bar and the data can never disagree.
+   */
+  readonly selectedSource = computed<string>(() => {
+    const name = this.requested();
+    if (!name || !this.loaded()) return '';
+    if (this.sourcesError()) return name;   // registry unknown: trust the request, nothing to validate against
+    return this.sources().some(s => s.name === name) || this.removed().some(r => r.name === name) ? name : '';
+  });
 
   readonly selectedSourceInfo = computed(() => {
     const name = this.selectedSource();
@@ -66,11 +80,9 @@ export class SourceStateService {
         this.sourcesError.set(false);
         if (removed) this.removed.set(removed);
         this.loaded.set(true);
-        // The selected cluster is gone for good (deleted / history purged) → fall back to "all clusters".
-        const sel = this.selectedSource();
-        if (sel && !list.some(s => s.name === sel) && !this.removed().some(r => r.name === sel)) {
-          this.selectedSource.set('');
-        }
+        // The requested cluster is gone for good (deleted / history purged / renamed) → forget it.
+        const req = this.requested();
+        if (req && removed && !this.selectedSource()) this.select('');   // (only when the removed list is trustworthy too)
       },
       error: () => {
         this.sourcesError.set(true);
@@ -85,7 +97,7 @@ export class SourceStateService {
       next: res => {
         const n = res?.deleted_containers ?? 0;
         this.toast.success(res?.message || `Deleted the recorded history of ${name} (${n} container${n === 1 ? '' : 's'})`);
-        if (this.selectedSource() === name) this.selectedSource.set('');
+        if (this.requested() === name) this.select('');
         this.refresh.trigger();
         done?.();
       },
@@ -101,7 +113,8 @@ export class SourceStateService {
   }
 
   select(name: string): void {
-    this.selectedSource.set(name);
+    this.requested.set(name);
+    writeStorage(SCOPE_KEY, name);
   }
 
   find(name: string | null | undefined): SourceStatus | null {

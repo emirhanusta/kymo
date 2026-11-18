@@ -102,13 +102,18 @@ or disables what the current role cannot do.
   everything else answers `403 {code: "password_change_required"}` (the guard is
   part of `Require`, so new routes are gated by default). API tokens cannot be
   created meanwhile. Changing the password clears the flag. Admin-created reset
-  links, invites and the CLI reset never set the flag (a reset clears it).
+  links, setup links and the CLI reset never set the flag (only temporary-password
+  users and the generated bootstrap admin start flagged) (a reset clears it).
 - Helm: the chart Secret holds a generated `admin-password` (kept across
   upgrades via `lookup`, or `auth.admin.password` / `existingSecret`), passed as
   `KYMO_ADMIN_PASSWORD` with `KYMO_ADMIN_MUST_CHANGE_PASSWORD=true`.
-- Invites: admin creates an invite (username + role, optional email) → link valid
-  7 days, copied and shared manually (no email sending). The invitee sets a name
-  and password.
+- Adding users (Settings → Users → "Add user"; KYMO sends no email, so the admin
+  passes the result on by hand), two methods:
+  * **Setup link** (default, recommended): one-time link valid 7 days; the user
+    sets a name and their own password.
+  * **Temporary password:** the admin types one (policy applies) or lets KYMO
+    generate 20 characters (shown once). The user is created immediately with
+    `must_change_password = true`, so the first sign-in forces a change.
 - Password reset: admin creates a 1-hour reset link; lockout recovery via
   `kymo admin reset-password --username ... | --email ...` (CLI subcommand of
   the same binary).
@@ -155,12 +160,21 @@ Session / token required:
   (admin; only owner changes admins; cannot disable/demote the owner or yourself)
 - `POST /users/:id/reset-link` → {url, expires_at} (admin, local-password users)
 - `POST /users/:id/transfer-ownership` → 204 (owner; target must be admin+active)
-- `GET /users/invites` → [{id, username, email, role, created_by, created_by_id,
-  created_at, expires_at}];
-  `POST /users/invites` {username, role, email?} → {id, username, email, role, url,
-  expires_at} (400 `invalid_username` / `invalid_email`, 409 `username_taken` /
-  `email_taken`);
-  `DELETE /users/invites/:id` (admin)
+- `POST /users` {username, role, name?, email?, method: "link"|"password" (default
+  link), password?} (admin; only the owner may create admins; audit `invite.create`
+  for links, `user.create` {method} for passwords):
+  * `method=link` → 201 {method:"link", id, username, email, role, url, expires_at}
+    (`name` is ignored; the user picks it when redeeming the link);
+  * `method=password` → 201 {method:"password", user, password?}; `password` is
+    returned only when KYMO generated it. A given password must satisfy the policy.
+  * Errors: 400 `invalid_username` / `invalid_email` / `weak_password` /
+    `invalid_request`, 403 `forbidden`, 409 `username_taken` / `email_taken` (also
+    against pending setup links).
+- `GET /users/invites` → pending setup links [{id, username, email, role, created_by,
+  created_by_id, created_at, expires_at}];
+  `POST /users/invites` {username, role, email?} → alias of `POST /users` with
+  method=link (backward compatible);
+  `DELETE /users/invites/:id` (admin; revokes a pending setup link)
 - `GET /tokens[?all=1]` → [{id, name, prefix, role, user_id, user_username, user_email,
   created_at, expires_at, last_used_at, revoked_at}];
   `POST /tokens` {name, role, expires_in_days: number|null} →

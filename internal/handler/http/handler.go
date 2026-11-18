@@ -155,6 +155,10 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 
 		// Recent events endpoint (cross-container)
 		v1.GET("/events/recent", viewer, h.GetRecentEvents)
+
+		// Overview aggregates (viewer)
+		v1.GET("/overview/activity", viewer, h.GetOverviewActivity)
+		v1.GET("/overview/changes", viewer, h.GetOverviewChanges)
 	}
 }
 

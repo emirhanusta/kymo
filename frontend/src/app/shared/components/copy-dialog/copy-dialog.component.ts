@@ -21,6 +21,9 @@ import { DialogDirective } from '../../directives/dialog.directive';
         @if (warning()) {
           <p class="text-xs text-kymo-amber border border-kymo-amber/40 px-3 py-2" role="note">{{ warning() }}</p>
         }
+        @if (note()) {
+          <p class="text-xs text-kymo-muted border border-kymo-rule px-3 py-2 whitespace-pre-line">{{ note() }}</p>
+        }
         @if (expiresAt()) { <p class="text-xs text-kymo-muted">Expires {{ expiresAt() }}</p> }
         <div class="flex justify-end"><button type="button" class="k-btn" (click)="closed.emit()">Done</button></div>
       </div>
@@ -34,6 +37,8 @@ export class CopyDialogComponent {
   value = input.required<string>();
   warning = input('');
   expiresAt = input('');
+  /** Optional instructions for the admin to pass on along with the value. */
+  note = input('');
   closed = output<void>();
   copied = signal(false);
 

@@ -33,24 +33,6 @@
       }
     </select>
 
-    <select
-      aria-label="Filter by cluster"
-      class="k-input cursor-pointer max-w-[14rem]"
-      [value]="source()"
-      (change)="setSource($any($event.target).value)"
-    >
-      <option value="">All clusters</option>
-      @for (s of sourceSvc.sources(); track s.name) {
-        <option [value]="s.name" [selected]="s.name === source()">{{ s.name }}</option>
-      }
-      @if (sourceSvc.removed().length > 0) {
-        <optgroup label="Removed">
-          @for (r of sourceSvc.removed(); track r.name) {
-            <option [value]="r.name" [selected]="r.name === source()">{{ r.name }}</option>
-          }
-        </optgroup>
-      }
-    </select>
     }
   </app-page-header>
 

@@ -80,14 +80,14 @@ export class EventsComponent {
   /** Without a cluster filter, events of removed clusters stay out of the list. */
   events      = computed(() => this.source() ? this.loaded() : this.sourceSvc.connectedOnly(this.loaded(), e => e.source_name));
   type        = signal<LifecycleEventType | ''>('');
-  /** Page-level source filter; follows the top-bar selector but can be changed here. */
-  source      = signal('');
+  /** The cluster scope is global (scope bar); this page has no filter of its own. */
+  source      = this.sourceSvc.selectedSource;
   loadingMore = signal(false);
   moreError   = signal(false);
   /** False once a page came back shorter than PAGE_SIZE. */
   hasMore     = signal(true);
 
-  hasFilters = computed(() => !!this.type() || !!this.source());
+  hasFilters = computed(() => !!this.type());
   showSourceColumn = computed(() => !this.source());
 
   private sub?: Subscription;
@@ -95,7 +95,6 @@ export class EventsComponent {
 
   constructor() {
     reloadOnSourceAndRefresh({
-      onSourceChange: src => this.source.set(src),
       load: reason => this.load(reason),
     });
   }
@@ -112,14 +111,8 @@ export class EventsComponent {
     this.reset();
   }
 
-  setSource(name: string): void {
-    this.source.set(name);
-    this.reset();
-  }
-
   clearFilters(): void {
     this.type.set('');
-    this.source.set('');
     this.reset();
   }
 

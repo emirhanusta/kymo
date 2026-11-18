@@ -4,7 +4,7 @@ import { forkJoin } from 'rxjs';
 
 import { AuthService } from '../../../core/services/auth.service';
 import { ToastService } from '../../../core/services/toast.service';
-import { Invite, Role, USERNAME_RE, User, userLabel } from '../../../core/models/auth.model';
+import { AddUserResult, Invite, Role, User, userLabel } from '../../../core/models/auth.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
 import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.component';
@@ -12,22 +12,25 @@ import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialo
 import { CopyDialogComponent } from '../../../shared/components/copy-dialog/copy-dialog.component';
 import { RoleChipComponent } from '../../../shared/components/role-chip/role-chip.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
+import { AddUserDialogComponent } from './add-user-dialog.component';
 import { SettingsNavComponent } from '../settings-nav.component';
 
-interface LinkShown { title: string; message: string; url: string; expires: string; }
+interface LinkShown { title: string; message: string; value: string; expires: string; warning: string; note: string; }
+const LINK_WARNING = 'Anyone with this link can use it. It is shown only once.';
 
 @Component({
   selector: 'app-users',
   standalone: true,
   imports: [
     FormsModule, TimeagoPipe, PageHeaderComponent, ErrorStateComponent, SkeletonComponent,
-    ConfirmDialogComponent, CopyDialogComponent, RoleChipComponent, SettingsNavComponent,
+    ConfirmDialogComponent, CopyDialogComponent, AddUserDialogComponent, RoleChipComponent, SettingsNavComponent,
   ],
   template: `
 <div class="space-y-4">
   <app-settings-nav />
   <app-page-header title="Users">
     <ng-container subtitle>{{ loaded() ? users().length + ' user' + (users().length === 1 ? '' : 's') : 'Loading…' }}</ng-container>
+    <button type="button" class="k-btn k-btn-primary" (click)="adding.set(true)">Add user</button>
   </app-page-header>
 
   @if (error()) { <app-error-state message="Failed to load users" (retry)="load()" /> }
@@ -47,7 +50,7 @@ interface LinkShown { title: string; message: string; url: string; expires: stri
         <tbody>
           @for (u of users(); track u.id) {
             <tr [class.opacity-60]="busyId() === u.id || u.status === 'disabled'">
-              <td class="px-4 py-2.5 text-xs text-kymo-ink">{{ u.username }}@if (u.id === me()?.id) { <span class="text-kymo-faint"> (you)</span> }</td>
+              <td class="px-4 py-2.5 text-xs text-kymo-ink">{{ u.username }}@if (u.id === me()?.id) { <span class="text-kymo-faint"> (you)</span> }@if (u.must_change_password) { <span class="text-kymo-faint ml-1.5" title="Must change the password at next sign-in">temp password</span> }</td>
               <td class="px-4 py-2.5 text-xs text-kymo-muted">{{ u.name || '—' }}</td>
               <td class="px-4 py-2.5 text-xs text-kymo-muted">
                 @if (editEmailId() === u.id) {
@@ -93,32 +96,9 @@ interface LinkShown { title: string; message: string; url: string; expires: stri
       </table>
     </div>
 
-    <section class="space-y-2 pt-2" aria-labelledby="invite-title">
-      <h2 id="invite-title" class="k-label !text-kymo-ink">Invite a user</h2>
-      <form class="k-panel p-4 flex items-end gap-3 flex-wrap" (ngSubmit)="invite()" aria-label="Invite user">
-        <label class="flex flex-col gap-1">
-          <span class="k-label">Username</span>
-          <input class="k-input w-48" name="username" required autocomplete="off" autocapitalize="none" spellcheck="false" [ngModel]="inviteUsername()" (ngModelChange)="inviteUsername.set($event)" />
-          @if (inviteUsername().trim() && !usernameValid()) { <span class="text-[11px] text-kymo-danger">2–64 chars: a-z, 0-9, . _ -</span> }
-        </label>
-        <label class="flex flex-col gap-1">
-          <span class="k-label">Email (optional)</span>
-          <input class="k-input w-64" type="email" name="email" autocomplete="off" [ngModel]="inviteEmail()" (ngModelChange)="inviteEmail.set($event)" />
-        </label>
-        <label class="flex flex-col gap-1">
-          <span class="k-label">Role</span>
-          <select class="k-input" name="role" [ngModel]="inviteRole()" (ngModelChange)="inviteRole.set($event)">
-            @for (r of assignable(); track r) { <option [value]="r">{{ r }}</option> }
-          </select>
-        </label>
-        <button type="submit" class="k-btn k-btn-primary" [disabled]="!usernameValid() || inviting()">{{ inviting() ? 'Creating…' : 'Create invite' }}</button>
-      </form>
-      <p class="text-xs text-kymo-muted">Invites are valid for 7 days. KYMO does not send email; share the link yourself.</p>
-    </section>
-
     @if (invites().length) {
       <section class="space-y-2" aria-labelledby="pending-title">
-        <h2 id="pending-title" class="k-label !text-kymo-ink">Pending invites</h2>
+        <h2 id="pending-title" class="k-label !text-kymo-ink">Pending setup links</h2>
         <div class="k-panel overflow-x-auto scrollbar-thin">
           <table class="k-table">
             <thead><tr><th>Username</th><th>Role</th><th>Expires</th><th><span class="sr-only">Actions</span></th></tr></thead>
@@ -139,9 +119,12 @@ interface LinkShown { title: string; message: string; url: string; expires: stri
   }
 </div>
 
+@if (adding()) {
+  <app-add-user-dialog [assignable]="assignable()" (created)="onCreated($event)" (closed)="adding.set(false)" />
+}
 @if (shown(); as l) {
-  <app-copy-dialog [title]="l.title" [message]="l.message" [value]="l.url" [expiresAt]="l.expires"
-    warning="Anyone with this link can use it. It is shown only once." (closed)="shown.set(null)" />
+  <app-copy-dialog [title]="l.title" [message]="l.message" [value]="l.value" [expiresAt]="l.expires" [note]="l.note"
+    [warning]="l.warning" (closed)="shown.set(null)" />
 }
 @if (transferTarget(); as t) {
   <app-confirm-dialog title="Transfer ownership?"
@@ -149,8 +132,8 @@ interface LinkShown { title: string; message: string; url: string; expires: stri
     confirmLabel="Transfer ownership" (confirmed)="confirmTransfer()" (cancelled)="transferTarget.set(null)" />
 }
 @if (revokeTarget(); as i) {
-  <app-confirm-dialog title="Revoke invite?" [message]="'The invite link for ' + i.username + ' will stop working.'"
-    confirmLabel="Revoke invite" (confirmed)="confirmRevoke()" (cancelled)="revokeTarget.set(null)" />
+  <app-confirm-dialog title="Revoke setup link?" [message]="'The setup link for ' + i.username + ' will stop working.'"
+    confirmLabel="Revoke link" (confirmed)="confirmRevoke()" (cancelled)="revokeTarget.set(null)" />
 }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -165,14 +148,10 @@ export class UsersComponent {
   loaded = signal(false);
   error = signal(false);
   busyId = signal<number | null>(null);
-  inviting = signal(false);
-  inviteUsername = signal('');
-  inviteEmail = signal('');
+  adding = signal(false);
   editEmailId = signal<number | null>(null);
   emailDraft = signal('');
   label = userLabel;
-  usernameValid = computed(() => USERNAME_RE.test(this.inviteUsername().trim().toLowerCase()));
-  inviteRole = signal<Role>('viewer');
   shown = signal<LinkShown | null>(null);
   transferTarget = signal<User | null>(null);
   revokeTarget = signal<Invite | null>(null);
@@ -233,27 +212,31 @@ export class UsersComponent {
     this.auth.resetLink(u.id).subscribe({
       next: r => {
         this.busyId.set(null);
-        this.shown.set({ title: 'Password reset link', message: `Share this link with ${userLabel(u)}. It is valid for 1 hour.`, url: this.abs(r.url), expires: r.expires_at });
+        this.shown.set({ title: 'Password reset link', message: `Share this link with ${userLabel(u)}. It is valid for 1 hour.`, value: this.abs(r.url), expires: r.expires_at, warning: LINK_WARNING, note: '' });
       },
       error: err => { this.busyId.set(null); this.toast.apiError(err, 'Could not create reset link'); },
     });
   }
 
-  invite(): void {
-    const username = this.inviteUsername().trim().toLowerCase();
-    if (!USERNAME_RE.test(username) || this.inviting()) return;
-    const email = this.inviteEmail().trim();
-    this.inviting.set(true);
-    this.auth.createInvite({ username, role: this.inviteRole(), ...(email ? { email } : {}) }).subscribe({
-      next: r => {
-        this.inviting.set(false);
-        this.inviteUsername.set('');
-        this.inviteEmail.set('');
-        this.shown.set({ title: 'Invite link', message: `Share this link with ${username}. It is valid for 7 days.`, url: this.abs(r.url), expires: r.expires_at });
-        this.load();
-      },
-      error: err => { this.inviting.set(false); this.toast.apiError(err, 'Could not create invite'); },
-    });
+  onCreated(e: { result: AddUserResult; username: string }): void {
+    this.adding.set(false);
+    const r = e.result;
+    const where = `${location.origin}/login with username "${e.username}"`;
+    if (r.method === 'link') {
+      this.shown.set({
+        title: 'Setup link', message: `Share this link with ${e.username}. It is valid for 7 days.`, value: this.abs(r.url), expires: r.expires_at, warning: LINK_WARNING,
+        note: `Open the link above and choose your KYMO password. After that, sign in at ${where}.`,
+      });
+    } else if (r.password) {
+      this.shown.set({
+        title: 'Temporary password', message: `Share this password with ${e.username}. They must change it at first sign-in.`, value: r.password, expires: '',
+        warning: 'This password is shown only once. KYMO cannot display it again.',
+        note: `Sign in at ${where} and the temporary password above. You will be asked to choose a new password.`,
+      });
+    } else {
+      this.toast.success(`${e.username} added. They must change the password you set at first sign-in.`);
+    }
+    this.load();
   }
 
   confirmRevoke(): void {
@@ -261,8 +244,8 @@ export class UsersComponent {
     if (!i) return;
     this.revokeTarget.set(null);
     this.auth.revokeInvite(i.id).subscribe({
-      next: () => { this.toast.success('Invite revoked'); this.load(); },
-      error: err => this.toast.apiError(err, 'Could not revoke invite'),
+      next: () => { this.toast.success('Setup link revoked'); this.load(); },
+      error: err => this.toast.apiError(err, 'Could not revoke link'),
     });
   }
 

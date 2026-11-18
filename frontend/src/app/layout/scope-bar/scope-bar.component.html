@@ -1,0 +1,159 @@
+@if (visible()) {
+  @if (state.selectedRemoved(); as r) {
+    <!-- History state: a removed cluster's recorded history, read-only -->
+    <div class="relative z-30 bg-kymo-panel border-b border-kymo-amber/40" role="status">
+      <div class="px-3 sm:px-4 min-h-8 py-1 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+        <svg class="w-3.5 h-3.5 flex-none text-kymo-amber" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path stroke-linecap="square" d="M4 4h16v4H4zM6 8v12h12V8M10 12h4" />
+        </svg>
+        <p class="text-kymo-muted min-w-0 flex-1 basis-56">
+          Viewing history of <strong class="font-semibold text-kymo-ink break-all">{{ r.name }}</strong> (removed)
+          <span class="text-kymo-faint"> · last seen {{ r.last_seen_at | timeago }}</span>
+        </p>
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <button type="button" class="k-btn k-btn-sm k-btn-primary" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="readd(r.name)">Re-add cluster</button>
+          <button type="button" class="k-btn k-btn-sm k-btn-danger" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="confirming.set(true)">Delete history</button>
+          <button type="button" class="k-btn k-btn-sm" (click)="pick('')">Exit history</button>
+        </div>
+      </div>
+    </div>
+    @if (confirming()) {
+      <app-confirm-dialog
+        [title]="'Delete history of ' + r.name + '?'"
+        [message]="message(r)"
+        confirmLabel="Delete history"
+        (confirmed)="purge(r.name)"
+        (cancelled)="confirming.set(false)"
+      />
+    }
+  } @else if (clusters().length > 0 || state.removed().length > 0) {
+    <div class="relative z-30 bg-kymo-deep border-b border-kymo-rule">
+      <div class="px-3 sm:px-4 h-8 flex items-stretch gap-3 text-xs">
+        <span class="k-label hidden md:flex items-center flex-none">Scope</span>
+
+        <!-- md+: pills -->
+        <div class="hidden md:flex items-stretch min-w-0" role="group" aria-label="Cluster scope">
+          <button type="button" class="px-2.5 -mb-px border-b-2 transition-colors whitespace-nowrap focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-2 focus-visible:outline-kymo-amber"
+                  [class]="selected() === '' ? 'text-kymo-amber border-kymo-amber' : 'text-kymo-muted border-transparent hover:text-kymo-ink'"
+                  [attr.aria-pressed]="selected() === ''" (click)="pick('')">All clusters</button>
+          @for (c of inline(); track c.name) {
+            <button type="button" class="px-2.5 -mb-px border-b-2 transition-colors inline-flex items-center gap-1.5 min-w-0 focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-2 focus-visible:outline-kymo-amber"
+                    [class]="selected() === c.name ? 'text-kymo-amber border-kymo-amber' : 'text-kymo-muted border-transparent hover:text-kymo-ink'"
+                    [attr.aria-pressed]="selected() === c.name" [title]="c.name + ' — ' + statusLabel(c)" (click)="pick(c.name)">
+              <span class="k-led" [class]="dotClass(c)"></span>
+              <span class="truncate max-w-[10rem]">{{ c.name }}</span>
+            </button>
+          }
+          @if (overflow().length > 0) {
+            <div class="relative flex items-stretch" data-scope-menu>
+              <button type="button" class="px-2.5 -mb-px border-b-2 border-transparent text-kymo-muted hover:text-kymo-ink transition-colors inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-2 focus-visible:outline-kymo-amber"
+                      aria-haspopup="listbox" [attr.aria-expanded]="menu() === 'more'" [attr.aria-label]="overflow().length + ' more clusters'" (click)="toggle('more')">
+                +{{ overflow().length }}
+                <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              @if (menu() === 'more') {
+                <div class="absolute left-0 top-full bg-kymo-deep border border-kymo-rule min-w-[240px] py-1 shadow-lg">
+                  <div class="px-2 pb-1">
+                    <input #f type="text" class="k-input w-full" placeholder="Filter clusters…" aria-label="Filter clusters"
+                           [value]="filterText()" (input)="filterText.set(f.value)" (keydown.escape)="menu.set(null)" />
+                  </div>
+                  <div role="listbox" aria-label="More clusters" class="max-h-64 overflow-y-auto">
+                    @for (c of filteredOverflow(); track c.name) {
+                      <button type="button" role="option" [attr.aria-selected]="selected() === c.name" [title]="statusLabel(c)"
+                              class="w-full px-3 py-1.5 text-left hover:bg-kymo-raised flex items-center gap-2 text-kymo-ink" (click)="pick(c.name)">
+                        <span class="k-led" [class]="dotClass(c)"></span><span class="truncate">{{ c.name }}</span>
+                      </button>
+                    } @empty {
+                      <p class="px-3 py-2 text-kymo-faint">No matching cluster</p>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          }
+          @if (state.removed().length > 0) {
+            <div class="relative flex items-stretch ml-1 pl-1 border-l border-kymo-rule" data-scope-menu>
+              <button type="button" class="px-2.5 -mb-px border-b-2 border-transparent text-kymo-muted hover:text-kymo-ink transition-colors inline-flex items-center gap-1.5 focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-2 focus-visible:outline-kymo-amber"
+                      aria-haspopup="listbox" [attr.aria-expanded]="menu() === 'history'" (click)="toggle('history')">
+                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 4h16v4H4zM6 8v12h12V8M10 12h4" /></svg>
+                History
+                <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M19 9l-7 7-7-7" /></svg>
+              </button>
+              @if (menu() === 'history') {
+                <div class="absolute left-0 top-full bg-kymo-deep border border-kymo-rule min-w-[260px] py-1 shadow-lg">
+                  <p class="px-3 pt-1 pb-1 k-label">Removed clusters</p>
+                  @if (state.removed().length > 6) {
+                    <div class="px-2 pb-1">
+                      <input #hf type="text" class="k-input w-full" placeholder="Filter…" aria-label="Filter removed clusters"
+                             [value]="filterText()" (input)="filterText.set(hf.value)" />
+                    </div>
+                  }
+                  <div role="listbox" aria-label="Removed clusters" class="max-h-64 overflow-y-auto">
+                    @for (r of filteredRemoved(); track r.name) {
+                      <button type="button" role="option" [attr.aria-selected]="false"
+                              class="w-full px-3 py-1.5 text-left hover:bg-kymo-raised flex items-center gap-2 text-kymo-muted"
+                              [title]="'Recorded history only, last seen ' + (r.last_seen_at | timeago)" (click)="pick(r.name)">
+                        <span class="truncate flex-1">{{ r.name }}</span>
+                        <span class="text-[10px] text-kymo-faint flex-none">{{ r.last_seen_at | timeago }}</span>
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+
+        <!-- < md: one compact button -->
+        <div class="md:hidden relative flex items-center min-w-0" data-scope-menu>
+          <button type="button" class="k-btn k-btn-sm gap-1.5 px-2 max-w-full" aria-haspopup="listbox"
+                  [attr.aria-expanded]="menu() === 'compact'" aria-label="Cluster scope" (click)="toggle('compact')">
+            <span class="k-label">Scope</span>
+            @if (currentInfo(); as ci) { <span class="k-led" [class]="dotClass(ci)"></span> }
+            <span class="truncate" [class]="selected() ? 'text-kymo-amber' : 'text-kymo-ink'">{{ currentLabel() }}</span>
+            <svg class="w-2.5 h-2.5 flex-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          @if (menu() === 'compact') {
+            <div class="absolute left-0 top-full mt-px bg-kymo-deep border border-kymo-rule min-w-[240px] py-1 shadow-lg">
+              @if (clusters().length + state.removed().length > 6) {
+                <div class="px-2 pb-1">
+                  <input #cf type="text" class="k-input w-full" placeholder="Filter clusters…" aria-label="Filter clusters"
+                         [value]="filterText()" (input)="filterText.set(cf.value)" />
+                </div>
+              }
+              <div role="listbox" aria-label="Cluster scope" class="max-h-72 overflow-y-auto">
+                <button type="button" role="option" [attr.aria-selected]="selected() === ''"
+                        class="w-full px-3 py-2 text-left hover:bg-kymo-raised" [class]="selected() === '' ? 'text-kymo-amber' : 'text-kymo-ink'" (click)="pick('')">All clusters</button>
+                @for (c of filteredAll(); track c.name) {
+                  <button type="button" role="option" [attr.aria-selected]="selected() === c.name" [title]="statusLabel(c)"
+                          class="w-full px-3 py-2 text-left hover:bg-kymo-raised flex items-center gap-2" [class]="selected() === c.name ? 'text-kymo-amber' : 'text-kymo-ink'" (click)="pick(c.name)">
+                    <span class="k-led" [class]="dotClass(c)"></span><span class="truncate">{{ c.name }}</span>
+                  </button>
+                }
+                @if (filteredRemoved().length > 0) {
+                  <p class="px-3 pt-2 pb-1 k-label" role="presentation">History (removed)</p>
+                  @for (r of filteredRemoved(); track r.name) {
+                    <button type="button" role="option" [attr.aria-selected]="false"
+                            class="w-full px-3 py-2 text-left hover:bg-kymo-raised flex items-center gap-2 text-kymo-muted" (click)="pick(r.name)">
+                      <span class="truncate flex-1">{{ r.name }}</span>
+                      <span class="text-[10px] text-kymo-faint flex-none">{{ r.last_seen_at | timeago }}</span>
+                    </button>
+                  }
+                }
+              </div>
+            </div>
+          }
+        </div>
+
+        <!-- Context -->
+        <a routerLink="/clusters" class="ml-auto flex-none flex items-center gap-1.5 text-[11px] text-kymo-faint hover:text-kymo-ink transition-colors whitespace-nowrap"
+           title="Manage clusters">
+          <span>{{ clusters().length }} <span class="hidden sm:inline">cluster{{ clusters().length === 1 ? '' : 's' }} · </span><span class="sm:hidden">/ </span>{{ connected() }} connected</span>
+          @if (failing() > 0) {
+            <span class="text-kymo-danger">· {{ failing() }} error{{ failing() === 1 ? '' : 's' }}</span>
+          }
+        </a>
+      </div>
+    </div>
+  }
+}

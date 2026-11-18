@@ -182,8 +182,8 @@ export class K8sEventsComponent {
   namespace = signal('');
   reason    = signal('');
   q         = signal('');
-  /** Selected top-bar cluster ('' = all connected). */
-  source    = signal('');
+  /** Global cluster scope ('' = all connected). */
+  source    = this.sourceSvc.selectedSource;
 
   loading     = signal(true);
   error       = signal(false);
@@ -225,7 +225,6 @@ export class K8sEventsComponent {
 
   constructor() {
     reloadOnSourceAndRefresh({
-      onSourceChange: src => this.source.set(src),
       load: reason => this.load(reason),
     });
     // Namespaces and reason chips follow the cluster; a reason that does not exist there is dropped.

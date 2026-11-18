@@ -1,5 +1,5 @@
 import {
-  Component, ChangeDetectionStrategy, inject, signal, computed, effect, ElementRef, DestroyRef,
+  Component, ChangeDetectionStrategy, inject, signal, computed, effect, DestroyRef,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
 import { Router, NavigationEnd, RouterLink, RouterLinkActive } from '@angular/router';
@@ -8,12 +8,8 @@ import { filter, map } from 'rxjs/operators';
 
 import { AuthService } from '../../core/services/auth.service';
 import { RefreshService } from '../../core/services/refresh.service';
-import { SourceStateService } from '../../core/services/source-state.service';
 import { IssuesService } from '../../core/services/issues.service';
-import { sourceDotClass, sourceStatusLabel } from '../../shared/utils/source';
-import { SourceStatus } from '../../core/models/container.model';
 import { PageContextService } from '../../core/services/page-context.service';
-import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import { LogoComponent } from '../../shared/components/logo/logo.component';
 import { UserMenuComponent } from '../user-menu/user-menu.component';
 import { CommandPaletteComponent } from '../command-palette/command-palette.component';
@@ -23,7 +19,7 @@ export interface NavTab {
   label: string;
 }
 
-/** Fixed main navigation (digit hotkeys 1–6 in this order). The cluster selector only filters data. */
+/** Fixed main navigation (digit hotkeys 1–6 in this order). The cluster scope lives in the scope bar. */
 export const NAV_TABS: NavTab[] = [
   { path: '/dashboard',  label: 'Overview' },
   { path: '/issues',     label: 'Issues' },
@@ -55,25 +51,21 @@ function isTypingOrModal(ev: KeyboardEvent): boolean {
 @Component({
   selector: 'app-topbar',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, TimeagoPipe, LogoComponent, CommandPaletteComponent, UserMenuComponent],
+  imports: [RouterLink, RouterLinkActive, LogoComponent, CommandPaletteComponent, UserMenuComponent],
   templateUrl: './topbar.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block sticky top-0 z-40',
-    '(document:click)': 'onDocumentClick($event)',
     '(document:keydown)': 'onKey($event)',
   },
 })
 export class TopbarComponent {
   private router  = inject(Router);
-  private host    = inject<ElementRef<HTMLElement>>(ElementRef);
   private pageCtx = inject(PageContextService);
   private title   = inject(Title);
   refreshSvc      = inject(RefreshService);
-  sourceState     = inject(SourceStateService);
   issues          = inject(IssuesService);
 
-  showSourceMenu = signal(false);
   paletteOpen    = signal(false);
   spinning       = signal(false);
   private now    = signal(Date.now());
@@ -90,6 +82,10 @@ export class TopbarComponent {
     ...(this.auth.authEnabled() ? [{ path: '#signout', label: 'Sign out' }] : []),
   ]);
 
+  liveTitle = computed(() => this.refreshSvc.autoRefresh()
+    ? `Auto-refresh on · ${this.updatedLabel()} — click to pause`
+    : `Auto-refresh paused · ${this.updatedLabel()} — click to resume`);
+
   updatedLabel = computed(() => {
     const last = this.refreshSvc.lastUpdated();
     if (!last) return 'not updated';
@@ -99,8 +95,6 @@ export class TopbarComponent {
     const m = Math.floor(s / 60);
     return m < 60 ? `updated ${m}m ago` : `updated ${Math.floor(m / 60)}h ago`;
   });
-
-  selectedSource = computed<SourceStatus | null>(() => this.sourceState.selectedSourceInfo());
 
   private url = toSignal(
     this.router.events.pipe(
@@ -121,13 +115,9 @@ export class TopbarComponent {
     return tab?.label ?? null;
   });
 
-  dotClass = sourceDotClass;
-  statusLabel = sourceStatusLabel;
-
   constructor() {
     const id = setInterval(() => this.now.set(Date.now()), 1000);
     inject(DestroyRef).onDestroy(() => clearInterval(id));
-    this.router.events.pipe(filter(e => e instanceof NavigationEnd)).subscribe(() => this.showSourceMenu.set(false));
     effect(() => {
       const t = this.pageTitle();
       this.title.setTitle(t ? `${t} · KYMO` : 'KYMO');
@@ -140,32 +130,11 @@ export class TopbarComponent {
     setTimeout(() => this.spinning.set(false), 600);
   }
 
-  toggleSourceMenu(): void {
-    this.showSourceMenu.update(v => !v);
-  }
-
-  /** Changing the source is picked up by each page via `reloadOnSourceAndRefresh`; no extra refresh needed. */
-  selectSource(name: string): void {
-    this.sourceState.select(name);
-    this.showSourceMenu.set(false);
-  }
-
-  onDocumentClick(ev: MouseEvent): void {
-    if (!this.showSourceMenu()) return;
-    const menu = this.host.nativeElement.querySelector('[data-source-menu]');
-    if (menu && !menu.contains(ev.target as Node)) this.showSourceMenu.set(false);
-  }
-
   onKey(ev: KeyboardEvent): void {
     // ⌘K / Ctrl+K: command palette (works from anywhere, including inputs).
     if ((ev.metaKey || ev.ctrlKey) && !ev.altKey && !ev.shiftKey && ev.key.toLowerCase() === 'k') {
       ev.preventDefault();
       if (!this.paletteOpen() && !document.querySelector('[aria-modal="true"]')) this.openPalette();
-      return;
-    }
-
-    if (ev.key === 'Escape' && this.showSourceMenu()) {
-      this.showSourceMenu.set(false);
       return;
     }
 
@@ -179,7 +148,6 @@ export class TopbarComponent {
   }
 
   openPalette(): void {
-    this.showSourceMenu.set(false);
     this.paletteOpen.set(true);
   }
 }

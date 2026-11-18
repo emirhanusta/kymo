@@ -123,6 +123,7 @@ func (h *Handler) registerAuthRoutes(v1 *gin.RouterGroup) {
 
 	// Admin and owner.
 	v1.GET("/users/invites", h.require(model.RoleAdmin), h.ListInvites)
+	v1.POST("/users", h.require(model.RoleAdmin), h.CreateUser)
 	v1.POST("/users/invites", h.require(model.RoleAdmin), h.CreateInvite)
 	v1.DELETE("/users/invites/:id", h.require(model.RoleAdmin), h.DeleteInvite)
 	v1.PATCH("/users/:id", h.require(model.RoleAdmin), h.UpdateUser)
@@ -897,16 +898,44 @@ func (h *Handler) ListInvites(c *gin.Context) {
 	c.JSON(http.StatusOK, out)
 }
 
-// CreateInvite creates a 7-day invite link.
+// CreateInvite creates a 7-day setup link. Alias of CreateUser with method=link.
 //
 //	POST /api/v1/users/invites {username, role, email?}
-func (h *Handler) CreateInvite(c *gin.Context) {
+func (h *Handler) CreateInvite(c *gin.Context) { h.createAccount(c, "link") }
+
+// CreateUser adds a user, either through a one-time setup link or directly
+// with a temporary password the user must change at first sign-in.
+//
+//	POST /api/v1/users {username, role, name?, email?, method: "link"|"password", password?}
+//
+// method=link answers {method, id, username, email, role, url, expires_at};
+// method=password answers {method, user, password?} where password is present
+// only when KYMO generated it. KYMO sends no email, so the admin passes it on.
+func (h *Handler) CreateUser(c *gin.Context) { h.createAccount(c, "") }
+
+const generatedTempPasswordLen = 20
+
+func (h *Handler) createAccount(c *gin.Context, forced string) {
 	var in struct {
 		Username string `json:"username"`
 		Email    string `json:"email"`
+		Name     string `json:"name"`
 		Role     string `json:"role"`
+		Method   string `json:"method"`
+		Password string `json:"password"`
 	}
 	if !bindBody(c, &in) {
+		return
+	}
+	method := forced
+	if method == "" {
+		method = strings.ToLower(strings.TrimSpace(in.Method))
+	}
+	if method == "" {
+		method = "link"
+	}
+	if method != "link" && method != "password" {
+		apiErr(c, http.StatusBadRequest, "invalid_request", `method must be "link" or "password"`)
 		return
 	}
 	actor := auth.IdentityOf(c)
@@ -921,7 +950,7 @@ func (h *Handler) CreateInvite(c *gin.Context) {
 		return
 	}
 	if role == model.RoleAdmin && actor.Role != model.RoleOwner {
-		forbidden(c, model.RoleOwner, "only the owner can invite admins")
+		forbidden(c, model.RoleOwner, "only the owner can add admins")
 		return
 	}
 	ctx := c.Request.Context()
@@ -932,37 +961,86 @@ func (h *Handler) CreateInvite(c *gin.Context) {
 			return
 		}
 	}
+	// Validate a given password before touching the database.
+	password, generated := in.Password, false
+	if method == "password" {
+		if password == "" {
+			if password, err = auth.GeneratePassword(generatedTempPasswordLen); err != nil {
+				h.internalErr(c, "generate password", err)
+				return
+			}
+			generated = true
+		} else if err := auth.ValidatePassword(password); err != nil {
+			apiErr(c, http.StatusBadRequest, "weak_password", err.Error())
+			return
+		}
+	}
 	taken := func(code, msg string, err error) bool {
 		if err == nil {
 			apiErr(c, http.StatusConflict, code, msg)
 			return true
 		}
 		if !errors.Is(err, repository.ErrNotFound) {
-			h.internalErr(c, "invite lookup", err)
+			h.internalErr(c, "user lookup", err)
 			return true
 		}
 		return false
 	}
+	now := h.auth.Now()
 	if _, err := h.auth.Repo.GetUserByUsername(ctx, username); taken("username_taken", "a user with this username already exists", err) {
 		return
 	}
-	if _, err := h.auth.Repo.GetInviteByUsername(ctx, username, h.auth.Now()); taken("username_taken", "a pending invite for this username already exists", err) {
+	if _, err := h.auth.Repo.GetInviteByUsername(ctx, username, now); taken("username_taken", "a pending setup link for this username already exists", err) {
 		return
 	}
 	if email != "" {
 		if _, err := h.auth.Repo.GetUserByEmail(ctx, email); taken("email_taken", "a user with this email already exists", err) {
 			return
 		}
+		if _, err := h.auth.Repo.GetInviteByEmail(ctx, email, now); taken("email_taken", "a pending setup link for this email already exists", err) {
+			return
+		}
 	}
-	exp := h.auth.Now().Add(inviteTTL)
-	l := &model.UserLink{Kind: model.LinkInvite, Username: username, Email: email, Role: role, CreatedBy: actorID(actor), ExpiresAt: exp}
-	tok, err := h.newLink(ctx, l)
-	if err != nil {
-		h.internalErr(c, "create invite", err)
+
+	if method == "link" {
+		exp := now.Add(inviteTTL)
+		l := &model.UserLink{Kind: model.LinkInvite, Username: username, Email: email, Role: role, CreatedBy: actorID(actor), ExpiresAt: exp}
+		tok, err := h.newLink(ctx, l)
+		if err != nil {
+			h.internalErr(c, "create setup link", err)
+			return
+		}
+		h.audit(c, "invite.create", "invite", fmt.Sprint(l.ID), map[string]any{"username": username, "email": email, "role": role})
+		c.JSON(http.StatusCreated, gin.H{"method": "link", "id": l.ID, "username": username, "email": email, "role": role,
+			"url": h.baseURL(c) + "/invite/" + tok, "expires_at": exp})
 		return
 	}
-	h.audit(c, "invite.create", "invite", fmt.Sprint(l.ID), map[string]any{"username": username, "email": email, "role": role})
-	c.JSON(http.StatusCreated, gin.H{"id": l.ID, "username": username, "email": email, "role": role, "url": h.baseURL(c) + "/invite/" + tok, "expires_at": exp})
+
+	hash, err := auth.HashPassword(password)
+	if err != nil {
+		h.internalErr(c, "hash password", err)
+		return
+	}
+	name := strings.TrimSpace(in.Name)
+	if name == "" {
+		name = username
+	}
+	u := &model.User{Username: username, Email: email, Name: name, Role: role, PasswordHash: hash, MustChangePassword: true, Status: model.UserActive}
+	if err := h.auth.Repo.CreateUser(ctx, u); err != nil {
+		if errors.Is(err, repository.ErrConflict) {
+			apiErr(c, http.StatusConflict, "username_taken", "a user with this username or email already exists")
+			return
+		}
+		h.internalErr(c, "create user", err)
+		return
+	}
+	u.HasPassword = true
+	h.audit(c, "user.create", "user", fmt.Sprint(u.ID), map[string]any{"method": "password", "username": username, "role": role})
+	out := gin.H{"method": "password", "user": u}
+	if generated {
+		out["password"] = password
+	}
+	c.JSON(http.StatusCreated, out)
 }
 
 // DeleteInvite revokes an invite.

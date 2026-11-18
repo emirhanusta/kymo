@@ -1,219 +1,305 @@
 <div class="flex flex-col gap-6">
-  <app-page-header title="Overview">
-    <ng-container subtitle>
-      {{ clusterCards().length }} cluster{{ clusterCards().length !== 1 ? 's' : '' }}
-      @if (workloadCount() > 0) {
-        · {{ workloadCount() }} workload{{ workloadCount() !== 1 ? 's' : '' }}
+
+  <!-- Header: title + one-line health statement -->
+  <header class="border-b border-kymo-rule pb-3">
+    <h1 class="text-lg font-semibold text-kymo-ink tracking-tight">Overview</h1>
+    <p class="mt-1.5 text-xs text-kymo-muted flex items-center gap-2 flex-wrap min-h-4" role="status">
+      @if (state.loaded() && issuesLoaded()) {
+        <span class="k-led" aria-hidden="true"
+              [class]="{ 'bg-kymo-running': health().tone === 'ok', 'bg-kymo-amber': health().tone === 'warn', 'bg-kymo-danger': health().tone === 'bad', 'bg-kymo-unknown': health().tone === 'history' }"></span>
+        <span class="font-medium"
+              [class]="{ 'text-kymo-running': health().tone === 'ok', 'text-kymo-amber': health().tone === 'warn', 'text-kymo-danger': health().tone === 'bad', 'text-kymo-muted': health().tone === 'history' }">{{ health().text }}</span>
+        @if (health().detail) {
+          <span class="text-kymo-muted">— {{ health().detail }}</span>
+        }
+        @if (scopeText()) {
+          <span class="text-kymo-faint">· {{ scopeText() }}</span>
+        }
       }
-      @if (issues().length > 0) {
-        · <span class="text-kymo-danger font-medium">{{ issues().length }} open issue{{ issues().length === 1 ? '' : 's' }}</span>
-      }
-    </ng-container>
-  </app-page-header>
+    </p>
+  </header>
 
   @if (state.error()) {
-    <app-error-state message="Failed to load overview data" (retry)="state.load()" />
+    <app-error-state message="Failed to load overview data" (retry)="retryAll()" />
   }
 
   @if (!state.loaded()) {
-    <app-skeleton variant="cards" [rows]="3" />
-    <app-skeleton [rows]="5" />
+    <!-- Loading skeleton -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-kymo-rule border border-kymo-rule animate-pulse" aria-busy="true" aria-label="Loading">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-kymo-panel px-4 py-4 space-y-3">
+          <div class="h-2.5 w-1/3 bg-kymo-raised"></div>
+          <div class="h-6 w-1/2 bg-kymo-raised"></div>
+          <div class="h-2 w-2/3 bg-kymo-raised"></div>
+        </div>
+      }
+    </div>
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      @for (i of [1, 2]; track i) {
+        <div class="k-panel h-56 animate-pulse" [class]="i === 1 ? 'lg:col-span-2' : ''"></div>
+      }
+    </div>
   } @else {
 
-    <!-- Summary strip -->
-    <div class="k-panel grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 divide-x divide-kymo-rule">
-      <div class="px-4 py-3">
-        <div class="k-label">Clusters</div>
-        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ clusterCards().length }}</div>
-      </div>
-      <div class="px-4 py-3">
+    <!-- KPI strip -->
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-px bg-kymo-rule border border-kymo-rule">
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
         <div class="k-label">Workloads</div>
-        <div class="mt-1 text-2xl font-medium text-kymo-ink tabular-nums">{{ workloadCount() }}</div>
+        <div class="mt-1.5 text-2xl font-medium text-kymo-ink tabular-nums">{{ healthyCount() }}<span class="text-sm text-kymo-faint"> / {{ workloadCount() }}</span></div>
+        <div class="mt-1 text-[11px] tabular-nums" [class]="unhealthyCount() > 0 ? 'text-kymo-danger' : 'text-kymo-muted'">
+          {{ unhealthyCount() > 0 ? unhealthyCount() + ' unhealthy' : 'healthy' }}
+        </div>
       </div>
-      <div class="px-4 py-3" title="Ready of active pods">
-        <div class="k-label">Ready pods</div>
-        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="runningPods() > 0 ? 'text-kymo-running' : 'text-kymo-muted'">{{ runningPods() }}<span class="text-sm text-kymo-faint"> / {{ totalPods() }}</span></div>
+
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+        <div class="k-label">Pods ready</div>
+        <div class="mt-1.5 text-2xl font-medium text-kymo-ink tabular-nums">{{ readyPods() }}<span class="text-sm text-kymo-faint"> / {{ desiredPods() }}</span></div>
+        <div class="mt-2 h-1 bg-kymo-rule" role="progressbar" aria-label="Pods ready" [attr.aria-valuenow]="readyPct()" aria-valuemin="0" aria-valuemax="100">
+          <div class="h-full" [class]="notReadyPods() > 0 ? 'bg-kymo-amber' : 'bg-kymo-muted'" [style.width.%]="readyPct()"></div>
+        </div>
+        <div class="mt-1 text-[11px] tabular-nums" [class]="notReadyPods() > 0 ? 'text-kymo-amber' : 'text-kymo-muted'">
+          {{ notReadyPods() > 0 ? notReadyPods() + ' not ready' : 'all ready' }}
+        </div>
       </div>
-      <div class="px-4 py-3">
+
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
         <div class="k-label">Open issues</div>
-        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="issues().length > 0 ? 'text-kymo-danger' : 'text-kymo-muted'">{{ issues().length }}</div>
+        @if (historyMode()) {
+          <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+          <div class="mt-1 text-[11px] text-kymo-muted">not tracked</div>
+        } @else {
+          <div class="mt-1.5 text-2xl font-medium tabular-nums" [class]="openIssues().length > 0 ? (criticalCount() > 0 ? 'text-kymo-danger' : 'text-kymo-amber') : 'text-kymo-ink'">{{ openIssues().length }}</div>
+          <div class="mt-1 text-[11px] text-kymo-muted tabular-nums">{{ breakdown() || 'none open' }}</div>
+        }
       </div>
-      <div class="px-4 py-3">
-        <div class="k-label">Avg stability</div>
-        <div class="mt-1 text-2xl font-medium tabular-nums" [class]="overallAvgScore() | scoreClass">{{ formatScore(overallAvgScore()) }}</div>
+
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+        <div class="k-label">Crashes · 24h</div>
+        @if (activity(); as a) {
+          <div class="mt-1.5 flex items-end justify-between gap-3">
+            <div class="text-2xl font-medium tabular-nums" [class]="crashes24h() > 0 ? 'text-kymo-danger' : 'text-kymo-ink'">{{ crashes24h() }}</div>
+            <svg class="w-24 h-5 flex-none hidden sm:block" viewBox="0 0 96 20" preserveAspectRatio="none" role="img" [attr.aria-label]="'Hourly crashes, last 24 hours'">
+              @for (b of sparkBars(); track $index) {
+                <rect [attr.x]="b.x" [attr.y]="20 - b.h" width="3" [attr.height]="b.h" [class]="b.hot ? 'fill-kymo-danger' : 'fill-kymo-rule'" />
+              }
+            </svg>
+          </div>
+          <div class="mt-1 text-[11px] text-kymo-muted tabular-nums">{{ crashDelta() }}</div>
+        } @else if (activityError()) {
+          <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+          <div class="mt-1 text-[11px] text-kymo-muted">unavailable</div>
+        } @else {
+          <div class="mt-2 space-y-2 animate-pulse"><div class="h-6 w-1/3 bg-kymo-raised"></div><div class="h-2 w-2/3 bg-kymo-raised"></div></div>
+        }
       </div>
     </div>
 
-    <!-- Top issues -->
-    <section class="k-panel overflow-hidden flex flex-col" aria-labelledby="dash-issues-title">
-      <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between">
-        <h2 id="dash-issues-title" class="k-label flex items-center gap-2">
-          <span class="k-led" [class]="issues().length ? 'bg-kymo-danger animate-pulse' : 'bg-kymo-running'"></span>
-          Top issues
-        </h2>
-        @if (issues().length > topIssues().length) {
-          <a routerLink="/issues" class="text-xs text-kymo-amber hover:underline underline-offset-4 tabular-nums">all {{ issues().length }} →</a>
-        } @else if (issues().length > 0) {
-          <a routerLink="/issues" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4">Issues →</a>
-        }
-      </div>
-      @if (historyMode()) {
-        <app-empty-state icon="box" [compact]="true" message="Issues are not tracked for removed clusters" hint="Statuses of a removed cluster are frozen at the moment it was removed." />
-      } @else if (issues().length === 0) {
-        <app-empty-state icon="check" tone="success" [compact]="true" message="No open issues" hint="Nothing is crash looping, OOM-killed, degraded or failing." />
-      } @else {
-        <ul class="divide-y divide-kymo-rule">
-          @for (i of topIssues(); track i.id) {
-            <li>
-              <a [routerLink]="['/workloads', i.workload_id]" [queryParams]="issueQuery(i)" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
-                <span class="k-led flex-none" [class]="issueLed(i.severity)" aria-hidden="true"></span>
-                <app-workload-badge class="flex-none" [kind]="i.kind" />
-                <div class="flex-1 min-w-0">
-                  <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="i.name">{{ i.name }}</p>
-                  <p class="text-[11px] text-kymo-faint truncate">{{ i.namespace ? i.namespace + ' · ' : '' }}{{ i.source_name }}</p>
-                </div>
-                <span class="text-xs flex-none truncate max-w-[40%]" [class]="issueText(i.severity)" [title]="i.title">{{ i.title }}</span>
-                <span class="text-xs text-kymo-faint flex-none w-16 text-right tabular-nums hidden sm:inline">{{ i.first_seen | timeago }}</span>
-              </a>
-            </li>
-          }
-        </ul>
-      }
-    </section>
+    <!-- Needs attention + Recent changes -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-    <!-- Top errors (opt-in error-log capture) -->
-    @if (showErrors()) {
-      <section class="k-panel overflow-hidden flex flex-col" aria-labelledby="dash-errors-title">
-        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between">
-          <h2 id="dash-errors-title" class="k-label">Top errors (24h)</h2>
-          <a routerLink="/settings/log-capture" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4">Log capture →</a>
+      <section class="k-panel flex flex-col lg:col-span-2 min-w-0" aria-labelledby="ov-attn-title">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between gap-3">
+          <h2 id="ov-attn-title" class="k-label">Needs attention</h2>
+          @if (!historyMode() && openIssues().length > 0) {
+            <a routerLink="/issues" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4 whitespace-nowrap">All issues →</a>
+          }
         </div>
-        @if (topErrors().length === 0) {
-          <app-empty-state icon="check" tone="success" [compact]="true" message="No captured errors" hint="Capture is on; nothing logged at error level in the last 24 hours." />
+        @if (historyMode()) {
+          <app-empty-state icon="archive" [compact]="true" message="Issues are not tracked for removed clusters" hint="Statuses of a removed cluster are frozen at the moment it was removed." />
+        } @else if (topIssues().length === 0) {
+          <app-empty-state icon="check" tone="success" [compact]="true" message="Nothing needs attention" hint="No crash loops, OOM kills or failing workloads." />
         } @else {
           <ul class="divide-y divide-kymo-rule">
-            @for (e of topErrors(); track e.id) {
+            @for (i of topIssues(); track i.id) {
               <li>
-                <a [routerLink]="['/workloads', e.workload_id]" [queryParams]="{ tab: 'errors' }" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
-                  <div class="w-40 sm:w-52 flex-none min-w-0">
-                    <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="e.name">{{ e.name }}</p>
-                    <p class="text-[11px] text-kymo-faint truncate">{{ e.namespace ? e.namespace + ' · ' : '' }}{{ e.source_name }}</p>
+                <a [routerLink]="['/workloads', i.workload_id]" [queryParams]="issueQuery(i)"
+                   class="px-4 py-3 hover:bg-kymo-raised transition-colors flex items-start gap-3 group">
+                  <span class="k-led mt-1.5" [class]="issueLed(i.severity)" [title]="i.severity" aria-hidden="true"></span>
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <span class="text-sm text-kymo-ink truncate group-hover:text-kymo-amber" [title]="i.name">{{ i.name }}</span>
+                      <app-workload-badge class="flex-none" [kind]="i.kind" />
+                    </div>
+                    <p class="text-xs mt-0.5 truncate" [class]="issueText(i.severity)" [title]="i.detail || i.title">{{ i.title }}</p>
+                    <p class="text-[11px] text-kymo-faint mt-0.5 truncate">{{ i.namespace ? i.namespace + ' · ' : '' }}{{ i.source_name }}</p>
                   </div>
-                  <p class="flex-1 min-w-0 text-xs text-kymo-muted truncate" [title]="e.template"><app-error-template [template]="e.template" /></p>
-                  <app-error-spark class="hidden sm:inline-block" [buckets]="e.buckets" />
-                  <span class="text-xs flex-none w-12 text-right tabular-nums" [class]="e.level === 'fatal' ? 'text-kymo-danger' : 'text-kymo-amber'">{{ e.count }}</span>
+                  <span class="text-xs text-kymo-faint flex-none tabular-nums whitespace-nowrap pt-0.5" title="First seen">{{ i.first_seen | timeago }}</span>
                 </a>
               </li>
             }
           </ul>
         }
       </section>
+
+      <section class="k-panel flex flex-col min-w-0" aria-labelledby="ov-changes-title">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between gap-3">
+          <h2 id="ov-changes-title" class="k-label">Recent changes</h2>
+        </div>
+        @if (changes(); as list) {
+          @if (list.length === 0) {
+            <app-empty-state icon="clock" [compact]="true" message="No recent rollouts" hint="New revisions of a workload show up here." />
+          } @else {
+            <ul class="divide-y divide-kymo-rule">
+              @for (c of list; track c.workload_id + c.revision) {
+                <li>
+                  <a [routerLink]="['/workloads', c.workload_id]" class="px-4 py-3 hover:bg-kymo-raised transition-colors flex items-start gap-3 group"
+                     [title]="c.previous_image + ' → ' + c.image">
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2 min-w-0">
+                        <span class="text-sm text-kymo-ink truncate group-hover:text-kymo-amber">{{ c.name }}</span>
+                        <app-workload-badge class="flex-none" [kind]="c.kind" />
+                      </div>
+                      @if (changeLabel(c); as l) {
+                        <p class="text-xs text-kymo-muted mt-0.5 truncate tabular-nums">
+                          {{ l.from || '—' }} <span class="text-kymo-faint">→</span> <span class="text-kymo-ink">{{ l.to }}</span>
+                          @if (l.kind === 'revision') { <span class="text-kymo-faint"> · revision</span> }
+                        </p>
+                      }
+                      <p class="text-[11px] text-kymo-faint mt-0.5 truncate">{{ c.namespace ? c.namespace + ' · ' : '' }}{{ c.source_name }}</p>
+                    </div>
+                    <span class="text-xs text-kymo-faint flex-none tabular-nums whitespace-nowrap pt-0.5">{{ c.at | timeago }}</span>
+                  </a>
+                </li>
+              }
+            </ul>
+          }
+        } @else if (changesError()) {
+          <app-empty-state icon="search" [compact]="true" message="Failed to load changes" hint="Will retry on the next refresh." />
+        } @else {
+          <div class="p-4 space-y-4 animate-pulse" aria-busy="true">
+            @for (i of [1, 2, 3]; track i) { <div class="space-y-2"><div class="h-3 w-1/2 bg-kymo-raised"></div><div class="h-2.5 w-1/3 bg-kymo-raised"></div></div> }
+          </div>
+        }
+      </section>
+    </div>
+
+    <!-- Activity -->
+    <section class="k-panel" aria-labelledby="ov-activity-title">
+      <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between gap-3 flex-wrap">
+        <h2 id="ov-activity-title" class="k-label">Activity · last 24h</h2>
+        <ul class="flex items-center gap-4 text-[11px] text-kymo-muted" aria-label="Legend">
+          <li class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 bg-kymo-faint"></span>Starts</li>
+          <li class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 bg-kymo-danger"></span>Crashes</li>
+          <li class="flex items-center gap-1.5"><span class="inline-block w-2 h-2 bg-kymo-amber"></span>OOM kills</li>
+        </ul>
+      </div>
+      @if (activity(); as a) {
+        @if (a.buckets.length === 0) {
+          <app-empty-state icon="chart" [compact]="true" message="No activity recorded" />
+        } @else {
+          <div class="px-4 pt-4 pb-3">
+            <div class="relative" (mouseleave)="hovered.set(null)">
+              <div class="flex">
+                <!-- y axis -->
+                <div class="relative w-7 flex-none text-[10px] text-kymo-faint tabular-nums" [style.height.px]="chartH / 2" aria-hidden="true">
+                  @for (t of yTicks(); track t.label) {
+                    <span class="absolute right-1.5 -translate-y-1/2" [style.top.%]="t.y / chartH * 100">{{ t.label }}</span>
+                  }
+                  <span class="absolute right-1.5 bottom-0 translate-y-1/2">0</span>
+                </div>
+                <div class="relative flex-1 min-w-0">
+                  <svg class="block w-full" [style.height.px]="chartH / 2" [attr.viewBox]="'0 0 ' + chartW + ' ' + chartH" preserveAspectRatio="none"
+                       role="img" [attr.aria-label]="activitySummary()">
+                    @for (t of yTicks(); track t.label) {
+                      <line [attr.x1]="0" [attr.x2]="chartW" [attr.y1]="t.y" [attr.y2]="t.y" class="stroke-kymo-rule" stroke-width="1" vector-effect="non-scaling-stroke" stroke-dasharray="3 3" />
+                    }
+                    <line [attr.x1]="0" [attr.x2]="chartW" [attr.y1]="chartH" [attr.y2]="chartH" class="stroke-kymo-rule" stroke-width="1" vector-effect="non-scaling-stroke" />
+                    @for (bar of bars(); track bar.index) {
+                      <rect [attr.x]="bar.x - 4" [attr.width]="bar.w + 8" y="0" [attr.height]="chartH" class="cursor-default"
+                            [attr.fill]="hovered() === bar.index ? 'var(--color-kymo-raised)' : 'transparent'" (mouseenter)="hovered.set(bar.index)" />
+                      @for (s of bar.segments; track $index) {
+                        <rect [attr.x]="bar.x" [attr.width]="bar.w" [attr.y]="s.y" [attr.height]="s.h" [class]="s.cls" pointer-events="none" />
+                      }
+                    }
+                  </svg>
+                  @if (hoveredBucket(); as hb) {
+                    <div class="absolute top-0 z-10 -translate-x-1/2 pointer-events-none bg-kymo-deep border border-kymo-rule px-2.5 py-1.5 text-[11px] whitespace-nowrap shadow-lg"
+                         [style.left.%]="tooltipLeft()" role="tooltip">
+                      <div class="text-kymo-muted tabular-nums">{{ hoveredRange() }}</div>
+                      <div class="mt-1 grid grid-cols-[auto_auto] gap-x-4 tabular-nums">
+                        <span class="text-kymo-muted">Starts</span><span class="text-kymo-ink text-right">{{ hb.starts }}</span>
+                        <span class="text-kymo-muted">Crashes</span><span class="text-right" [class]="hb.crashes ? 'text-kymo-danger' : 'text-kymo-ink'">{{ hb.crashes }}</span>
+                        <span class="text-kymo-muted">OOM kills</span><span class="text-right" [class]="hb.ooms ? 'text-kymo-amber' : 'text-kymo-ink'">{{ hb.ooms }}</span>
+                      </div>
+                    </div>
+                  }
+                </div>
+              </div>
+              <!-- x axis: a label every 6 hours -->
+              <div class="relative h-4 mt-1.5 ml-7 text-[10px] text-kymo-faint tabular-nums" aria-hidden="true">
+                @for (l of xLabels(); track l.left) {
+                  <span class="absolute -translate-x-1/2" [style.left.%]="l.left">{{ l.text }}</span>
+                }
+              </div>
+            </div>
+          </div>
+        }
+      } @else if (activityError()) {
+        <app-empty-state icon="search" [compact]="true" message="Failed to load activity" hint="Will retry on the next refresh." />
+      } @else {
+        <div class="p-4 animate-pulse" aria-busy="true"><div class="h-20 bg-kymo-raised"></div></div>
+      }
+    </section>
+
+    <!-- Top errors (only when log capture has signatures) -->
+    @if (showErrors()) {
+      <section class="k-panel flex flex-col" aria-labelledby="ov-errors-title">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between gap-3">
+          <h2 id="ov-errors-title" class="k-label">Top errors · 24h</h2>
+          <a routerLink="/settings/log-capture" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4 whitespace-nowrap">Log capture →</a>
+        </div>
+        <ul class="divide-y divide-kymo-rule">
+          @for (e of topErrors(); track e.id) {
+            <li>
+              <a [routerLink]="['/workloads', e.workload_id]" [queryParams]="{ tab: 'errors' }" class="px-4 py-2.5 hover:bg-kymo-raised transition-colors flex items-center gap-3 group">
+                <div class="w-36 sm:w-52 flex-none min-w-0">
+                  <p class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="e.name">{{ e.name }}</p>
+                  <p class="text-[11px] text-kymo-faint truncate">{{ e.namespace ? e.namespace + ' · ' : '' }}{{ e.source_name }}</p>
+                </div>
+                <p class="flex-1 min-w-0 text-xs text-kymo-muted truncate" [title]="e.template"><app-error-template [template]="e.template" /></p>
+                <app-error-spark class="hidden sm:inline-block" [buckets]="e.buckets" />
+                <span class="text-xs flex-none w-12 text-right tabular-nums text-kymo-ink">{{ e.count }}</span>
+              </a>
+            </li>
+          }
+        </ul>
+      </section>
     }
 
-    <!-- Clusters -->
-    @if (clusterCards().length > 0) {
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full">
-        @for (card of clusterCards(); track card.name; let i = $index) {
-          <button
-            type="button"
-            class="k-paper text-left border flex flex-col transition-colors hover:border-kymo-amber focus:outline-none focus-visible:outline-1 focus-visible:outline-kymo-amber"
-            [class]="card.source?.status === 'error' || card.issues > 0 ? 'border-kymo-danger/60' : 'border-kymo-rule'"
-            [title]="'Show workloads of ' + card.name"
-            [attr.aria-label]="'Cluster ' + card.name + ', ' + card.workloads + ' workloads, ' + card.running + ' of ' + card.total + ' pods ready, ' + card.issues + ' open issues. Show workloads'"
-            (click)="selectCluster(card)"
-          >
-            <div class="flex items-center gap-2 px-3 py-2 border-b border-kymo-rule bg-kymo-panel">
-              <span class="k-label text-kymo-faint tabular-nums">{{ channelNo(i) }}</span>
-              @if (card.source; as s) {
-                <span class="k-led" [class]="dotClass(s)" [title]="statusLabel(s)"></span>
-              } @else {
-                <span class="k-led bg-kymo-unknown"></span>
-              }
-              <span class="text-sm font-medium text-kymo-ink truncate flex-1 min-w-0" [title]="card.name">{{ card.name }}</span>
-            </div>
-
-            <div class="px-3 py-3 space-y-3">
-              @if (card.source?.status === 'error') {
-                <p class="text-xs text-kymo-danger truncate" [title]="card.source?.last_error ?? ''">
-                  ERR {{ card.source?.last_error || 'connection error' }}
-                </p>
-              } @else if (card.source?.status === 'connecting') {
-                <p class="text-xs text-kymo-amber">connecting…</p>
-              }
-              <div class="grid grid-cols-3 gap-2 tabular-nums">
-                <div>
-                  <div class="k-label">Workloads</div>
-                  <div class="text-xl font-medium text-kymo-ink leading-tight">{{ card.workloads }}</div>
-                </div>
-                <div>
-                  <div class="k-label">Ready</div>
-                  <div class="text-xl font-medium leading-tight" [class]="card.running > 0 ? 'text-kymo-running' : 'text-kymo-muted'">{{ card.running }}<span class="text-xs text-kymo-faint"> / {{ card.total }}</span></div>
-                </div>
-                <div>
-                  <div class="k-label">Issues</div>
-                  <div class="text-xl font-medium leading-tight" [class]="card.issues > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ card.issues }}</div>
-                </div>
-              </div>
-              <div>
-                <div class="flex items-baseline justify-between mb-1">
-                  <span class="k-label">Stability</span>
-                  <span class="text-sm font-medium tabular-nums leading-none" [class]="card.avgScore | scoreClass">{{ formatScore(card.avgScore) }}</span>
-                </div>
-                <div class="h-1 bg-kymo-rule overflow-hidden">
-                  <div class="h-full transition-all" [class]="card.avgScore | scoreClass:'bg'" [style.width.%]="card.avgScore ?? 0"></div>
-                </div>
-              </div>
-            </div>
-          </button>
-        }
-      </div>
-    } @else if (!state.error()) {
+    <!-- Clusters (all-clusters scope with 2+ clusters) -->
+    @if (showClusters()) {
+      <section class="k-panel flex flex-col" aria-labelledby="ov-clusters-title">
+        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between gap-3">
+          <h2 id="ov-clusters-title" class="k-label">Clusters</h2>
+          <a routerLink="/clusters" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4 whitespace-nowrap">Manage →</a>
+        </div>
+        <div class="grid grid-cols-[minmax(0,1fr)_3.5rem_4.5rem_3.5rem] sm:grid-cols-[minmax(0,1.2fr)_4.5rem_5.5rem_4.5rem_minmax(0,1.5fr)] gap-x-3 px-4 py-2 border-b border-kymo-rule k-label text-[10px]">
+          <span>Name</span><span class="text-right">Workloads</span><span class="text-right">Pods ready</span><span class="text-right">Issues</span><span class="hidden sm:block">Last error</span>
+        </div>
+        <ul class="divide-y divide-kymo-rule">
+          @for (c of clusterRows(); track c.name) {
+            <li>
+              <button type="button" (click)="selectCluster(c.name)" [attr.aria-label]="'Show only ' + c.name"
+                      class="w-full text-left grid grid-cols-[minmax(0,1fr)_3.5rem_4.5rem_3.5rem] sm:grid-cols-[minmax(0,1.2fr)_4.5rem_5.5rem_4.5rem_minmax(0,1.5fr)] gap-x-3 items-center px-4 py-2.5 text-xs hover:bg-kymo-raised transition-colors group focus:outline-none focus-visible:outline-1 focus-visible:-outline-offset-2 focus-visible:outline-kymo-amber">
+                <span class="flex items-center gap-2 min-w-0">
+                  @if (c.source; as s) { <span class="k-led" [class]="dotClass(s)" [title]="statusLabel(s)"></span> }
+                  <span class="text-kymo-ink truncate group-hover:text-kymo-amber" [title]="c.name">{{ c.name }}</span>
+                </span>
+                <span class="text-right tabular-nums text-kymo-ink">{{ c.workloads }}</span>
+                <span class="text-right tabular-nums text-kymo-ink">{{ c.ready }}<span class="text-kymo-faint"> / {{ c.desired }}</span></span>
+                <span class="text-right tabular-nums" [class]="c.issues > 0 ? 'text-kymo-danger' : 'text-kymo-faint'">{{ c.issues }}</span>
+                <span class="hidden sm:block truncate" [class]="c.source?.status === 'error' ? 'text-kymo-danger' : 'text-kymo-faint'" [title]="c.source?.last_error ?? ''">{{ c.source?.last_error || '—' }}</span>
+              </button>
+            </li>
+          }
+        </ul>
+      </section>
+    } @else if (sourceCount() === 0 && !state.error()) {
       <div class="k-panel">
         <app-empty-state icon="box" message="No clusters configured" hint="Add a Kubernetes cluster to start recording.">
           <a routerLink="/clusters" [queryParams]="{ add: 1 }" class="k-btn k-btn-primary k-btn-sm mt-4">Add a cluster</a>
         </app-empty-state>
       </div>
     }
-
-    <!-- Recent events -->
-    <div>
-      <section class="k-panel overflow-hidden flex flex-col" aria-labelledby="dash-events-title">
-        <div class="px-4 py-2.5 border-b border-kymo-rule flex items-center justify-between">
-          <h2 id="dash-events-title" class="k-label">Recent events</h2>
-          @if (eventsError()) {
-            <span class="text-xs text-kymo-danger">failed to load</span>
-          }
-        </div>
-        @if (recentEvents().length === 0) {
-          <app-empty-state icon="events" [compact]="true" message="No events recorded yet" hint="Start, stop, crash and OOM events will show up here." />
-        } @else {
-          <div class="divide-y divide-kymo-rule">
-            @for (ev of recentEvents().slice(0, 8); track ev.id) {
-              <a
-                [routerLink]="eventRoute(ev)"
-                class="px-4 py-2 flex items-center gap-3 hover:bg-kymo-raised transition-colors group"
-              >
-                <span class="w-6 h-6 flex items-center justify-center text-xs flex-none" [class]="eventChip(ev)" aria-hidden="true">{{ eventIcon(ev) }}</span>
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 min-w-0">
-                    <span class="text-xs text-kymo-ink truncate group-hover:text-kymo-amber" [title]="ev.container_name || ev.container_id">{{ eventName(ev) }}</span>
-                    @if (ev.source_name) {
-                      <span class="text-[10px] text-kymo-faint border border-kymo-rule px-1 flex-none hidden sm:inline">{{ ev.source_name }}</span>
-                    }
-                  </div>
-                  @if (eventReason(ev); as reason) {
-                    <p class="text-[11px] text-kymo-muted truncate" [title]="reason">{{ reason }}</p>
-                  }
-                </div>
-                <span class="text-xs flex-none uppercase tracking-wide" [class]="eventText(ev)">
-                  {{ eventLabel(ev) }}@if (showsExit(ev)) {<span class="text-kymo-faint"> ({{ ev.exit_code }})</span>}
-                </span>
-                <span class="text-xs text-kymo-faint flex-none w-16 text-right tabular-nums">{{ ev.occurred_at | timeago }}</span>
-              </a>
-            }
-          </div>
-        }
-      </section>
-    </div>
   }
 </div>
