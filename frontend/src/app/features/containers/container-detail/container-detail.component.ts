@@ -24,6 +24,7 @@ import { WorkloadBadgeComponent } from '../../../shared/components/workload-badg
 import { StabilityGaugeComponent } from '../../../shared/components/stability-gauge/stability-gauge.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { CrashLogInlineComponent } from '../../../shared/components/crash-log-inline/crash-log-inline.component';
+import { ExitTagComponent } from '../../../shared/components/exit-tag/exit-tag.component';
 import { READ_ONLY_HINT, REMOVED_HINT } from '../../../shared/utils/source';
 import { normalizeStatus } from '../../../shared/utils/status';
 import { LogViewerComponent } from '../../../shared/components/log-viewer/log-viewer.component';
@@ -54,6 +55,7 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   selector: 'app-container-detail',
   standalone: true,
   imports: [
+    ExitTagComponent,
     RouterLink, DecimalPipe,
     MetricCardComponent, StatusBadgeComponent, WorkloadBadgeComponent, StabilityGaugeComponent,
     TimeagoPipe, LogViewerComponent, CrashLogInlineComponent, DeleteModalComponent,

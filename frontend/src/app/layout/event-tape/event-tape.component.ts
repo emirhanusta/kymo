@@ -38,7 +38,7 @@ import { containerRoute, shortId } from '../../shared/utils/format';
               <span class="text-kymo-ink max-w-[180px] truncate">{{ ev.container_name || shortId(ev.container_id) }}</span>
               <span class="uppercase tracking-[0.06em]" [class]="textClass(ev)">{{ ev.event_type }}</span>
               @if (showsExit(ev)) {
-                <span class="text-kymo-danger tabular-nums">{{ ev.exit_code }}</span>
+                <span class="tabular-nums" [class]="ev.exit_code === 0 ? 'text-kymo-faint' : 'text-kymo-danger'">{{ ev.exit_code }}</span>
               }
             </a>
           </li>

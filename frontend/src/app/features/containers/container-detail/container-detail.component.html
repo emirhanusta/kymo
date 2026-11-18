@@ -164,7 +164,7 @@
                   <div class="flex items-center gap-2 flex-wrap">
                     <span class="text-xs font-medium uppercase tracking-wide" [class]="eventText(ev)">{{ eventLabel(ev) }}</span>
                     @if (showsExit(ev)) {
-                      <span class="text-[11px] text-kymo-danger border border-kymo-danger/40 px-1.5 tabular-nums">exit {{ ev.exit_code }}</span>
+                      <app-exit-tag [code]="ev.exit_code!" />
                     }
                     <span class="text-[11px] text-kymo-faint ml-auto flex-none tabular-nums" [title]="ev.occurred_at">{{ ev.occurred_at | timeago }}</span>
                   </div>
