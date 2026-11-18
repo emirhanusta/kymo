@@ -1,5 +1,5 @@
 import { Component, ChangeDetectionStrategy, signal, computed, inject, effect, untracked } from '@angular/core';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { SourceService, sourceToInput } from '../../core/services/source.service';
@@ -12,11 +12,12 @@ import { EmptyStateComponent } from '../../shared/components/empty-state/empty-s
 import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
 import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
 import { ConfirmDialogComponent } from '../../shared/components/confirm-dialog/confirm-dialog.component';
-import { ReadOnlyTagComponent } from '../../shared/components/read-only-tag/read-only-tag.component';
 import { purgeMessage } from '../../shared/utils/removed';
 import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
+import { WorkloadStateService } from '../../core/services/workload-state.service';
+import { isLongRunning } from '../../shared/utils/workload';
 import {
-  CONFIG_ORIGIN_HINT, sourceConnectionSummary, sourceDotClass, sourceStatusLabel,
+  CONFIG_ORIGIN_HINT, sourceConnectionSummary, sourceConnectionTitle, sourceDotClass,
 } from '../../shared/utils/source';
 import { ClusterWizardComponent } from './cluster-wizard/cluster-wizard.component';
 import { AuthService } from '../../core/services/auth.service';
@@ -26,10 +27,11 @@ import { AuthService } from '../../core/services/auth.service';
   selector: 'app-clusters',
   standalone: true,
   imports: [
-    RouterLink, TimeagoPipe, PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
-    ConfirmDialogComponent, ReadOnlyTagComponent, ClusterWizardComponent,
+    TimeagoPipe, PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
+    ConfirmDialogComponent, ClusterWizardComponent,
   ],
   templateUrl: './clusters.component.html',
+  host: { '(document:keydown.escape)': 'closeMenu()' },
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ClustersComponent {
@@ -41,9 +43,11 @@ export class ClustersComponent {
   protected state    = inject(SourceStateService);
   private refreshSvc = inject(RefreshService);
 
+  private workloadState = inject(WorkloadStateService);
+
   readonly dotClass    = sourceDotClass;
-  readonly statusLabel = sourceStatusLabel;
   readonly connection  = sourceConnectionSummary;
+  readonly connectionTitle = sourceConnectionTitle;
   readonly configHint  = CONFIG_ORIGIN_HINT;
 
   /** null = closed; 'new' = create; SourceStatus = edit. */
@@ -67,6 +71,70 @@ export class ClustersComponent {
     const w = this.wizard();
     return w && w !== 'new' ? w : null;
   });
+
+  /** Live workloads / pods per cluster: non-system, long-running, not stopped-with-no-pods (same as the Overview). */
+  liveStats = computed(() => {
+    const m = new Map<string, { workloads: number; running: number; desired: number }>();
+    for (const w of this.workloadState.workloads()) {
+      if (w.is_system || !isLongRunning(w) || (w.status === 'stopped' && w.active_instances === 0)) continue;
+      const e = m.get(w.source_name) ?? { workloads: 0, running: 0, desired: 0 };
+      e.workloads++;
+      e.running += w.running_instances;
+      e.desired += w.active_instances;
+      m.set(w.source_name, e);
+    }
+    return m;
+  });
+  statsFor(name: string): { workloads: number; running: number; desired: number } | null {
+    return this.workloadState.loaded() ? this.liveStats().get(name) ?? { workloads: 0, running: 0, desired: 0 } : null;
+  }
+
+  hasConfigSources = computed(() => this.state.sources().some(s => s.origin === 'config'));
+  /** Shown when a config file is in use or any config-file cluster exists. */
+  showReload = computed(() => !!this.meta()?.config_file || this.hasConfigSources());
+
+  removedOpen = signal(false);
+
+  /** Row actions menu: fixed-position so the table's overflow does not clip it. */
+  menu = signal<{ src: SourceStatus; x: number; y: number } | null>(null);
+  testingName = signal<string | null>(null);
+
+  openMenu(ev: MouseEvent, src: SourceStatus): void {
+    ev.stopPropagation();
+    if (this.menu()?.src.name === src.name) { this.menu.set(null); return; }
+    const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+    this.menu.set({ src, x: Math.max(8, r.right - 208), y: r.bottom + 4 });
+  }
+  closeMenu(): void { this.menu.set(null); }
+
+  /** Row click: scope the whole app to this cluster and open its dashboard. */
+  open(src: SourceStatus): void {
+    this.state.select(src.name);
+    this.router.navigate(['/dashboard']);
+  }
+
+  /** "30m" from a timestamp ("for 30m"). */
+  since(iso: string | undefined): string {
+    return iso ? this.timeago.transform(iso).replace(/ ago$/, '') : '';
+  }
+  private timeago = new TimeagoPipe();
+
+  testConnection(src: SourceStatus): void {
+    if (this.testingName()) return;
+    this.testingName.set(src.name);
+    this.api.test(sourceToInput(src)).subscribe({
+      next: res => {
+        this.testingName.set(null);
+        const ver = res.checks.find(c => c.name === 'API server' && c.ok)?.detail;
+        if (res.ok) this.toast.success(`${src.name}: connected${ver ? ` · ${ver}` : ''}`);
+        else this.toast.error(`${src.name}: ${res.checks.find(c => !c.ok)?.detail || 'connection test failed'}`);
+      },
+      error: err => {
+        this.testingName.set(null);
+        this.toast.apiError(err, `Could not test ${src.name}`);
+      },
+    });
+  }
 
   counts = computed(() => {
     const list = this.state.sources();

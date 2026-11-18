@@ -136,7 +136,8 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- $sources := list -}}
 {{- if .Values.cluster.enabled -}}
   {{- $src := dict "name" .Values.cluster.name "type" "kubernetes" -}}
-  {{- /* No kubeconfig_path: KYMO falls back to the pod's in-cluster credentials. */ -}}
+  {{- /* Strict in-cluster mode: only the pod's service account, never a fallback kubeconfig. */ -}}
+  {{- $_ := set $src "kubeconfig_path" "in-cluster" -}}
   {{- if .Values.cluster.pollInterval }}{{- $_ := set $src "poll_interval" .Values.cluster.pollInterval -}}{{- end -}}
   {{- $ro := .Values.cluster.readOnly -}}
   {{- if kindIs "invalid" $ro }}{{- $ro = not .Values.rbac.management.enabled -}}{{- end -}}

@@ -12,9 +12,10 @@
         No clusters
       }
     </ng-container>
-    @if (meta()?.config_file) {
-      <button type="button" class="k-btn" [disabled]="reloading() || !auth.can('sources:manage')" (click)="reloadConfig()" [title]="auth.denyHint('sources:manage') || 'Re-read config.yaml and apply its clusters now'">
-        {{ reloading() ? 'Reloading…' : 'Reload config.yaml' }}
+    @if (showReload()) {
+      <button type="button" class="k-btn k-btn-icon" [disabled]="reloading() || !auth.can('sources:manage')" (click)="reloadConfig()"
+              [title]="auth.denyHint('sources:manage') || 'Re-read config.yaml'" aria-label="Reload config">
+        <svg class="w-3.5 h-3.5" [class.animate-spin]="reloading()" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
       </button>
     }
     <button type="button" class="k-btn k-btn-primary" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="openAdd()">
@@ -31,7 +32,7 @@
     <app-skeleton [rows]="3" />
   } @else if (sources().length === 0 && !state.sourcesError()) {
     <div class="k-panel">
-      <app-empty-state icon="box" message="No clusters yet" hint="Add a Kubernetes cluster to start recording workload and pod lifecycles.">
+      <app-empty-state icon="box" message="No clusters yet" hint="A cluster is a Kubernetes API that KYMO connects to and records pod and workload lifecycles from.">
         <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="openAdd()">Add cluster</button>
       </app-empty-state>
     </div>
@@ -41,123 +42,82 @@
         <thead>
           <tr>
             <th>Cluster</th>
+            <th>Status</th>
             <th class="hidden md:table-cell">Connection</th>
-            <th class="!text-right">Pods</th>
-            <th class="hidden lg:table-cell">Origin</th>
-            <th><span class="sr-only">Actions</span></th>
+            <th class="!text-right">Workloads</th>
+            <th class="hidden lg:table-cell">Access</th>
+            <th class="w-10"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           @for (src of sources(); track src.name) {
-            <tr [class.opacity-60]="busyName() === src.name" [class.text-kymo-muted]="!src.enabled">
-              <!-- Name / status -->
-              <td class="px-4 py-3 align-top">
+            <tr class="cursor-pointer hover:bg-kymo-raised transition-colors" [class.opacity-60]="busyName() === src.name" (click)="open(src)">
+              <td class="px-4 py-2.5 max-w-[22rem]">
                 <div class="flex items-center gap-2 min-w-0">
                   <span class="k-led" [class]="dotClass(src)" aria-hidden="true"></span>
-                  <span class="font-medium truncate max-w-[16rem]" [class]="src.enabled ? 'text-kymo-ink' : 'text-kymo-muted'" [title]="src.name">{{ src.name }}</span>
-                  @if (src.read_only) {
-                    <app-read-only-tag />
-                  }
-                </div>
-                <div class="text-[11px] mt-1 ml-[0.9375rem]">
-                  <span [class]="src.status === 'error' ? 'text-kymo-danger' : (src.status === 'connected' ? 'text-kymo-running' : 'text-kymo-muted')">{{ src.status === 'error' ? 'error' : statusLabel(src).toLowerCase() }}</span>
-                  @if (src.status === 'connected' && src.connected_at) {
-                    <span class="text-kymo-faint"> · since {{ src.connected_at | timeago }}</span>
-                  }
-                </div>
-                @if (src.last_error) {
-                  <p class="text-[11px] text-kymo-danger mt-1 ml-[0.9375rem] break-words min-w-[14rem] max-w-[32rem]" [title]="src.last_error">{{ src.last_error }}</p>
-                }
-                <div class="text-[11px] text-kymo-muted mt-1 ml-[0.9375rem] md:hidden truncate">{{ connection(src) }}</div>
-              </td>
-
-              <!-- Connection -->
-              <td class="px-4 py-3 align-top hidden md:table-cell">
-                <div class="text-xs font-mono text-kymo-muted break-all max-w-[22rem]">{{ connection(src) }}</div>
-                @if (src.settings && src.settings.poll_interval_seconds) {
-                  <div class="text-[11px] text-kymo-faint mt-0.5">poll every {{ src.settings.poll_interval_seconds }}s</div>
-                }
-              </td>
-
-              <!-- Counts -->
-              <td class="px-4 py-3 align-top text-right whitespace-nowrap">
-                @if (src.container_count > 0) {
-                  <a
-                    routerLink="/workloads"
-                    class="text-xs tabular-nums hover:text-kymo-amber"
-                    [title]="'Show workloads of ' + src.name"
-                    (click)="state.select(src.name)"
-                  >
-                    <span class="text-kymo-running">{{ src.running_count }}</span>
-                    <span class="text-kymo-faint"> / </span>
-                    <span class="text-kymo-ink">{{ src.container_count }}</span>
-                  </a>
-                  <div class="text-[10px] text-kymo-faint">running / total pods</div>
-                } @else {
-                  <span class="text-xs text-kymo-faint tabular-nums">0</span>
-                }
-              </td>
-
-              <!-- Origin -->
-              <td class="px-4 py-3 align-top hidden lg:table-cell">
-                @if (src.origin === 'config') {
-                  <span class="inline-flex items-center gap-1 h-5 px-1.5 text-[10px] tracking-[0.06em] border border-kymo-rule text-kymo-muted cursor-help" tabindex="0" [title]="configHint" [attr.aria-label]="'config.yaml. ' + configHint">
-                    <svg class="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><rect x="5" y="11" width="14" height="10" /><path stroke-linecap="square" d="M8 11V7a4 4 0 018 0v4" /></svg>
-                    config.yaml
-                  </span>
-                } @else {
-                  <span class="text-xs text-kymo-muted">added in UI</span>
-                }
-              </td>
-
-              <!-- Actions -->
-              <td class="px-4 py-3 align-top">
-                <div class="flex items-center justify-end gap-1.5">
+                  <button type="button" class="font-medium truncate text-left hover:text-kymo-amber focus:outline-none focus-visible:underline" [class]="src.enabled ? 'text-kymo-ink' : 'text-kymo-muted'" [title]="'Show ' + src.name + ' on the dashboard'">{{ src.name }}</button>
                   @if (src.origin === 'config') {
-                    <span class="lg:hidden inline-flex items-center h-5 px-1.5 text-[10px] tracking-[0.06em] border border-kymo-rule text-kymo-muted cursor-help" tabindex="0" [title]="configHint" [attr.aria-label]="'config.yaml. ' + configHint">config.yaml</span>
-                    <span class="hidden lg:inline text-[11px] text-kymo-faint" [title]="configHint">managed in config.yaml</span>
-                  } @else {
-                    <button type="button" class="k-btn k-btn-sm" [disabled]="busyName() === src.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="openEdit(src)" [attr.aria-label]="'Edit ' + src.name">Edit</button>
-                    <button
-                      type="button"
-                      class="k-btn k-btn-sm"
-                      [class.k-btn-go]="!src.enabled"
-                      [disabled]="busyName() === src.name || !auth.can('sources:manage')"
-                      [title]="auth.denyHint('sources:manage')"
-                      [attr.aria-pressed]="src.enabled"
-                      [attr.aria-label]="(src.enabled ? 'Disable ' : 'Enable ') + src.name"
-                      (click)="toggleEnabled(src)"
-                    >{{ src.enabled ? 'Disable' : 'Enable' }}</button>
-                    <button
-                      type="button"
-                      class="k-btn k-btn-sm k-btn-icon text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50"
-                      [disabled]="busyName() === src.name || !auth.can('sources:manage')"
-                      [attr.aria-label]="'Delete ' + src.name"
-                      [title]="auth.denyHint('sources:manage') || 'Delete cluster'"
-                      (click)="askDelete(src)"
-                    >
-                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                    <span class="flex-none inline-flex items-center h-4 px-1 text-[10px] border border-kymo-rule text-kymo-muted cursor-help" [title]="configHint">config.yaml</span>
                   }
                 </div>
+                @if (src.status === 'error' && src.last_error) {
+                  <p class="text-[11px] text-kymo-muted truncate ml-[0.9375rem] mt-0.5" [title]="src.last_error">{{ src.last_error }}</p>
+                }
+              </td>
+
+              <td class="px-4 py-2.5 whitespace-nowrap text-xs">
+                @switch (src.status) {
+                  @case ('connected') { <span class="text-kymo-running">Connected</span> }
+                  @case ('connecting') { <span class="text-kymo-amber">Connecting</span> }
+                  @case ('error') { <span class="text-kymo-danger">Error</span> }
+                  @default { <span class="text-kymo-muted">Disabled</span> }
+                }
+                @if (src.status === 'connected' && src.connected_at) {
+                  <span class="text-kymo-faint"> for {{ since(src.connected_at) }}</span>
+                }
+              </td>
+
+              <td class="px-4 py-2.5 hidden md:table-cell whitespace-nowrap">
+                <span class="text-xs text-kymo-muted font-mono cursor-help" [title]="connectionTitle(src)">{{ connection(src) }}</span>
+              </td>
+
+              <td class="px-4 py-2.5 text-right whitespace-nowrap text-xs">
+                @if (statsFor(src.name); as st) {
+                  @if (src.status === 'error' || src.enabled === false) {
+                    <span class="text-kymo-faint">—</span>
+                  } @else {
+                    <span class="text-kymo-ink tabular-nums">{{ st.workloads }}</span>
+                    <span class="text-kymo-faint tabular-nums" [title]="'Pods running / desired across live workloads'"> · {{ st.running }} / {{ st.desired }} pods</span>
+                  }
+                } @else {
+                  <span class="text-kymo-faint">…</span>
+                }
+              </td>
+
+              <td class="px-4 py-2.5 hidden lg:table-cell whitespace-nowrap text-xs">
+                @if (src.read_only) {
+                  <span class="inline-flex items-center h-4 px-1 text-[10px] border border-kymo-amber/50 text-kymo-amber cursor-help" title="Restart, scale and rollout restart are disabled; logs and history still work.">read-only</span>
+                } @else {
+                  <span class="text-kymo-muted">manage</span>
+                }
+              </td>
+
+              <td class="px-2 py-1.5 text-right">
+                <button type="button" class="k-btn k-btn-sm k-btn-icon border-transparent text-kymo-muted hover:text-kymo-ink"
+                        [disabled]="busyName() === src.name"
+                        aria-haspopup="menu" [attr.aria-expanded]="menu()?.src?.name === src.name"
+                        [attr.aria-label]="'Actions for ' + src.name" (click)="openMenu($event, src)">
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>
+                </button>
               </td>
             </tr>
           }
         </tbody>
       </table>
     </div>
-    <p class="text-[11px] text-kymo-faint">
-      Clusters from <span class="text-kymo-muted">config.yaml</span> are applied automatically when the file changes.
-      @if (meta()?.config_file; as file) {
-        <span class="font-mono text-kymo-muted break-all">{{ file }}</span>
-        @if (meta()?.config_sync?.reloaded_at; as at) {
-          · last synced {{ at | timeago }}
-        }
-      }
-      Clusters added in the UI are stored in the database and survive restarts.
-    </p>
+    @if (hasConfigSources()) {
+      <p class="text-[11px] text-kymo-faint">Clusters from config.yaml reload automatically when the file changes.</p>
+    }
     @if (meta()?.config_sync?.error; as err) {
       <p class="text-[11px] text-kymo-danger break-words">config.yaml is invalid, keeping current clusters: {{ err }}</p>
     }
@@ -165,54 +125,61 @@
 
   @if (state.removed().length > 0) {
     <section class="space-y-2" aria-labelledby="removed-title">
-      <div class="flex items-baseline gap-2 pt-2">
-        <h2 id="removed-title" class="k-label !text-kymo-ink">Removed clusters ({{ state.removed().length }})</h2>
-        <span class="text-[11px] text-kymo-faint">No longer recorded; their history is kept until you delete it.</span>
-      </div>
-      <div class="k-panel overflow-x-auto scrollbar-thin">
-        <table class="k-table">
-          <thead>
-            <tr>
-              <th>Cluster</th>
-              <th class="!text-right">Workloads</th>
-              <th class="!text-right">Containers</th>
-              <th class="!text-right hidden md:table-cell">CronJob runs</th>
-              <th class="!text-right hidden md:table-cell">K8s events</th>
-              <th class="hidden lg:table-cell">First seen</th>
-              <th class="hidden sm:table-cell">Last seen</th>
-              <th><span class="sr-only">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (r of state.removed(); track r.name) {
-              <tr [class.opacity-60]="purgingName() === r.name">
-                <td class="px-4 py-3 align-top">
-                  <div class="flex items-center gap-2 min-w-0 text-kymo-muted">
-                    <svg class="w-3 h-3 flex-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 4h16v4H4zM6 8v12h12V8M10 12h4" /></svg>
-                    <span class="font-medium truncate max-w-[16rem]" [title]="r.name">{{ r.name }}</span>
-                  </div>
-                </td>
-                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink">{{ r.workloads }}</td>
-                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink">{{ r.containers }}</td>
-                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink hidden md:table-cell">{{ r.cronjob_runs }}</td>
-                <td class="px-4 py-3 align-top text-right text-xs tabular-nums text-kymo-ink hidden md:table-cell">{{ r.k8s_events ?? '—' }}</td>
-                <td class="px-4 py-3 align-top text-xs text-kymo-muted whitespace-nowrap hidden lg:table-cell" [title]="r.first_seen_at">{{ r.first_seen_at | timeago }}</td>
-                <td class="px-4 py-3 align-top text-xs text-kymo-muted whitespace-nowrap hidden sm:table-cell" [title]="r.last_seen_at">{{ r.last_seen_at | timeago }}</td>
-                <td class="px-4 py-3 align-top">
-                  <div class="flex items-center justify-end gap-1.5 flex-wrap">
-                    <button type="button" class="k-btn k-btn-sm" [disabled]="purgingName() === r.name" (click)="viewHistory(r)" [attr.aria-label]="'View history of ' + r.name">View history</button>
-                    <button type="button" class="k-btn k-btn-sm k-btn-primary" [disabled]="purgingName() === r.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="readd(r)" [attr.aria-label]="'Re-add ' + r.name">Re-add</button>
-                    <button type="button" class="k-btn k-btn-sm text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50" [disabled]="purgingName() === r.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="purgeTarget.set(r)" [attr.aria-label]="'Delete history of ' + r.name">Delete history</button>
-                  </div>
-                </td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
+      <button type="button" class="flex items-center gap-1.5 k-label hover:text-kymo-ink" [attr.aria-expanded]="removedOpen()" aria-controls="removed-panel" (click)="removedOpen.set(!removedOpen())">
+        <svg class="w-2.5 h-2.5 transition-transform" [class.rotate-90]="removedOpen()" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M9 5l7 7-7 7" /></svg>
+        <span id="removed-title">Removed clusters ({{ state.removed().length }})</span>
+      </button>
+      @if (removedOpen()) {
+        <div id="removed-panel" class="k-panel overflow-x-auto scrollbar-thin">
+          <p class="px-4 py-2 text-[11px] text-kymo-faint border-b border-kymo-rule">No longer recorded. Their history is kept until you delete it.</p>
+          <table class="k-table">
+            <tbody>
+              @for (r of state.removed(); track r.name) {
+                <tr [class.opacity-60]="purgingName() === r.name">
+                  <td class="px-4 py-2.5 max-w-[16rem]">
+                    <span class="font-medium text-kymo-muted truncate block" [title]="r.name">{{ r.name }}</span>
+                  </td>
+                  <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden sm:table-cell" [title]="r.last_seen_at">last seen {{ r.last_seen_at | timeago }}</td>
+                  <td class="px-4 py-2.5 text-xs text-kymo-faint whitespace-nowrap hidden md:table-cell tabular-nums">
+                    {{ r.workloads }} workloads · {{ r.containers }} containers · {{ r.cronjob_runs }} runs{{ r.k8s_events != null ? ' · ' + r.k8s_events + ' events' : '' }}
+                  </td>
+                  <td class="px-4 py-2.5">
+                    <div class="flex items-center justify-end gap-1.5">
+                      <button type="button" class="k-btn k-btn-sm" [disabled]="purgingName() === r.name" (click)="viewHistory(r)" [attr.aria-label]="'View history of ' + r.name">View history</button>
+                      <button type="button" class="k-btn k-btn-sm" [disabled]="purgingName() === r.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="readd(r)" [attr.aria-label]="'Re-add ' + r.name">Re-add</button>
+                      <button type="button" class="k-btn k-btn-sm text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50" [disabled]="purgingName() === r.name || !auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="purgeTarget.set(r)" [attr.aria-label]="'Delete history of ' + r.name">Delete history</button>
+                    </div>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
     </section>
   }
 </div>
+
+@if (menu(); as m) {
+  <div class="fixed inset-0 z-40" (click)="closeMenu()"></div>
+  <div class="fixed z-50 w-52 bg-kymo-deep border border-kymo-rule py-1" role="menu" [style.left.px]="m.x" [style.top.px]="m.y">
+    @if (!auth.can('sources:manage')) {
+      <p class="px-3 py-2 text-[11px] text-kymo-muted">{{ auth.denyHint('sources:manage') }}</p>
+    } @else {
+      @if (m.src.origin === 'config') {
+        <p class="px-3 py-2 text-[11px] text-kymo-muted border-b border-kymo-rule mb-1">Managed in config.yaml</p>
+      }
+      <button type="button" role="menuitem" class="w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised disabled:opacity-40 disabled:cursor-not-allowed"
+              [disabled]="m.src.origin === 'config'" (click)="closeMenu(); openEdit(m.src)">Edit</button>
+      <button type="button" role="menuitem" class="w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised disabled:opacity-40 disabled:cursor-not-allowed"
+              [disabled]="!!testingName()" (click)="closeMenu(); testConnection(m.src)">Test connection</button>
+      <button type="button" role="menuitem" class="w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised disabled:opacity-40 disabled:cursor-not-allowed"
+              [disabled]="m.src.origin === 'config'" (click)="closeMenu(); toggleEnabled(m.src)">{{ m.src.enabled ? 'Disable' : 'Enable' }}</button>
+      <button type="button" role="menuitem" class="w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised text-kymo-danger disabled:opacity-40 disabled:cursor-not-allowed"
+              [disabled]="m.src.origin === 'config'" (click)="closeMenu(); askDelete(m.src)">Remove</button>
+    }
+  </div>
+}
 
 @if (wizard()) {
   <app-cluster-wizard
@@ -225,9 +192,9 @@
 
 @if (deleteTarget(); as src) {
   <app-confirm-dialog
-    [title]="'Delete cluster ' + src.name + '?'"
+    [title]="'Remove cluster ' + src.name + '?'"
     [message]="deleteMessage(src)"
-    [confirmLabel]="purge() ? 'Delete with history' : 'Delete cluster'"
+    [confirmLabel]="purge() ? 'Remove with history' : 'Remove cluster'"
     (confirmed)="confirmDelete()"
     (cancelled)="deleteTarget.set(null)"
   >
