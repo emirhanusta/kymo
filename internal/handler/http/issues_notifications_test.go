@@ -63,6 +63,9 @@ func apiRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.UseRawPath, r.UnescapePathValues = true, true
+	if h.auth == nil {
+		h.auth = disabledAuth()
+	}
 	h.registerRoutes(r)
 	return r
 }

@@ -17,6 +17,7 @@ import { EmptyStateComponent } from '../../../shared/components/empty-state/empt
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
 import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.component';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
+import { AuthService } from '../../../core/services/auth.service';
 
 interface PendingConfirm {
   title: string;
@@ -37,6 +38,7 @@ interface PendingConfirm {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ArchiveComponent {
+  readonly auth = inject(AuthService);
   private svc        = inject(ContainerService);
   private toast      = inject(ToastService);
   private refreshSvc = inject(RefreshService);

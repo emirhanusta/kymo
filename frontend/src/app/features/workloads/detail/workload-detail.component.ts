@@ -40,6 +40,7 @@ import { ScoreClassPipe } from '../../../shared/pipes/score-class.pipe';
 import { hourAgoIso, warningsLastHour } from '../../../shared/utils/k8s-events';
 import { readStorage, writeStorage } from '../../../shared/utils/storage';
 import { scoreHex } from '../../../shared/utils/score';
+import { AuthService } from '../../../core/services/auth.service';
 
 const HOUR = 3_600_000;
 const RANGE_KEY = 'kymo.resourceRange';
@@ -67,6 +68,7 @@ type TabKey = 'timeline' | 'pods' | 'resources' | 'runs' | 'errors';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class WorkloadDetailComponent {
+  readonly auth = inject(AuthService);
   private route      = inject(ActivatedRoute);
   private router     = inject(Router);
   private svc        = inject(ContainerService);

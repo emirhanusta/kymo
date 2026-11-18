@@ -29,6 +29,9 @@ type Config struct {
 
 	Notifications NotificationsConfig `mapstructure:"notifications"`
 
+	// Auth configures accounts, sessions and SSO.
+	Auth AuthConfig `mapstructure:"auth"`
+
 	// SecretKey encrypts kubeconfigs uploaded through the UI (env KYMO_SECRET_KEY).
 	// Without it, Kubernetes sources can only reference kubeconfig files on the server.
 	SecretKey string `mapstructure:"secret_key"`
@@ -61,6 +64,61 @@ type ServerConfig struct {
 	// PublicURL is the externally reachable base URL of the web UI (e.g.
 	// "https://kymo.example.com"). Notifications use it to link to workloads.
 	PublicURL string `mapstructure:"public_url"`
+
+	// AllowedOrigins lists additional browser origins (e.g.
+	// "https://dashboard.example.com") that may call the API with credentials
+	// (CORS) and pass the CSRF origin check. Empty = same-origin only.
+	AllowedOrigins []string `mapstructure:"allowed_origins"`
+
+	// TrustedProxies lists the proxy IPs/CIDRs whose X-Forwarded-For header is
+	// trusted for the client IP (login rate limiting, audit log). Empty keeps
+	// Gin's default (trust every proxy).
+	TrustedProxies []string `mapstructure:"trusted_proxies"`
+}
+
+// Defaults of the auth section.
+const (
+	DefaultSessionIdleTimeout = 7 * 24 * time.Hour
+	DefaultSessionMaxAge      = 30 * 24 * time.Hour
+)
+
+// AuthConfig configures accounts and access control. See docs/design/accounts.md.
+type AuthConfig struct {
+	// Enabled turns authentication on (default true). false is for local
+	// development only: every request acts as an owner.
+	Enabled bool `mapstructure:"enabled"`
+	// SessionIdleTimeout is the sliding session lifetime (default 7d).
+	SessionIdleTimeout time.Duration `mapstructure:"session_idle_timeout"`
+	// SessionMaxAge is the absolute session lifetime (default 30d).
+	SessionMaxAge time.Duration `mapstructure:"session_max_age"`
+	// OIDC configures single sign-on.
+	OIDC OIDCConfig `mapstructure:"oidc"`
+}
+
+// OIDCConfig configures OpenID Connect single sign-on.
+type OIDCConfig struct {
+	Enabled bool `mapstructure:"enabled"`
+	// Name is the sign-in button label ("Google").
+	Name     string `mapstructure:"name"`
+	Issuer   string `mapstructure:"issuer"`
+	ClientID string `mapstructure:"client_id"`
+	// ClientSecret may also come from KYMO_AUTH_OIDC_CLIENT_SECRET.
+	ClientSecret string   `mapstructure:"client_secret"`
+	Scopes       []string `mapstructure:"scopes"`
+	// AllowedDomains restricts sign-in to these (verified) email domains.
+	AllowedDomains []string `mapstructure:"allowed_domains"`
+	// GroupsClaim names the ID-token claim holding the user's groups (dotted
+	// paths such as "realm_access.roles" are supported).
+	GroupsClaim string `mapstructure:"groups_claim"`
+	// RoleMapping maps a role (admin | operator | viewer) to the groups that
+	// grant it; the highest matching role wins.
+	RoleMapping map[string][]string `mapstructure:"role_mapping"`
+	// DefaultRole is the role of new users without a mapped group (default viewer).
+	DefaultRole string `mapstructure:"default_role"`
+	// AutoCreate creates users on first SSO login (default true); false = an
+	// invite for the email is required.
+	AutoCreate           bool `mapstructure:"auto_create"`
+	DisablePasswordLogin bool `mapstructure:"disable_password_login"`
 }
 
 // IssuesConfig tunes the server-side issue engine.
@@ -370,6 +428,24 @@ func load(path string) (*Config, error) {
 	v.SetDefault("server.write_timeout", "15s")
 	v.SetDefault("server.static_dir", "")
 	v.SetDefault("server.public_url", "")
+	v.SetDefault("server.allowed_origins", []string{})
+	v.SetDefault("server.trusted_proxies", []string{})
+
+	v.SetDefault("auth.enabled", true)
+	v.SetDefault("auth.session_idle_timeout", DefaultSessionIdleTimeout.String())
+	v.SetDefault("auth.session_max_age", DefaultSessionMaxAge.String())
+	v.SetDefault("auth.oidc.enabled", false)
+	v.SetDefault("auth.oidc.name", "SSO")
+	v.SetDefault("auth.oidc.issuer", "")
+	v.SetDefault("auth.oidc.client_id", "")
+	v.SetDefault("auth.oidc.client_secret", "")
+	v.SetDefault("auth.oidc.scopes", []string{"openid", "email", "profile"})
+	v.SetDefault("auth.oidc.allowed_domains", []string{})
+	v.SetDefault("auth.oidc.groups_claim", "")
+	v.SetDefault("auth.oidc.role_mapping", map[string][]string{})
+	v.SetDefault("auth.oidc.default_role", "viewer")
+	v.SetDefault("auth.oidc.auto_create", true)
+	v.SetDefault("auth.oidc.disable_password_login", false)
 
 	v.SetDefault("issues.evaluate_interval", "30s")
 	v.SetDefault("issues.degraded_after", "3m")
@@ -464,6 +540,9 @@ func (c *Config) validate() error {
 			return fmt.Errorf("config: server.public_url %q must be an http(s) URL", c.Server.PublicURL)
 		}
 	}
+	if err := c.validateAuth(); err != nil {
+		return err
+	}
 	seenCh := make(map[string]bool, len(c.Notifications.Channels))
 	for i, ch := range c.Notifications.Channels {
 		if ch.Name == "" {
@@ -539,6 +618,77 @@ func (c *Config) validateLogCapture() error {
 	}
 	if c.Issues.ErrorRateThreshold < 1 {
 		return fmt.Errorf("config: issues.error_rate_threshold must be >= 1")
+	}
+	return nil
+}
+
+// validateAuth checks server.allowed_origins and the auth section. A bad OIDC
+// block fails startup with a clear message (e.g. OIDC without a public_url).
+func (c *Config) validateAuth() error {
+	for i, o := range c.Server.AllowedOrigins {
+		o = strings.TrimRight(strings.TrimSpace(o), "/")
+		u, err := url.Parse(o)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Path != "" {
+			return fmt.Errorf("config: server.allowed_origins[%d] %q must be an origin such as https://kymo.example.com", i, o)
+		}
+		c.Server.AllowedOrigins[i] = o
+	}
+	a := &c.Auth
+	if a.SessionIdleTimeout <= 0 {
+		return fmt.Errorf("config: auth.session_idle_timeout must be > 0")
+	}
+	if a.SessionMaxAge < a.SessionIdleTimeout {
+		return fmt.Errorf("config: auth.session_max_age must be >= auth.session_idle_timeout")
+	}
+	o := &a.OIDC
+	o.ClientSecret = strings.TrimSpace(o.ClientSecret)
+	if !a.Enabled || !o.Enabled {
+		return nil
+	}
+	if c.Server.PublicURL == "" {
+		return fmt.Errorf("config: auth.oidc.enabled requires server.public_url (the redirect URL is <public_url>/api/v1/auth/oidc/callback)")
+	}
+	if o.Issuer == "" || o.ClientID == "" || o.ClientSecret == "" {
+		return fmt.Errorf("config: auth.oidc needs issuer, client_id and client_secret (or KYMO_AUTH_OIDC_CLIENT_SECRET)")
+	}
+	if u, err := url.Parse(o.Issuer); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("config: auth.oidc.issuer %q must be an http(s) URL", o.Issuer)
+	}
+	if o.Name == "" {
+		o.Name = "SSO"
+	}
+	if len(o.Scopes) == 0 {
+		o.Scopes = []string{"openid", "email", "profile"}
+	}
+	hasOpenID := false
+	for _, s := range o.Scopes {
+		hasOpenID = hasOpenID || s == "openid"
+	}
+	if !hasOpenID {
+		o.Scopes = append([]string{"openid"}, o.Scopes...)
+	}
+	role := model.Role(strings.ToLower(strings.TrimSpace(o.DefaultRole)))
+	if role == "" {
+		role = model.RoleViewer
+	}
+	if !role.Valid() || role == model.RoleOwner {
+		return fmt.Errorf("config: auth.oidc.default_role %q must be viewer, operator or admin", o.DefaultRole)
+	}
+	o.DefaultRole = string(role)
+	mapping := make(map[string][]string, len(o.RoleMapping))
+	for k, groups := range o.RoleMapping {
+		r := model.Role(strings.ToLower(strings.TrimSpace(k)))
+		if !r.Valid() || r == model.RoleOwner {
+			return fmt.Errorf("config: auth.oidc.role_mapping key %q must be viewer, operator or admin", k)
+		}
+		mapping[string(r)] = groups
+	}
+	o.RoleMapping = mapping
+	if len(mapping) > 0 && o.GroupsClaim == "" {
+		return fmt.Errorf("config: auth.oidc.role_mapping requires auth.oidc.groups_claim")
+	}
+	for i, d := range o.AllowedDomains {
+		o.AllowedDomains[i] = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(d), "@"))
 	}
 	return nil
 }

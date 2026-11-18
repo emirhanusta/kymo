@@ -92,14 +92,14 @@
                 <div class="flex items-stretch h-[1.875rem] border border-kymo-rule bg-kymo-deep" role="group" aria-label="Replica count">
                   <button type="button" aria-label="Decrease replicas"
                     class="w-7 text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    [disabled]="busy() !== null || (scaleValue() ?? 0) <= 0" (click)="decrement()">−</button>
+                    [disabled]="busy() !== null || (scaleValue() ?? 0) <= 0 || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="decrement()">−</button>
                   <span class="min-w-[2.5rem] px-2 flex items-center justify-center border-x border-kymo-rule text-sm font-semibold text-kymo-amber tabular-nums select-none" aria-live="polite">{{ scaleValue() ?? d.replicas }}</span>
                   <button type="button" aria-label="Increase replicas"
                     class="w-7 text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    [disabled]="busy() !== null" (click)="increment()">+</button>
+                    [disabled]="busy() !== null || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="increment()">+</button>
                 </div>
-                <button type="button" class="k-btn k-btn-primary" [disabled]="busy() !== null || scaleValue() === d.replicas" (click)="scale()">Scale</button>
-                <button type="button" class="k-btn" [disabled]="busy() !== null" (click)="restart()">
+                <button type="button" class="k-btn k-btn-primary" [disabled]="busy() !== null || scaleValue() === d.replicas || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="scale()">Scale</button>
+                <button type="button" class="k-btn" [disabled]="busy() !== null || !auth.can('workloads:manage')" [title]="auth.denyHint('workloads:manage')" (click)="restart()">
                   <svg class="w-3 h-3" [class.animate-spin]="busy() === 'restart'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                   </svg>

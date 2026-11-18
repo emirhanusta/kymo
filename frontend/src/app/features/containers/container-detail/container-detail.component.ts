@@ -36,6 +36,7 @@ import { PageHeaderComponent } from '../../../shared/components/page-header/page
 import { formatBytes } from '../../../shared/utils/format';
 import { readStorage, writeStorage } from '../../../shared/utils/storage';
 import { eventDotClass, eventLabel, eventReason, eventTextClass, hasCrashLogs, showsExitCode } from '../../../shared/utils/events';
+import { AuthService } from '../../../core/services/auth.service';
 
 const HOUR = 3_600_000;
 const DETAIL_REFRESH_MS = 15_000;
@@ -64,6 +65,7 @@ const RANGES: { key: RangeKey; ms: number }[] = [
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ContainerDetailComponent {
+  readonly auth = inject(AuthService);
   private route      = inject(ActivatedRoute);
   private router     = inject(Router);
   private svc        = inject(ContainerService);

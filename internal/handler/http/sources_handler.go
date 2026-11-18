@@ -50,6 +50,7 @@ func (h *Handler) ReloadSources(c *gin.Context) {
 		h.log.Error("reload sources failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 	default:
+		h.audit(c, "source.reload", "config", "", map[string]any{"added": res.Added, "removed": res.Removed, "updated": res.Updated})
 		c.JSON(http.StatusOK, res)
 	}
 }
@@ -132,6 +133,7 @@ func (h *Handler) CreateSource(c *gin.Context) {
 		h.sourceError(c, "create source", err)
 		return
 	}
+	h.audit(c, "source.create", "source", spec.Name, nil)
 	st, _ := h.sourceStatus(c, spec.Name)
 	c.JSON(http.StatusCreated, st)
 }
@@ -150,6 +152,7 @@ func (h *Handler) UpdateSource(c *gin.Context) {
 		h.sourceError(c, "update source", err)
 		return
 	}
+	h.audit(c, "source.update", "source", spec.Name, nil)
 	st, _ := h.sourceStatus(c, spec.Name)
 	c.JSON(http.StatusOK, st)
 }
@@ -165,6 +168,7 @@ func (h *Handler) DeleteSource(c *gin.Context) {
 		h.sourceError(c, "delete source", err)
 		return
 	}
+	h.audit(c, "source.delete", "source", name, map[string]any{"purge": purge})
 	msg := "Source removed; its history is kept"
 	if purge {
 		msg = "Source and its history deleted"
@@ -205,6 +209,7 @@ func (h *Handler) PurgeRemovedSource(c *gin.Context) {
 	case err != nil:
 		h.sourceError(c, "purge removed source", err)
 	default:
+		h.audit(c, "source.purge", "source", name, map[string]any{"deleted_containers": n})
 		c.JSON(http.StatusOK, gin.H{"success": true, "message": "History of removed source " + name + " deleted", "deleted_containers": n})
 	}
 }

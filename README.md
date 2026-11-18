@@ -103,7 +103,7 @@ the Sources page or `POST /api/v1/sources/reload`. Added, changed and removed
 sources take effect immediately (recorded history is kept); an invalid file is
 rejected and the current sources keep running. The notification channels and
 `log_capture` (targets, patterns, limits) are applied live too. All other
-settings (server, database, log, secret key, poll and scoring intervals,
+settings (server, auth, database, log, secret key, poll and scoring intervals,
 `issues`, `log_capture.retention`) still need a restart.
 
 See [`config.example.yaml`](config.example.yaml). Every key can be overridden
@@ -141,6 +141,124 @@ cluster-wide). API: `GET /api/v1/k8s-events[?source&namespace&type&reason&worklo
 **Revisions:** each container records its pod's revision
 (`pod-template-hash`, `controller-revision-hash`, or the Job name);
 `GET /api/v1/workloads/:id/revisions` lists rollouts newest first.
+
+## Accounts & SSO
+
+KYMO requires a sign-in by default (`auth.enabled: true`). One installation has
+one organisation; roles are global:
+
+| Role | Can |
+|---|---|
+| viewer | read everything (overview, workloads, issues, errors, logs, clusters, settings) |
+| operator | viewer + restart pods, scale / rollout-restart deployments, ignore / restore containers, toggle log capture |
+| admin | operator + clusters (add/edit/remove/purge/reload), notification channels, permanent deletes and purges, users, invites, other people's API tokens, audit log |
+| owner | admin + promote/demote admins, transfer ownership (exactly one owner) |
+
+**Sign-in identity.** Users sign in with a **username** (or their email, if they
+have one); email is optional and KYMO never sends mail. Usernames are lower-case
+(`[a-z0-9][a-z0-9._-]{1,63}`) and unique.
+
+**First run: the initial admin account.** When KYMO starts with no users it
+creates an owner account:
+
+- With `KYMO_ADMIN_PASSWORD` set (12+ characters): username `KYMO_ADMIN_USERNAME`
+  (default `admin`), optional `KYMO_ADMIN_EMAIL` / `KYMO_ADMIN_NAME`, and
+  `KYMO_ADMIN_MUST_CHANGE_PASSWORD=true` to force a change at first sign-in
+  (default `false`).
+- Otherwise: owner `admin` with a random 24-character password that must be
+  changed at first sign-in. It is logged once:
+
+  ```sh
+  kubectl logs deploy/kymo | grep "initial admin"     # or: docker compose logs kymo | grep "initial admin"
+  # initial admin account created: username "admin", password "...." — sign in and change it
+  ```
+
+The variables are ignored once any user exists. While an account must change
+its password, its session can only reach the change-password page (and
+profile / sign-out); every other API call answers `403 password_change_required`.
+The Helm chart generates the password into its Secret instead (see the chart README).
+Passwords are stored as argon2id hashes.
+
+**Lockout recovery.** Reset any account's password from the server (same
+config/database; all its sessions are signed out):
+
+```sh
+kymo admin reset-password --username admin                     # prompts twice (or --email you@example.com)
+echo 'new-long-password' | kymo admin reset-password --username admin --password-stdin
+# in a container the binary is /kymo:
+kubectl exec -it deploy/kymo -- /kymo admin reset-password --username admin
+```
+
+**Users.** Admins invite people by username, with an optional email
+(`Settings -> Users`): the invite link is valid 7 days and is shared by hand
+(no email is sent); the invitee picks a name and password. Everyone can edit
+their name and email under the user menu -> Profile; admins can set a user's email. Admins can also create 1-hour
+password-reset links, disable users (history is kept) and change roles. API
+tokens (`Authorization: Bearer kymo_<prefix>_<secret>`, shown once, never above
+the creator's role) are for scripts; every sensitive action ends up in the
+audit log (kept one year; `Settings -> Audit`).
+
+**Security model.** Sessions use the `kymo_session` cookie (HttpOnly,
+SameSite=Lax, `Secure` when `server.public_url` is https), expire after 7 days
+idle / 30 days absolute and are revoked on password, role or status change.
+Login is limited to 10 failures per 15 minutes per IP and per login (username or email). Mutating
+API calls need the `X-KYMO-Request: 1` header and a matching `Origin` (API-token
+calls are exempt). CORS is same-origin only; list extra browser origins in
+`server.allowed_origins`. Behind a reverse proxy also set
+`server.trusted_proxies` so the real client IP is used.
+
+**Single sign-on (OpenID Connect).** Authorization-code flow with PKCE, state
+and nonce. Register `<server.public_url>/api/v1/auth/oidc/callback` as the
+redirect URL at the provider; `server.public_url` is required (KYMO refuses to
+start otherwise). The ID token must contain a verified `email`. Users are matched
+by (issuer, subject), then linked to an existing user whose stored email equals
+the verified email. New users get their username from `preferred_username`,
+else the email local part, else `user` (sanitised, and `-2`, `-3`... on clashes). With `role_mapping`, the role is re-synced from the groups claim at every
+login (highest match wins, `default_role` otherwise); the owner is never
+demoted by SSO. `auto_create: false` requires an invite first.
+`disable_password_login: true` makes it SSO-only (use `reset-password` only for
+recovery).
+
+```yaml
+server:
+  public_url: "https://kymo.example.com"
+auth:
+  oidc:
+    enabled: true
+    name: "Google"
+    issuer: "https://accounts.google.com"
+    client_id: "1234.apps.googleusercontent.com"
+    client_secret: ""              # KYMO_AUTH_OIDC_CLIENT_SECRET
+    allowed_domains: ["example.com"]
+    default_role: "viewer"
+```
+
+Google: create an OAuth client of type *Web application*, add the redirect URL
+above. Google has no groups claim, so use `allowed_domains` and `default_role`
+(promote people in the UI).
+
+```yaml
+auth:
+  oidc:
+    enabled: true
+    name: "Keycloak"
+    issuer: "https://keycloak.example.com/realms/acme"
+    client_id: "kymo"
+    scopes: ["openid", "email", "profile"]
+    groups_claim: "groups"          # add a "Group Membership" mapper (full path off) to the client
+    role_mapping:
+      admin: ["kymo-admins"]
+      operator: ["sre"]
+    default_role: "viewer"
+```
+
+Keycloak: a confidential client with *Standard flow* on and the redirect URL
+above; the groups mapper must add the claim to the **ID token**. Realm roles
+work with `groups_claim: "realm_access.roles"`.
+
+**Local development without sign-in:** `auth.enabled: false` (or
+`KYMO_AUTH_ENABLED=false`) makes every request the owner and logs a loud
+warning. Never expose KYMO like that.
 
 ## Issues and notifications
 
@@ -214,9 +332,10 @@ mac.Write(body) // the raw request body
 ok := hmac.Equal([]byte("sha256="+hex.EncodeToString(mac.Sum(nil))), []byte(r.Header.Get("X-KYMO-Signature")))
 ```
 
-> **Security note:** the API has no authentication and exposes management
-> actions (delete pod, scale, rollout restart). Run it on a trusted network or behind an
-> authenticating proxy, and be careful which kubeconfig context a source uses.
+> **Security note:** the API exposes management actions (delete pod, scale,
+> rollout restart). Access is controlled by [accounts and roles](#accounts--sso);
+> only turn authentication off (`auth.enabled: false`) on a trusted local machine,
+> and be careful which kubeconfig context a source uses.
 
 ## Error log capture
 

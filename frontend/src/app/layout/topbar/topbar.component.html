@@ -36,7 +36,7 @@
 
     <!-- Controls -->
     <div class="flex items-center gap-1.5 flex-none ml-auto lg:ml-0">
-      <span class="hidden lg:inline text-[11px] text-kymo-faint tabular-nums mr-1" aria-live="off">{{ updatedLabel() }}</span>
+      <span class="hidden xl:inline text-[11px] text-kymo-faint tabular-nums mr-1" aria-live="off">{{ updatedLabel() }}</span>
 
       <button
         type="button"
@@ -150,7 +150,7 @@
         <svg class="w-3.5 h-3.5 text-kymo-muted" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path stroke-linecap="square" d="M21 21l-4.35-4.35M17 10.5a6.5 6.5 0 11-13 0 6.5 6.5 0 0113 0z" />
         </svg>
-        <span class="hidden md:inline text-kymo-muted">{{ isMac ? '⌘K' : 'Ctrl K' }}</span>
+        <span class="hidden xl:inline text-kymo-muted">{{ isMac ? '⌘K' : 'Ctrl K' }}</span>
       </button>
 
       <a
@@ -159,7 +159,7 @@
         #setRla="routerLinkActive"
         class="k-btn k-btn-icon text-kymo-muted"
         [attr.aria-current]="setRla.isActive ? 'page' : null"
-        title="Settings — notifications, log capture"
+        title="Settings"
         aria-label="Settings"
       >
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
@@ -167,10 +167,12 @@
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
         </svg>
       </a>
+
+      <app-user-menu />
     </div>
   </div>
 </header>
 
 @if (paletteOpen()) {
-  <app-command-palette [tabs]="palettePages" (closed)="paletteOpen.set(false)" />
+  <app-command-palette [tabs]="palettePages()" (closed)="paletteOpen.set(false)" />
 }

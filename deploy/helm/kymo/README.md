@@ -11,8 +11,14 @@ kubectl -n kymo port-forward svc/kymo 8080:8080   # http://localhost:8080
 helm test kymo -n kymo
 ```
 
-> KYMO has **no authentication**. Keep it on `ClusterIP`/port-forward or put an
-> authenticating proxy in front of the ingress.
+> KYMO requires a sign-in (`auth.enabled=true`). The chart creates an initial
+> admin account (`auth.admin.username`, default `admin`) with a generated
+> password kept in the chart Secret (preserved across upgrades):
+> `kubectl -n kymo get secret kymo -o jsonpath='{.data.admin-password}' | base64 -d`.
+> KYMO asks for a new password at first sign-in, after which the stored value no
+> longer works. Set `auth.admin.password` or `auth.admin.existingSecret` to
+> choose it yourself. SSO: see `auth.oidc.*` below and the main README
+> ("Accounts & SSO").
 
 ## Prerequisites
 
@@ -211,6 +217,16 @@ helm install kymo deploy/helm/kymo -n kymo --create-namespace \
 | `configInSecret` | `false` | store config.yaml in a Secret |
 | `config` | `{}` | raw YAML deep-merged over the generated config |
 | `secretKey.value` | `""` | explicit key; empty = generated |
+| `auth.enabled` | `true` | `false` = no sign-in, every request is the owner (never expose it) |
+| `auth.sessionIdleTimeout`, `auth.sessionMaxAge` | `168h`, `720h` | sliding / absolute session lifetime |
+| `auth.allowedOrigins`, `auth.trustedProxies` | `[]` | extra CORS/CSRF origins; proxies trusted for `X-Forwarded-For` |
+| `auth.admin.username`, `.email`, `.name` | `admin`, `""`, `""` | initial admin account, created at startup only while no users exist |
+| `auth.admin.password` | `""` | empty = generated once (24 chars) in the chart Secret (`admin-password`) and preserved across upgrades |
+| `auth.admin.mustChangePassword` | `true` | force a password change at first sign-in |
+| `auth.admin.existingSecret` + `existingSecretKeys.password` | `""`, `admin-password` | take the admin password from your own Secret instead |
+| `auth.oidc.enabled` | `false` | SSO; needs `server.publicUrl`, `issuer`, `clientId` and a client secret |
+| `auth.oidc.clientSecret` / `existingSecret`, `existingSecretKey` | `""`, `oidc-client-secret` | client secret (exposed as `KYMO_AUTH_OIDC_CLIENT_SECRET`) |
+| `auth.oidc.{name,scopes,allowedDomains,groupsClaim,roleMapping,defaultRole,autoCreate,disablePasswordLogin}` | see `values.yaml` | as in `config.example.yaml` |
 | `secretKey.existingSecret`, `.existingSecretKey` | `""`, `secret-key` | |
 | `database.dsn` | `""` | external DSN |
 | `database.existingSecret`, `.existingSecretKey` | `""`, `dsn` | |

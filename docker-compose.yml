@@ -44,6 +44,15 @@ services:
       # Required to upload kubeconfigs from the Sources page; keep it stable,
       # stored kubeconfigs cannot be decrypted with a different key.
       KYMO_SECRET_KEY:                    "${KYMO_SECRET_KEY:-}"
+      # Accounts: on first start KYMO creates the initial admin and logs a random
+      # password once (docker compose logs kymo | grep "initial admin"); sign in
+      # as "admin" and change it. To choose the account unattended instead set
+      # (password: 12+ characters; ignored once any user exists):
+      # KYMO_ADMIN_USERNAME:              "admin"
+      # KYMO_ADMIN_PASSWORD:              "change-me-please-123"
+      # KYMO_ADMIN_EMAIL:                 "admin@example.com"   # optional
+      # KYMO_ADMIN_NAME:                  "Administrator"       # optional
+      # KYMO_ADMIN_MUST_CHANGE_PASSWORD:  "true"                # default false
       # With no sources configured KYMO starts empty. Kubernetes sources can be
       # added from the web UI (Sources page: paste a kubeconfig; this needs
       # KYMO_SECRET_KEY above), or declared in a config file: mount it at

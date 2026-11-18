@@ -6,8 +6,8 @@
 # Live reload: edits to collector.sources are applied automatically while KYMO
 # runs (or via the "Reload config.yaml" button / POST /api/v1/sources/reload).
 # An invalid file is rejected and the current sources keep running. Every other
-# setting (server, database, log, secret_key, poll/scoring intervals) needs a
-# restart.
+# setting (server, auth, database, log, secret_key, poll/scoring intervals)
+# needs a restart.
 
 server:
   address: ":8080"
@@ -19,6 +19,50 @@ server:
   # Notifications use it for the "Open in KYMO" link
   # (<public_url>/workloads/<workload id>). Leave empty for no links.
   public_url: ""
+  # Extra browser origins allowed to call the API with credentials (CORS) and
+  # to pass the CSRF origin check, e.g. a separately hosted dashboard. Empty =
+  # same-origin only (the default; CORS "*" no longer exists).
+  allowed_origins: []
+  #  - "https://dashboard.example.com"
+  # Proxies (IPs / CIDRs) whose X-Forwarded-For header is trusted for the client
+  # IP used by the login rate limit and the audit log. Empty = Gin default
+  # (trust every proxy, so the header can be spoofed). Behind an ingress set it,
+  # e.g. ["10.0.0.0/8"].
+  trusted_proxies: []
+
+# Accounts & access control. Roles: viewer < operator < admin < owner.
+# Sign-in is by username (or email, optional). With no users yet KYMO creates
+# the initial owner at startup: from KYMO_ADMIN_USERNAME (default "admin") +
+# KYMO_ADMIN_PASSWORD (+ KYMO_ADMIN_EMAIL, KYMO_ADMIN_NAME,
+# KYMO_ADMIN_MUST_CHANGE_PASSWORD=true), or - when no password is set - as
+# "admin" with a random password that must be changed at first sign-in and is
+# logged once ("initial admin account created: ..."). Ignored once users exist.
+# Lockout recovery:
+#   kymo admin reset-password --username admin
+auth:
+  # false = NO authentication, every request acts as the owner. Local
+  # development only; KYMO logs a loud warning.
+  enabled: true
+  session_idle_timeout: "168h"   # sliding lifetime (7 days)
+  session_max_age: "720h"        # absolute lifetime (30 days)
+  # Single sign-on (OpenID Connect). Redirect URL to register at the provider:
+  #   <server.public_url>/api/v1/auth/oidc/callback   (public_url is required)
+  # The ID token must carry a verified email (and the groups claim if used).
+  oidc:
+    enabled: false
+    name: "Google"                       # sign-in button label
+    issuer: "https://accounts.google.com"
+    client_id: ""
+    client_secret: ""                    # or KYMO_AUTH_OIDC_CLIENT_SECRET
+    scopes: ["openid", "email", "profile"]
+    allowed_domains: []                  # e.g. ["example.com"]; checked on the verified email
+    groups_claim: ""                     # e.g. "groups" or "realm_access.roles"
+    role_mapping: {}                     # highest matching role wins, re-synced at every login
+    #  admin: ["kymo-admins"]
+    #  operator: ["sre"]
+    default_role: "viewer"               # new users without a mapped group
+    auto_create: true                    # false = users need an invite first
+    disable_password_login: false        # true = SSO only (local login is refused)
 
 database:
   dsn: "postgres://kymo:kymo@localhost:5432/kymo?sslmode=disable"

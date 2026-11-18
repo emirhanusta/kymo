@@ -19,7 +19,7 @@ spec:
       annotations:
         # Restart on secret changes (env vars are read at startup). Deliberately
         # NOT on the config object: config.yaml is hot-reloaded.
-        checksum/secret: {{ toJson (dict "key" .Values.secretKey "database" .Values.database "pw" .Values.timescaledb.auth "user" .Values.timescaledb.enabled) | sha256sum }}
+        checksum/secret: {{ toJson (dict "key" .Values.secretKey "database" .Values.database "pw" .Values.timescaledb.auth "user" .Values.timescaledb.enabled "admin" .Values.auth.admin "oidc" (dict "secret" .Values.auth.oidc.clientSecret "existing" .Values.auth.oidc.existingSecret)) | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -89,6 +89,34 @@ spec:
                 secretKeyRef:
                   name: {{ include "kymo.keySecretName" . }}
                   key: {{ include "kymo.keySecretKey" . }}
+            {{- if .Values.auth.enabled }}
+            {{- $adm := .Values.auth.admin }}
+            {{- /* initial admin account: only used while KYMO has no users */}}
+            - name: KYMO_ADMIN_USERNAME
+              value: {{ $adm.username | default "admin" | quote }}
+            {{- if $adm.email }}
+            - name: KYMO_ADMIN_EMAIL
+              value: {{ $adm.email | quote }}
+            {{- end }}
+            {{- if $adm.name }}
+            - name: KYMO_ADMIN_NAME
+              value: {{ $adm.name | quote }}
+            {{- end }}
+            - name: KYMO_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ default (include "kymo.secretName" .) $adm.existingSecret }}
+                  key: {{ ternary $adm.existingSecretKeys.password "admin-password" (ne $adm.existingSecret "") }}
+            - name: KYMO_ADMIN_MUST_CHANGE_PASSWORD
+              value: {{ $adm.mustChangePassword | default false | quote }}
+            {{- end }}
+            {{- if and .Values.auth.enabled .Values.auth.oidc.enabled }}
+            - name: KYMO_AUTH_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "kymo.oidcSecretName" . }}
+                  key: {{ include "kymo.oidcSecretKey" . }}
+            {{- end }}
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

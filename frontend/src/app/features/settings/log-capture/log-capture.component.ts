@@ -20,6 +20,7 @@ import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { CONFIG_ORIGIN_HINT } from '../../../shared/utils/source';
 import { CAPTURE_PRIVACY_NOTE } from '../../../shared/utils/error-logs';
 import { SettingsNavComponent } from '../settings-nav.component';
+import { AuthService } from '../../../core/services/auth.service';
 
 /** Settings → Log capture: global status, which namespaces / workloads are recorded, and the privacy note. */
 @Component({
@@ -144,7 +145,7 @@ import { SettingsNavComponent } from '../settings-nav.component';
                     <div class="flex justify-end">
                       @if (t.origin === 'ui') {
                         <button type="button" class="k-btn k-btn-sm k-btn-icon text-kymo-faint hover:!text-kymo-danger hover:!border-kymo-danger/50"
-                          [disabled]="busyId() === t.id" aria-label="Delete target" title="Delete target" (click)="deleteTarget.set(t)">
+                          [disabled]="busyId() === t.id || !auth.can('logcapture:manage')" aria-label="Delete target" [title]="auth.denyHint('logcapture:manage') || 'Delete target'" (click)="deleteTarget.set(t)">
                           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                           </svg>
@@ -183,7 +184,7 @@ import { SettingsNavComponent } from '../settings-nav.component';
             @for (w of workloadOptions(); track w.id) { <option [value]="w.id">{{ w.kind }}/{{ w.name }}</option> }
           </select>
         </label>
-        <button type="submit" class="k-btn k-btn-primary" [disabled]="!canAdd() || adding()">{{ adding() ? 'Adding…' : 'Add target' }}</button>
+        <button type="submit" class="k-btn k-btn-primary" [disabled]="!canAdd() || adding() || !auth.can('logcapture:manage')" [title]="auth.denyHint('logcapture:manage')">{{ adding() ? 'Adding…' : 'Add target' }}</button>
       </form>
     </section>
   }
@@ -202,6 +203,7 @@ import { SettingsNavComponent } from '../settings-nav.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class LogCaptureComponent {
+  readonly auth = inject(AuthService);
   private api       = inject(ErrorLogService);
   private nsSvc     = inject(NamespaceService);
   private sourceSvc = inject(SourceStateService);

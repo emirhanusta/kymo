@@ -19,6 +19,7 @@ import {
   CONFIG_ORIGIN_HINT, sourceConnectionSummary, sourceDotClass, sourceStatusLabel,
 } from '../../shared/utils/source';
 import { ClusterWizardComponent } from './cluster-wizard/cluster-wizard.component';
+import { AuthService } from '../../core/services/auth.service';
 
 /** Clusters: list with status + management of user-created clusters (config.yaml ones are locked). */
 @Component({
@@ -32,6 +33,7 @@ import { ClusterWizardComponent } from './cluster-wizard/cluster-wizard.componen
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ClustersComponent {
+  readonly auth = inject(AuthService);
   private api        = inject(SourceService);
   private toast      = inject(ToastService);
   private route      = inject(ActivatedRoute);
@@ -91,7 +93,7 @@ export class ClustersComponent {
     // /clusters?readd=<name> (history banner) opens it for a removed cluster.
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(qp => {
       const readd = qp.get('readd');
-      if (qp.get('add') || readd) {
+      if ((qp.get('add') || readd) && this.auth.can('sources:manage')) {
         this.readdName.set(readd ?? '');
         this.wizard.set('new');
         this.router.navigate([], { relativeTo: this.route, queryParams: { add: null, readd: null }, queryParamsHandling: 'merge', replaceUrl: true });

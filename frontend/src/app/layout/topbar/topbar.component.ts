@@ -6,6 +6,7 @@ import { Router, NavigationEnd, RouterLink, RouterLinkActive } from '@angular/ro
 import { toSignal } from '@angular/core/rxjs-interop';
 import { filter, map } from 'rxjs/operators';
 
+import { AuthService } from '../../core/services/auth.service';
 import { RefreshService } from '../../core/services/refresh.service';
 import { SourceStateService } from '../../core/services/source-state.service';
 import { IssuesService } from '../../core/services/issues.service';
@@ -14,6 +15,7 @@ import { SourceStatus } from '../../core/models/container.model';
 import { PageContextService } from '../../core/services/page-context.service';
 import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import { LogoComponent } from '../../shared/components/logo/logo.component';
+import { UserMenuComponent } from '../user-menu/user-menu.component';
 import { CommandPaletteComponent } from '../command-palette/command-palette.component';
 
 export interface NavTab {
@@ -53,7 +55,7 @@ function isTypingOrModal(ev: KeyboardEvent): boolean {
 @Component({
   selector: 'app-topbar',
   standalone: true,
-  imports: [RouterLink, RouterLinkActive, TimeagoPipe, LogoComponent, CommandPaletteComponent],
+  imports: [RouterLink, RouterLinkActive, TimeagoPipe, LogoComponent, CommandPaletteComponent, UserMenuComponent],
   templateUrl: './topbar.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
@@ -79,7 +81,14 @@ export class TopbarComponent {
   readonly isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
   readonly tabs = NAV_TABS;
-  readonly palettePages = PALETTE_PAGES;
+  private auth = inject(AuthService);
+  readonly palettePages = computed<NavTab[]>(() => [
+    ...PALETTE_PAGES,
+    ...(this.auth.can('users:manage') ? [{ path: '/settings/users', label: 'Users' }] : []),
+    { path: '/settings/tokens', label: 'API tokens' },
+    ...(this.auth.can('audit:read') ? [{ path: '/settings/audit', label: 'Audit log' }] : []),
+    ...(this.auth.authEnabled() ? [{ path: '#signout', label: 'Sign out' }] : []),
+  ]);
 
   updatedLabel = computed(() => {
     const last = this.refreshSvc.lastUpdated();
@@ -104,7 +113,9 @@ export class TopbarComponent {
   /** Document title: detail pages show the container name (from PageContextService), others the tab name. */
   pageTitle = computed(() => {
     const segs = this.url().split(/[?#]/)[0].split('/').filter(Boolean);
-    if (segs[0] === 'settings') return segs[1] === 'log-capture' ? 'Log capture' : 'Notifications';
+    if (segs[0] === 'settings') {
+      return ({ 'log-capture': 'Log capture', users: 'Users', tokens: 'API tokens', audit: 'Audit log' } as Record<string, string>)[segs[1]] ?? 'Notifications';
+    }
     const tab = NAV_TABS.find(t => t.path === '/' + (segs[0] ?? 'dashboard'));
     if (segs.length > 1) return this.pageCtx.detailLabel() ?? tab?.label ?? null;
     return tab?.label ?? null;

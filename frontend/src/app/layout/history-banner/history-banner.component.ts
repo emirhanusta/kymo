@@ -5,6 +5,7 @@ import { SourceStateService } from '../../core/services/source-state.service';
 import { ConfirmDialogComponent } from '../../shared/components/confirm-dialog/confirm-dialog.component';
 import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
 import { purgeMessage } from '../../shared/utils/removed';
+import { AuthService } from '../../core/services/auth.service';
 
 /** Slim strip under the top bar while the recorded history of a removed cluster is being viewed. */
 @Component({
@@ -24,8 +25,8 @@ import { purgeMessage } from '../../shared/utils/removed';
             <span class="text-kymo-faint"> · last seen {{ r.last_seen_at | timeago }}</span>
           </p>
           <div class="flex items-center gap-1.5 flex-wrap">
-            <button type="button" class="k-btn k-btn-sm k-btn-primary" (click)="readd(r.name)">Re-add cluster</button>
-            <button type="button" class="k-btn k-btn-sm k-btn-danger" (click)="confirming.set(true)">Delete history</button>
+            <button type="button" class="k-btn k-btn-sm k-btn-primary" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="readd(r.name)">Re-add cluster</button>
+            <button type="button" class="k-btn k-btn-sm k-btn-danger" [disabled]="!auth.can('sources:manage')" [title]="auth.denyHint('sources:manage')" (click)="confirming.set(true)">Delete history</button>
             <button type="button" class="k-btn k-btn-sm" (click)="sources.select('')">Back to all clusters</button>
           </div>
         </div>
@@ -45,6 +46,7 @@ import { purgeMessage } from '../../shared/utils/removed';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HistoryBannerComponent {
+  readonly auth = inject(AuthService);
   protected sources = inject(SourceStateService);
   private router    = inject(Router);
 
