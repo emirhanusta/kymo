@@ -274,6 +274,26 @@ export interface CronJobExecution {
   sampled_at: string;
 }
 
+/** Live CronJob definition (GET /cronjobs/specs): not recorded, read from the cluster on demand. */
+export interface CronJobSpec {
+  source_name: string;
+  namespace: string;
+  name: string;
+  schedule: string;
+  timezone: string;
+  suspend: boolean;
+  last_schedule_time: string | null;
+  last_successful_time: string | null;
+  /** Null when suspended or the schedule cannot be parsed. */
+  next_run: string | null;
+}
+
+export interface CronJobSpecsResponse {
+  items: CronJobSpec[];
+  /** Clusters that could not be read: source name → message. */
+  errors: Record<string, string>;
+}
+
 export interface PodDetail {
   pod_name: string;
   namespace: string;

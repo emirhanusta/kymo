@@ -22,6 +22,7 @@ type managementService struct {
 	k8sClients map[string]kubernetes.Interface // keyed by source name
 	k8sOrder   []string
 	log        *zap.Logger
+	cronSpecs  *cronSpecCache
 }
 
 // NewManagementService constructs an empty ManagementService. Clients are
@@ -30,6 +31,7 @@ func NewManagementService(log *zap.Logger) ManagementService {
 	return &managementService{
 		k8sClients: make(map[string]kubernetes.Interface),
 		log:        log,
+		cronSpecs:  newCronSpecCache(cronSpecTTL),
 	}
 }
 
@@ -55,6 +57,7 @@ func (s *managementService) RegisterSource(spec model.SourceSpec) error {
 
 // UnregisterSource drops (and closes) the client for a source, if any.
 func (s *managementService) UnregisterSource(name string) {
+	s.cronSpecs.drop(name)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.k8sClients[name]; ok {

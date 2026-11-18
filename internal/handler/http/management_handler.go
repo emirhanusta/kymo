@@ -460,3 +460,37 @@ func (h *Handler) plainK8sLogs(c *gin.Context, reader io.ReadCloser) {
 	io.Copy(&buf, reader) //nolint:errcheck
 	c.Data(http.StatusOK, "text/plain; charset=utf-8", buf.Bytes())
 }
+
+// ListCronJobSpecs returns the live definition of every CronJob (schedule,
+// timezone, suspend flag, last/next run), read from the cluster on demand and
+// cached for a minute per source. Without ?source= every connected Kubernetes
+// cluster is read; removed clusters cannot be queried and yield no items. A
+// cluster that fails is reported in "errors" while the others are still
+// returned.
+//
+//	GET /api/v1/cronjobs/specs
+func (h *Handler) ListCronJobSpecs(c *gin.Context) {
+	ctx := c.Request.Context()
+	list, err := h.svc.ListSources(ctx)
+	if err != nil {
+		h.log.Error("cronjob specs: list sources failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal error"})
+		return
+	}
+	only := c.Query("source")
+	items := []service.CronJobSpec{}
+	errs := map[string]string{}
+	for _, s := range list {
+		if s.Type != model.SourceTypeKubernetes || !s.Enabled || (only != "" && s.Name != only) {
+			continue
+		}
+		specs, err := h.mgmt.ListCronJobSpecs(ctx, s.Name)
+		if err != nil {
+			h.log.Warn("cronjob specs failed", zap.String("source", s.Name), zap.Error(err))
+			errs[s.Name] = err.Error()
+			continue
+		}
+		items = append(items, specs...)
+	}
+	c.JSON(http.StatusOK, gin.H{"items": items, "errors": errs})
+}

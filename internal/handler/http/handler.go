@@ -113,6 +113,7 @@ func (h *Handler) registerRoutes(r *gin.Engine) {
 
 		// CronJob tracking endpoints (Kubernetes)
 		v1.GET("/cronjobs", viewer, h.ListCronJobs)
+		v1.GET("/cronjobs/specs", viewer, h.ListCronJobSpecs)
 		v1.GET("/cronjobs/:namespace/:name/executions", viewer, h.GetCronJobExecutions)
 
 		// Workloads (all instances of a Deployment / StatefulSet / … aggregated)

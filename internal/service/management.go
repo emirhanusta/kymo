@@ -34,6 +34,10 @@ type ManagementService interface {
 	RestartDeployment(ctx context.Context, sourceName, namespace, name string) error
 	ListDeployments(ctx context.Context, sourceName, namespace string) ([]DeploymentInfo, error)
 
+	// ListCronJobSpecs returns the live CronJob definitions of a cluster (read
+	// on demand, cached for a minute). Pass "" to use the first cluster.
+	ListCronJobSpecs(ctx context.Context, sourceName string) ([]CronJobSpec, error)
+
 	// ListNamespaces returns the Kubernetes namespaces reachable via the given source.
 	// Pass an empty sourceName to use any available K8s client.
 	// Returns ["local"] when no Kubernetes source is registered.
