@@ -49,3 +49,16 @@ export function shortImage(image: string): string {
   if (i > 0 && /[.:]|^localhost$/.test(image.slice(0, i))) return image.slice(i + 1);
   return image;
 }
+
+/** "quay.io/argoproj/argocd:v2.11.3@sha256:…" → "argocd:v2.11.3" (last path segment, digest dropped). */
+export function imageNameTag(image: string): string {
+  const noDigest = image.split('@')[0];
+  return noDigest.slice(noDigest.lastIndexOf('/') + 1);
+}
+
+/** The tag of an image reference ("latest" when none, '' for a bare digest). */
+export function imageTagOf(image: string): string {
+  const nt = imageNameTag(image);
+  const i = nt.lastIndexOf(':');
+  return i >= 0 ? nt.slice(i + 1) : (nt ? 'latest' : '');
+}

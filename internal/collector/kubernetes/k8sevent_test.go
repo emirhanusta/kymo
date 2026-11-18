@@ -191,3 +191,18 @@ func TestCrashLoopBackOffIsCrashing(t *testing.T) {
 		}
 	}
 }
+
+func TestFailedTerminalPodIsStoppedNotCrashing(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "repsy", Name: "job-1-abc"},
+		Status:     corev1.PodStatus{Phase: corev1.PodFailed},
+	}
+	snap := &containerSnapshot{state: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}}}
+	if got := buildContainerModel("src", pod, "job", "busybox", snap, WorkloadInfo{}).CurrentStatus; got != model.StatusStopped {
+		t.Fatalf("failed terminal pod: %s, want stopped", got)
+	}
+	pod.Status.Phase = corev1.PodRunning
+	if got := buildContainerModel("src", pod, "job", "busybox", snap, WorkloadInfo{}).CurrentStatus; got != model.StatusCrashing {
+		t.Fatalf("running pod with a non-zero exit: %s, want crashing", got)
+	}
+}

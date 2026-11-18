@@ -1,5 +1,5 @@
 import {
-  Component, ChangeDetectionStrategy, signal, computed, inject, input, effect, untracked, DestroyRef,
+  Component, ChangeDetectionStrategy, signal, computed, inject, input, effect, untracked, DestroyRef, output,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { DatePipe } from '@angular/common';
@@ -170,6 +170,8 @@ export class WorkloadErrorsComponent {
   namespace  = input<string>('');
   /** Recorded history of a removed cluster: capture cannot be changed. */
   historyOnly = input(false);
+  /** Emits whether capture is on whenever the capture state is (re)loaded or toggled. */
+  captureChange = output<boolean>();
 
   readonly windows = ERROR_WINDOWS;
   readonly privacy = CAPTURE_PRIVACY_NOTE;
@@ -203,6 +205,7 @@ export class WorkloadErrorsComponent {
         this.load(false);
       });
     });
+    effect(() => { const c = this.capture(); if (c) this.captureChange.emit(c.enabled && c.global_enabled); });
     const sub = inject(RefreshService).refresh$.subscribe(() => this.load(true));
     inject(DestroyRef).onDestroy(() => { sub.unsubscribe(); this.sigSub?.unsubscribe(); });
   }
