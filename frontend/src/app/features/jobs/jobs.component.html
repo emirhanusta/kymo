@@ -1,53 +1,73 @@
-<div class="space-y-4" [class.lg:pr-[27rem]]="peek.id()">
-  <app-page-header title="Jobs">
-    <ng-container subtitle>
-      @if (state.loaded()) {
-        {{ rows().length }} job{{ rows().length === 1 ? '' : 's' }}
-        @if (failingCount() > 0) {
-          · <span class="text-kymo-danger font-medium">{{ failingCount() }} failing</span>
-        }
-      }
-    </ng-container>
-  </app-page-header>
+<div class="flex flex-col gap-4" [class.lg:pr-[27rem]]="peek.id()">
 
-  <!-- Toolbar -->
-  <div class="flex items-center justify-between gap-3 flex-wrap">
-    <div class="flex border border-kymo-rule w-fit max-w-full overflow-x-auto scrollbar-none" role="group" aria-label="Filter by kind">
-      @for (k of kindChips; track k.value) {
+  <!-- Header: title + one-line summary that doubles as quick filters -->
+  <header class="border-b border-kymo-rule pb-3">
+    <h1 class="text-lg font-semibold text-kymo-ink tracking-tight">Jobs</h1>
+    <p class="mt-1.5 text-xs text-kymo-muted flex items-center gap-x-2 flex-wrap min-h-4" role="status">
+      @if (state.loaded()) {
+        <span class="tabular-nums">{{ totalCount() }} job{{ totalCount() === 1 ? '' : 's' }}</span>
+        <span class="text-kymo-faint" aria-hidden="true">·</span>
+        <button type="button" class="tabular-nums hover:underline underline-offset-4 disabled:no-underline disabled:cursor-default"
+                [class]="(failingCount() > 0 ? 'text-kymo-danger' : 'text-kymo-muted') + (status() === 'failing' ? ' underline' : '')"
+                [disabled]="failingCount() === 0 && status() !== 'failing'" [attr.aria-pressed]="status() === 'failing'"
+                (click)="toggleStatus('failing')">{{ failingCount() }} failing</button>
+        <span class="text-kymo-faint" aria-hidden="true">·</span>
+        <button type="button" class="tabular-nums hover:underline underline-offset-4 disabled:no-underline disabled:cursor-default"
+                [class]="(suspendedCount() > 0 ? 'text-kymo-amber' : 'text-kymo-muted') + (suspended() ? ' underline' : '')"
+                [disabled]="suspendedCount() === 0 && !suspended()" [attr.aria-pressed]="suspended()"
+                (click)="toggleSuspended()">{{ suspendedCount() }} suspended</button>
+      }
+    </p>
+  </header>
+
+  <!-- Filters -->
+  <div class="flex items-center gap-2 flex-wrap">
+    <div class="relative flex-1 min-w-[12rem] max-w-md">
+      <input
+        appSearchHotkey
+        type="search"
+        placeholder="Search name, namespace or cluster…"
+        aria-label="Search jobs"
+        class="k-input w-full pr-8"
+        [value]="searchText()"
+        (input)="onSearch($any($event.target).value)"
+        (keydown.escape)="onSearch('')"
+      />
+      <kbd class="k-kbd hidden sm:inline-flex absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">/</kbd>
+    </div>
+
+    <select aria-label="Filter by kind" class="k-input cursor-pointer" [value]="kind()" (change)="setKind($any($event.target).value)">
+      <option value="" [selected]="!kind()">All kinds</option>
+      @for (k of kinds; track k) {
+        <option [value]="k" [selected]="k === kind()">{{ k }} ({{ kindCounts().get(k) ?? 0 }})</option>
+      }
+    </select>
+
+    <div class="flex border border-kymo-rule h-[1.875rem]" role="group" aria-label="Filter by status">
+      @for (s of segments; track s.value) {
         <button
           type="button"
-          class="px-3 h-7 text-xs whitespace-nowrap transition-colors border-r border-kymo-rule last:border-r-0 flex items-center gap-1.5"
-          [class]="kind() === k.value ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
-          [attr.aria-pressed]="kind() === k.value"
-          (click)="setKind(k.value)"
-        >
-          {{ k.label }}
-          @if (state.loaded()) {
-            <span class="tabular-nums" [class]="kind() === k.value ? 'opacity-70' : 'text-kymo-faint'">{{ kindCounts().get(k.value) ?? 0 }}</span>
-          }
-        </button>
+          class="px-3 text-xs whitespace-nowrap transition-colors border-r border-kymo-rule last:border-r-0"
+          [class]="status() === s.value ? 'bg-kymo-raised text-kymo-ink' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+          [attr.aria-pressed]="status() === s.value"
+          (click)="setStatus(s.value)"
+        >{{ s.label }}</button>
       }
     </div>
-    <div class="flex items-center gap-2 flex-wrap">
-      <label class="flex items-center gap-1.5 text-xs text-kymo-muted cursor-pointer h-[1.875rem]">
-        <input type="checkbox" [checked]="system()" (change)="setSystem($any($event.target).checked)" />
-        Show system
-      </label>
-      <div class="relative">
-        <input
-          appSearchHotkey
-          type="search"
-          placeholder="Search jobs…"
-          aria-label="Search jobs"
-          class="k-input pr-8 w-52 sm:w-60"
-          [value]="searchText()"
-          (input)="onSearch($any($event.target).value)"
-          (keydown.escape)="onSearch('')"
-        />
-        <kbd class="k-kbd hidden sm:inline-flex absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none">/</kbd>
-      </div>
-    </div>
+
+    <label class="flex items-center gap-1.5 text-xs text-kymo-muted cursor-pointer h-[1.875rem]" title="Include system namespaces such as kube-system">
+      <input type="checkbox" [checked]="system()" (change)="setSystem($any($event.target).checked)" />
+      System
+    </label>
+
+    @if (hasFilters()) {
+      <button type="button" class="text-xs text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4" (click)="clearFilters()">Clear filters</button>
+    }
   </div>
+
+  @if (historyMode()) {
+    <p class="text-xs text-kymo-muted">This cluster was removed. Jobs shown are recorded history and are no longer updated; schedules are unavailable.</p>
+  }
 
   @if (state.error()) {
     <app-error-state message="Failed to load jobs" (retry)="state.load()" />
@@ -55,91 +75,130 @@
 
   @if (!state.loaded()) {
     <app-skeleton [rows]="6" />
-  } @else if (rows().length === 0 && !state.error()) {
+  } @else if (filtered().length === 0 && !state.error()) {
     <div class="k-panel">
       @if (hasFilters()) {
-        <app-empty-state icon="search" message="No jobs match your filters" hint="Try another kind or search term.">
+        <app-empty-state icon="search" message="No jobs match your filters" hint="Try another search term, kind or status.">
           <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" (click)="clearFilters()">Clear filters</button>
         </app-empty-state>
       } @else {
-        <app-empty-state icon="clock" message="No jobs recorded yet" hint="CronJobs and Jobs appear here once a cluster is connected and they have run." />
+        <app-empty-state icon="clock" message="No jobs in this scope" hint="CronJobs and Jobs appear here once a cluster is connected and they have run.">
+          <a routerLink="/clusters" class="mt-4 text-xs text-kymo-amber hover:underline underline-offset-4">Manage clusters →</a>
+        </app-empty-state>
       }
     </div>
-  } @else if (rows().length > 0) {
+  } @else if (filtered().length > 0) {
     <div class="k-panel overflow-hidden">
       <div class="overflow-auto max-h-[calc(100vh-17rem)] scrollbar-thin">
         <table class="k-table border-separate border-spacing-0">
           <thead class="sticky top-0 z-10">
             <tr>
-              <th>Job</th>
-              <th class="hidden sm:table-cell">Kind</th>
-              <th>Last run</th>
-              <th class="hidden md:table-cell">Recent runs <span class="normal-case tracking-normal text-kymo-faint">oldest → newest</span></th>
-              <th class="text-right" title="Succeeded / finished among the recent runs">Success</th>
-              <th class="text-right hidden lg:table-cell">Avg duration</th>
+              <th [attr.aria-sort]="ariaSort('job')">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-ink]="sortField() === 'job'" (click)="setSort('job')">Job <span class="text-kymo-amber">{{ sortIndicator('job') }}</span></button>
+              </th>
+              <th class="hidden md:table-cell">Schedule</th>
+              <th [attr.aria-sort]="ariaSort('last')">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-ink]="sortField() === 'last'" (click)="setSort('last')">Last run <span class="text-kymo-amber">{{ sortIndicator('last') }}</span></button>
+              </th>
+              <th [attr.aria-sort]="ariaSort('next')" class="hidden md:table-cell">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-ink]="sortField() === 'next'" (click)="setSort('next')">Next run <span class="text-kymo-amber">{{ sortIndicator('next') }}</span></button>
+              </th>
+              <th class="hidden md:table-cell">Recent runs</th>
+              <th [attr.aria-sort]="ariaSort('success')" class="text-right hidden sm:table-cell">
+                <button type="button" class="uppercase tracking-[0.08em] hover:text-kymo-ink" [class.text-kymo-ink]="sortField() === 'success'" (click)="setSort('success')" title="Succeeded / finished among the recent runs">Success <span class="text-kymo-amber">{{ sortIndicator('success') }}</span></button>
+              </th>
             </tr>
           </thead>
           <tbody>
-            @for (r of rows(); track r.w.id) {
+            @for (r of filtered(); track r.id) {
               <tr class="hover:bg-kymo-raised transition-colors group cursor-pointer outline-none focus-visible:bg-kymo-raised"
-                [attr.data-peek-id]="r.w.id" tabindex="0" [attr.aria-current]="peek.id() === r.w.id ? 'true' : null"
-                      [class.bg-kymo-raised]="peek.id() === r.w.id" [class.shadow-[inset_2px_0_0_var(--color-kymo-amber)]]="peek.id() === r.w.id"
-                      (click)="peek.rowClick($event, r.w.id)" (keydown.enter)="peek.rowKey($event, r.w.id)" (keydown.space)="peek.rowKey($event, r.w.id)">
-                <td class="px-4 py-2.5 max-w-[20rem]">
-                  <div class="flex items-center gap-2.5 min-w-0">
-                    <span class="k-led flex-none" [class]="healthDot[r.health]" [title]="healthLabel(r)" role="img" [attr.aria-label]="healthLabel(r)"></span>
-                    <div class="min-w-0">
-                      <a
-                        [routerLink]="['/workloads', r.w.id]"
-                        class="block text-kymo-ink font-medium truncate group-hover:text-kymo-amber hover:underline underline-offset-4"
-                        [title]="r.w.name"
-                      >{{ r.w.name }}</a>
-                      <div class="text-[11px] text-kymo-faint truncate">
-                        {{ r.w.namespace || '—' }} · {{ r.w.source_name }}@if (r.w.is_system) { · system}
-                      </div>
-                    </div>
+                  [attr.data-peek-id]="r.id" tabindex="0" [attr.aria-current]="peek.id() === r.id ? 'true' : null"
+                  [class.bg-kymo-raised]="peek.id() === r.id"
+                  (click)="openRow($event, r)" (keydown.enter)="openRow($event, r)">
+                <td class="pl-4 pr-2 sm:pr-4 py-2.5 max-w-[20rem]" [class]="edge(r)">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <a [routerLink]="['/workloads', r.id]" [queryParams]="{ tab: 'runs' }" class="text-kymo-ink font-medium truncate group-hover:text-kymo-amber hover:underline underline-offset-4" [title]="r.j.w.name">{{ r.j.w.name }}</a>
+                    <app-workload-badge class="flex-none" [kind]="r.kind" />
+                    @if (r.j.w.is_system) { <span class="flex-none text-[10px] text-kymo-faint">SYS</span> }
+                  </div>
+                  <div class="text-[11px] text-kymo-faint truncate mt-0.5">
+                    {{ r.j.w.namespace || '—' }}@if (r.cluster) { · {{ r.cluster }} }
+                    @if (r.parent; as p) {
+                      · <span title="Inferred from the job name">manual run of</span>
+                      <a [routerLink]="['/workloads', p.id]" [queryParams]="{ tab: 'runs' }" class="text-kymo-muted hover:text-kymo-amber hover:underline underline-offset-4">{{ p.name }}</a>
+                    }
                   </div>
                 </td>
-                <td class="px-4 py-2.5 hidden sm:table-cell"><app-workload-badge [kind]="r.w.kind" /></td>
-                <td class="px-4 py-2.5 text-xs whitespace-nowrap">
-                  @if (r.last; as l) {
-                    <span
-                      class="font-semibold"
-                      [class]="l.state === 'ok' ? 'text-kymo-running' : l.state === 'failed' ? 'text-kymo-danger' : 'text-kymo-amber'"
-                      [attr.aria-label]="l.state === 'ok' ? 'succeeded' : l.state === 'failed' ? 'failed' : 'running'"
-                    >{{ l.state === 'ok' ? '✓' : l.state === 'failed' ? '✕' : '●' }}</span>
-                    @if (l.state === 'failed' && l.exitCode != null) {
-                      <span class="text-kymo-danger"> exit {{ l.exitCode }}</span>
-                    } @else if (l.state === 'running') {
-                      <span class="text-kymo-amber"> running</span>
-                    }
-                    <span class="text-kymo-muted" [title]="l.time ? (l.time | date:'medium') : ''"> {{ l.at | timeago }}</span>
+
+                <td class="px-4 py-2.5 hidden md:table-cell max-w-[14rem]">
+                  @if (r.spec) {
+                    <div class="flex items-center gap-2 min-w-0">
+                      <code class="text-xs text-kymo-ink truncate" [title]="r.schedule + (r.spec.timezone ? ' (' + r.spec.timezone + ')' : '')">{{ r.schedule }}</code>
+                      @if (r.suspended) { <span class="flex-none text-[10px] text-kymo-amber border border-kymo-amber/40 px-1 py-0.5">suspended</span> }
+                    </div>
+                    @if (r.hint) { <div class="text-[11px] text-kymo-faint truncate mt-0.5">{{ r.hint }}{{ " · " + (r.spec.timezone || "UTC") }}</div> }
                   } @else {
-                    <span class="text-kymo-faint">no runs recorded</span>
+                    <span class="text-kymo-faint text-xs">—</span>
                   }
                 </td>
+
+                <td class="px-4 py-2.5 text-xs whitespace-nowrap">
+                  @if (r.j.last; as l) {
+                    <span class="inline-flex items-center gap-2" [class]="l.state === 'failed' ? 'text-kymo-danger' : l.state === 'running' ? 'text-kymo-amber' : 'text-kymo-muted'">
+                      <span class="k-led" [class]="ledClass(l)" [attr.aria-label]="l.state === 'ok' ? 'succeeded' : l.state === 'failed' ? 'failed' : 'running'" role="img"></span>
+                      @if (l.state === 'running') { running } @else { {{ l.at | timeago }} }
+                      @if (l.durationSeconds != null) { <span class="text-kymo-faint tabular-nums hidden sm:inline">· {{ duration(l.durationSeconds) }}</span> }
+                      @if (l.state === 'failed' && l.exitCode != null) { <span class="tabular-nums hidden sm:inline">· exit {{ l.exitCode }}</span> }
+                    </span>
+                  } @else {
+                    <span class="inline-flex items-center gap-2 text-kymo-faint"><span class="k-led bg-kymo-unknown" aria-hidden="true"></span>no runs</span>
+                  }
+                </td>
+
+                <td class="px-4 py-2.5 text-xs whitespace-nowrap hidden md:table-cell" [title]="r.nextIso ?? ''">
+                  <span [class]="r.nextIso ? 'text-kymo-muted' : 'text-kymo-faint'">{{ until(r.nextIso) }}</span>
+                </td>
+
                 <td class="px-4 py-2.5 hidden md:table-cell">
-                  <div class="flex items-center gap-[3px]" role="img" [attr.aria-label]="r.finished ? r.ok + ' of ' + r.finished + ' recent runs succeeded' : 'no runs'">
-                    @for (c of r.cells; track $index) {
-                      <span class="w-2.5 h-4 flex-none" [class]="cellClass[c.state]" [title]="cellTitle(c)"></span>
+                  <div class="flex items-end gap-[2px] h-4" role="img" [attr.aria-label]="r.successTitle" [title]="r.successTitle">
+                    @for (c of r.j.cells; track $index) {
+                      <span class="w-[5px] flex-none" [class]="barClass(c)" [class.h-4]="c.state !== 'ok'" [class.h-3]="c.state === 'ok'" [title]="cellTitle(c)"></span>
                     } @empty {
                       <span class="text-kymo-faint text-xs">—</span>
                     }
                   </div>
                 </td>
-                <td class="px-4 py-2.5 text-right text-xs tabular-nums whitespace-nowrap" [class]="rateClass(r)">
-                  {{ rateLabel(r) }}
-                  @if (r.rate !== null) { <span class="text-kymo-faint"> ({{ (r.rate * 100).toFixed(0) }}%)</span> }
+
+                <td class="px-4 py-2.5 text-right text-xs tabular-nums whitespace-nowrap hidden sm:table-cell" [title]="r.successTitle">
+                  <span class="inline-flex items-center justify-end gap-2">
+                    @if (r.rate !== null) {
+                      <span [class]="rateClass(r)">{{ (r.rate * 100).toFixed(0) }}%</span>
+                      <span class="text-kymo-faint">{{ r.j.ok }}/{{ r.j.finished }}</span>
+                    } @else {
+                      <span class="text-kymo-faint">—</span>
+                    }
+                    <button type="button" class="k-btn k-btn-icon opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label="Quick view" title="Quick view" (click)="peekRow($event, r)">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 5h16v14H4zM15 5v14" /></svg>
+                    </button>
+                  </span>
                 </td>
-                <td class="px-4 py-2.5 text-right text-xs tabular-nums text-kymo-muted hidden lg:table-cell">{{ duration(r.avgDuration) }}</td>
               </tr>
             }
           </tbody>
         </table>
       </div>
     </div>
-    @if (hiddenSystem() > 0) {
-      <p class="text-xs text-kymo-faint">{{ hiddenSystem() }} system job{{ hiddenSystem() === 1 ? '' : 's' }} hidden</p>
+    <div class="flex items-center gap-4 text-xs text-kymo-faint">
+      <span class="tabular-nums">{{ filtered().length }} shown</span>
+      @if (hiddenSystem() > 0) {
+        <span class="tabular-nums">{{ hiddenSystem() }} system job{{ hiddenSystem() === 1 ? '' : 's' }} hidden</span>
+      }
+    </div>
+  }
+
+  @if (state.cronSpecErrors(); as errs) {
+    @for (e of errs | keyvalue; track e.key) {
+      <p class="text-xs text-kymo-faint">Schedules unavailable for {{ e.key }}: {{ e.value }}</p>
     }
   }
 

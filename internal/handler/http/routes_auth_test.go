@@ -85,6 +85,7 @@ var routeRoles = map[string]string{
 	"POST /api/v1/deployments/:namespace/:name/restart": "operator",
 	"GET /api/v1/pods/:namespace/:name":                 "viewer",
 	"GET /api/v1/cronjobs":                              "viewer",
+	"GET /api/v1/cronjobs/specs":                        "viewer",
 	"GET /api/v1/cronjobs/:namespace/:name/executions":  "viewer",
 
 	// workloads

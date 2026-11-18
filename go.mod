@@ -8,6 +8,7 @@ require (
 	github.com/gin-gonic/gin v1.10.0
 	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/jackc/pgx/v5 v5.7.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.19.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/crypto v0.47.0

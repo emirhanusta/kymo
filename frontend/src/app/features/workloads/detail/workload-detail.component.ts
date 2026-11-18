@@ -19,9 +19,11 @@ import { ErrorLogService } from '../../../core/services/error-log.service';
 import { WorkloadErrorsComponent } from './workload-errors.component';
 import { statusReason, severityLedClass, severityTextClass } from '../../../shared/utils/issues';
 import { imageNameTag } from '../../../shared/utils/format';
+import { buildJobRow } from '../../../shared/utils/jobs';
+import { describeSchedule, untilLabel } from '../../../shared/utils/cron';
 import { SourceStateService } from '../../../core/services/source-state.service';
 import {
-  CronJobExecution, DeploymentDetail, K8sEvent, ResourceSample, WorkloadDetail, WorkloadScore,
+  CronJobExecution, CronJobSpec, DeploymentDetail, K8sEvent, ResourceSample, WorkloadDetail, WorkloadScore,
 } from '../../../core/models/container.model';
 import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialog/confirm-dialog.component';
 import { StatusBadgeComponent } from '../../../shared/components/status-badge/status-badge.component';
@@ -84,6 +86,7 @@ export class WorkloadDetailComponent {
   readonly textClass = severityTextClass;
 
   readonly ranges = RANGES;
+  readonly until = untilLabel;
 
   /** `namespace/pod/container` id of a CronJob run's container, or null when the pod is unknown. */
   runRoute(ex: CronJobExecution): string[] | null {
@@ -141,6 +144,8 @@ export class WorkloadDetailComponent {
   captureOn      = signal<boolean | null>(null);
   // CronJob runs
   executions     = signal<CronJobExecution[]>([]);
+  /** Live schedule of a CronJob (null when unavailable). */
+  cronSpec       = signal<CronJobSpec | null>(null);
 
   private mainSub?: Subscription;
   private resSub?: Subscription;
@@ -159,6 +164,14 @@ export class WorkloadDetailComponent {
 
   /** Container name used to link a CronJob run to its container detail page. */
   runContainer = computed(() => this.workload()?.containers?.[0] ?? '');
+
+  /** Run history of a CronJob / Job (last 20 runs) for the summary tiles. */
+  jobRow = computed(() => buildJobRow({
+    workload: this.workload()!,
+    executions: this.isCronJob() ? this.executions() : [],
+    instances: this.isJob() ? this.detail()?.instances ?? [] : [],
+  }));
+  scheduleHint = computed(() => describeSchedule(this.cronSpec()?.schedule ?? ''));
 
   /** "8 of 10 succeeded, avg 6.2s" over the loaded runs. */
   runSummary = computed(() => {
@@ -293,6 +306,7 @@ export class WorkloadDetailComponent {
     this.deployment.set(null);
     this.scaleValue.set(null);
     this.executions.set([]);
+    this.cronSpec.set(null);
     this.pageCtx.detailLabel.set(null);
   }
 
@@ -397,8 +411,13 @@ export class WorkloadDetailComponent {
         if (replicas !== undefined && (!silent || this.scaleValue() === null)) this.scaleValue.set(replicas);
       });
     } else if (w.kind === 'CronJob') {
-      this.kindSub = this.svc.getCronJobExecutions(w.namespace, w.name, 50, w.source_name)
-        .subscribe(list => this.executions.set(list ?? []));
+      this.kindSub = forkJoin({
+        runs:  this.svc.getCronJobExecutions(w.namespace, w.name, 50, w.source_name),
+        specs: this.svc.getCronJobSpecs(w.source_name),
+      }).subscribe(({ runs, specs }) => {
+        this.executions.set(runs ?? []);
+        this.cronSpec.set(specs.items.find(s => s.namespace === w.namespace && s.name === w.name) ?? null);
+      });
     }
   }
 

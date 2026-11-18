@@ -138,7 +138,70 @@
     }
 
     <!-- Summary strip -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-px bg-kymo-rule border border-kymo-rule">
+    <div class="grid grid-cols-2 gap-px bg-kymo-rule border border-kymo-rule" [class]="isJobKind() ? 'md:grid-cols-5' : 'md:grid-cols-4'">
+      @if (isJobKind()) {
+        @let jr = jobRow();
+        <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+          <div class="k-label">Last run</div>
+          @if (jr.last; as l) {
+            <div class="mt-1.5 text-2xl font-medium tabular-nums truncate" [class]="l.state === 'failed' ? 'text-kymo-danger' : l.state === 'running' ? 'text-kymo-amber' : 'text-kymo-ink'">
+              {{ l.state === 'running' ? 'running' : (l.at | timeago) }}
+            </div>
+            <div class="mt-1 text-[11px] tabular-nums flex items-center gap-1.5 min-w-0" [class]="l.state === 'failed' ? 'text-kymo-danger' : 'text-kymo-muted'">
+              <span class="k-led" [class]="l.state === 'ok' ? 'bg-kymo-running' : l.state === 'failed' ? 'bg-kymo-danger' : 'bg-kymo-amber'" aria-hidden="true"></span>
+              <span class="truncate">
+                {{ l.state === 'ok' ? 'succeeded' : l.state === 'failed' ? 'failed' : 'in progress' }}@if (l.durationSeconds != null) { · {{ formatDuration(l.durationSeconds) }}}@if (l.state === 'failed' && l.exitCode != null) { · exit {{ l.exitCode }}}
+              </span>
+            </div>
+          } @else {
+            <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+            <div class="mt-1 text-[11px] text-kymo-muted">no runs recorded</div>
+          }
+        </div>
+
+        <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+          <div class="k-label">Success rate</div>
+          @if (jr.rate !== null) {
+            <div class="mt-1.5 text-2xl font-medium tabular-nums" [class]="jr.rate < 0.5 ? 'text-kymo-danger' : jr.rate < 0.9 ? 'text-kymo-amber' : 'text-kymo-ink'">{{ (jr.rate * 100).toFixed(0) }}<span class="text-sm text-kymo-faint">%</span></div>
+            <div class="mt-1 text-[11px] text-kymo-muted tabular-nums">{{ jr.ok }}/{{ jr.finished }} of the last {{ jr.cells.length }} runs</div>
+          } @else {
+            <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+            <div class="mt-1 text-[11px] text-kymo-muted">no finished runs</div>
+          }
+        </div>
+
+        <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+          <div class="k-label">Avg duration</div>
+          <div class="mt-1.5 text-2xl font-medium tabular-nums" [class]="jr.avgDuration !== null ? 'text-kymo-ink' : 'text-kymo-faint'">{{ formatDuration(jr.avgDuration) }}</div>
+          <div class="mt-1 text-[11px] text-kymo-muted">{{ jr.avgDuration !== null ? 'over the last ' + jr.finished + ' finished runs' : 'no duration recorded' }}</div>
+        </div>
+
+        <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
+          @if (isCronJob()) {
+            <div class="k-label flex items-center gap-2">Next run
+              @if (cronSpec()?.suspend) { <span class="normal-case tracking-normal text-[10px] text-kymo-amber border border-kymo-amber/40 px-1 py-0.5">suspended</span> }
+            </div>
+            @let nxt = cronSpec()?.suspend ? null : (cronSpec()?.next_run ?? null);
+            <div class="mt-1.5 text-2xl font-medium tabular-nums truncate" [class]="nxt ? 'text-kymo-ink' : 'text-kymo-faint'" [title]="nxt ?? ''">{{ until(nxt) }}</div>
+            <div class="mt-1 text-[11px] text-kymo-muted truncate" [title]="cronSpec()?.timezone ?? ''">
+              @if (cronSpec(); as cs) {
+                <code>{{ cs.schedule }}</code>@if (scheduleHint()) { · {{ scheduleHint() }} }
+              } @else {
+                schedule unavailable
+              }
+            </div>
+          } @else {
+            <div class="k-label">Completed</div>
+            @if (jr.lastFinished; as lf) {
+              <div class="mt-1.5 text-2xl font-medium tabular-nums text-kymo-ink" [title]="lf.at ?? ''">{{ lf.at | timeago }}</div>
+              <div class="mt-1 text-[11px] text-kymo-muted">{{ lf.state === 'ok' ? 'succeeded' : 'failed' }}</div>
+            } @else {
+              <div class="mt-1.5 text-2xl font-medium text-kymo-faint">—</div>
+              <div class="mt-1 text-[11px] text-kymo-muted">{{ jr.last ? 'still running' : 'not completed' }}</div>
+            }
+          }
+        </div>
+      } @else {
       <div class="bg-kymo-panel px-4 py-3.5 min-w-0">
         <div class="k-label">{{ instanceLabel() }}s ready</div>
         <div class="mt-1.5 text-2xl font-medium text-kymo-ink tabular-nums">{{ readyCount() }}<span class="text-sm text-kymo-faint"> / {{ desiredCount() }}</span></div>
@@ -171,8 +234,9 @@
           <div class="mt-1 text-[11px] text-kymo-muted">not scored yet</div>
         }
       </div>
+      }
 
-      <div class="bg-kymo-panel px-4 py-3.5 min-w-0 relative">
+      <div class="bg-kymo-panel px-4 py-3.5 min-w-0 relative" [class]="isJobKind() ? 'col-span-2 md:col-span-1' : ''">
         <div class="k-label">Stability</div>
         @if (score(); as s) {
           <div class="mt-1.5 text-2xl font-medium tabular-nums" [class]="s.score < 90 ? (s.score | scoreClass) : 'text-kymo-ink'">{{ s.score | number:'1.0-0' }}<span class="text-sm text-kymo-faint"> / 100</span></div>

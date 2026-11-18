@@ -160,6 +160,7 @@ A ClusterRole + ClusterRoleBinding (`rbac.create`) grants cluster-wide:
 | core | namespaces | get, list, watch | UI namespace picker, connection test |
 | apps | replicasets, deployments | get, list, watch | resolve ReplicaSet -> Deployment owner, deployment picker |
 | batch | jobs | get, list, watch | resolve Job -> CronJob owner |
+| batch | cronjobs | get, list | CronJob schedule, suspend state and next run on the Jobs page (optional) |
 | metrics.k8s.io | pods | get, list | CPU/memory samples (optional) |
 | core | pods | delete | only with `rbac.management.enabled` |
 | apps | deployments | update, patch | only with `rbac.management.enabled` |

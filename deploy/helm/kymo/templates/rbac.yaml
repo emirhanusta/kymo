@@ -32,6 +32,12 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["get", "list", "watch"]
+  # CronJob schedule / suspend / next run on the Jobs page: read on demand via
+  # GET /api/v1/cronjobs/specs (internal/service/cronjob_specs.go, cached 60s).
+  # Without it the Jobs page still works, just without schedule information.
+  - apiGroups: ["batch"]
+    resources: ["cronjobs"]
+    verbs: ["get", "list"]
   # CPU/memory sampling from metrics-server (GET /apis/metrics.k8s.io/v1beta1/
   # namespaces/<ns>/pods/<pod>). Optional: without metrics-server KYMO simply
   # records no resource samples.

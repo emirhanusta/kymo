@@ -5,7 +5,7 @@ import { catchError, map, switchMap } from 'rxjs/operators';
 import { ContainerService } from './container.service';
 import { RefreshService } from './refresh.service';
 import { SourceStateService } from './source-state.service';
-import { WorkloadSummary } from '../models/container.model';
+import { CronJobSpec, WorkloadSummary } from '../models/container.model';
 import { JobInfo, JobRow, buildJobRow } from '../../shared/utils/jobs';
 
 const RUN_LIMIT = 20;
@@ -23,6 +23,10 @@ export class WorkloadStateService {
 
   readonly workloads = signal<WorkloadSummary[]>([]);
   readonly jobInfos  = signal<JobInfo[]>([]);
+  /** Live CronJob schedules (empty when RBAC lacks cronjobs or a cluster is unreachable). */
+  readonly cronSpecs = signal<CronJobSpec[]>([]);
+  /** Clusters whose CronJob schedules could not be read: name → message. */
+  readonly cronSpecErrors = signal<Record<string, string>>({});
   readonly loaded = signal(false);
   readonly error  = signal(false);
 
@@ -51,6 +55,7 @@ export class WorkloadStateService {
     this.sub?.unsubscribe();
     this.sub = forkJoin({
       workloads: this.svc.getWorkloads({ system: true }),
+      specs: this.svc.getCronJobSpecs(),
     }).pipe(
       switchMap(base => {
         const ws = (base.workloads ?? []).map(w => ({ ...w, images: w.images ?? [], containers: w.containers ?? [] }));
@@ -73,6 +78,8 @@ export class WorkloadStateService {
           // Jobs we did not fetch pods for (system) still appear, without run data.
           ...ws.filter(w => w.kind === 'Job' && w.is_system).map(w => ({ workload: w, executions: [], instances: [] })),
         ];
+        this.cronSpecs.set(base.specs.items);
+        this.cronSpecErrors.set(base.specs.errors);
         this.workloads.set(ws);
         this.jobInfos.set(infos);
         this.error.set(false);

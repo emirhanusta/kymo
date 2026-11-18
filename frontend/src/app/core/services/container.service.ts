@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { Observable, of, forkJoin } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
-import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, ActionResult, SourceStatus, CronJobExecution, PodDetail, DeploymentDetail, RecentEventsQuery, WorkloadSummary, WorkloadDetail, WorkloadQuery, WorkloadEventsQuery, WorkloadScore, CrashLog, Revision, K8sEvent, K8sEventsQuery, K8sReasonCount, WorkloadK8sEventsQuery } from '../models/container.model';
+import { Container, ContainerQuery, Page, ResourceSample, StabilityScore, LifecycleEvent, ActionResult, SourceStatus, CronJobExecution, CronJobSpecsResponse, PodDetail, DeploymentDetail, RecentEventsQuery, WorkloadSummary, WorkloadDetail, WorkloadQuery, WorkloadEventsQuery, WorkloadScore, CrashLog, Revision, K8sEvent, K8sEventsQuery, K8sReasonCount, WorkloadK8sEventsQuery } from '../models/container.model';
 
 export const API_BASE = '/api/v1';
 
@@ -226,6 +226,16 @@ export class ContainerService {
       { params }
     ).pipe(
       catchError(() => of([]))
+    );
+  }
+
+  /** Schedules / next runs of CronJobs (connected clusters, or one with `sourceName`). Never errors. */
+  getCronJobSpecs(sourceName?: string): Observable<CronJobSpecsResponse> {
+    let params = new HttpParams();
+    if (sourceName) params = params.set('source', sourceName);
+    return this.http.get<CronJobSpecsResponse>(`${this.base}/cronjobs/specs`, { params }).pipe(
+      map(r => ({ items: r?.items ?? [], errors: r?.errors ?? {} })),
+      catchError(() => of({ items: [], errors: {} } as CronJobSpecsResponse)),
     );
   }
 
