@@ -66,7 +66,7 @@ interface OccState {
           @for (w of windows; track w) {
             <button type="button"
               class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule last:border-r-0"
-              [class]="window() === w ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+              [class]="window() === w ? 'bg-kymo-amber text-kymo-on-accent font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
               [attr.aria-pressed]="window() === w" (click)="setWindow(w)">{{ w }}</button>
           }
         </div>
@@ -106,7 +106,7 @@ interface OccState {
                       <span class="inline-flex items-center h-5 px-1.5 text-[10px] uppercase tracking-[0.06em] border flex-none"
                             [class]="s.level === 'fatal' ? 'border-kymo-danger/60 text-kymo-danger' : 'border-kymo-amber/50 text-kymo-amber'">{{ s.level }}</span>
                       @if (s.is_new) {
-                        <span class="inline-flex items-center h-5 px-1.5 text-[10px] tracking-[0.06em] bg-kymo-amber text-kymo-deep font-medium flex-none">NEW</span>
+                        <span class="inline-flex items-center h-5 px-1.5 text-[10px] tracking-[0.06em] bg-kymo-amber text-kymo-on-accent font-medium flex-none">NEW</span>
                       }
                     </div>
                     <p class="text-xs text-kymo-ink mt-1.5 break-words"><app-error-template [template]="s.template" /></p>

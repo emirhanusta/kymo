@@ -24,6 +24,8 @@
 
   /* accent — amber phosphor */
   --color-kymo-amber: #ffb000;
+  /* text on top of amber / status-colored fills (stays dark in the dark theme) */
+  --color-kymo-on-accent: #111315;
 
   /* status (score uses running / amber / danger) */
   --color-kymo-running: #9bd27a;
@@ -43,6 +45,42 @@
   --radius-xl: 2px;
   --radius-2xl: 2px;
   --radius-3xl: 2px;
+}
+
+/* Non-color theme vars (not Tailwind tokens). */
+:root {
+  --kymo-shadow: rgba(0, 0, 0, 0.35);
+}
+
+/*
+ * Light theme — the same instrument printed on warm paper.
+ * Unlayered, and declared after @theme's :root block, so it wins over the defaults
+ * (same specificity, later source order, plus the attribute selector).
+ * Text-bearing colors are darkened to meet WCAG AA on the paper surfaces.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --kymo-shadow: rgba(60, 45, 20, 0.14);
+
+  --color-kymo-bg: #f1ecdf;
+  --color-kymo-deep: #f8f4ea;
+  --color-kymo-panel: #fdfaf3;
+  --color-kymo-raised: #ebe5d6;
+  --color-kymo-rule: #d3ccb9;
+  --color-kymo-grid: #ece6d7;
+
+  --color-kymo-ink: #2a2620;
+  --color-kymo-muted: #5a5346;
+  --color-kymo-faint: #6a6354;
+
+  --color-kymo-amber: #8f5800;
+  --color-kymo-on-accent: #fffaf0;
+
+  --color-kymo-running: #2d6a1b;
+  --color-kymo-danger: #b0301a;
+  --color-kymo-stopped: #6a6150;
+  --color-kymo-paused: #1d6190;
+  --color-kymo-unknown: #6a6354;
 }
 
 @layer base {
@@ -69,7 +107,7 @@
 
   ::selection {
     background: var(--color-kymo-amber);
-    color: var(--color-kymo-deep);
+    color: var(--color-kymo-on-accent);
   }
 
   :focus-visible {
@@ -161,7 +199,7 @@
   .k-btn-primary:not(:disabled):hover {
     border-color: var(--color-kymo-amber);
     background: var(--color-kymo-amber);
-    color: var(--color-kymo-deep);
+    color: var(--color-kymo-on-accent);
   }
   .k-btn-danger {
     border-color: var(--color-kymo-danger);
@@ -170,7 +208,7 @@
   .k-btn-danger:not(:disabled):hover {
     border-color: var(--color-kymo-danger);
     background: var(--color-kymo-danger);
-    color: var(--color-kymo-deep);
+    color: var(--color-kymo-on-accent);
   }
   .k-btn-go {
     border-color: color-mix(in srgb, var(--color-kymo-running) 60%, transparent);
@@ -179,7 +217,7 @@
   .k-btn-go:not(:disabled):hover {
     border-color: var(--color-kymo-running);
     background: var(--color-kymo-running);
-    color: var(--color-kymo-deep);
+    color: var(--color-kymo-on-accent);
   }
 
   /* Text inputs / selects */

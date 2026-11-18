@@ -29,7 +29,7 @@ import { RoleChipComponent } from '../../shared/components/role-chip/role-chip.c
     } @else if (auth.user(); as u) {
       <div class="relative">
         <button type="button" class="k-btn gap-2 px-2" (click)="open.update(v => !v)" aria-haspopup="menu" [attr.aria-expanded]="open()" aria-label="User menu">
-          <span class="w-5 h-5 inline-flex items-center justify-center text-[10px] font-semibold bg-kymo-amber text-kymo-deep" aria-hidden="true">{{ initials() }}</span>
+          <span class="w-5 h-5 inline-flex items-center justify-center text-[10px] font-semibold bg-kymo-amber text-kymo-on-accent" aria-hidden="true">{{ initials() }}</span>
           <span class="hidden xl:inline max-w-[120px] truncate">{{ u.username }}</span>
           <span class="hidden xl:inline-flex"><app-role-chip [role]="u.role" /></span>
         </button>

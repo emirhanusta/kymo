@@ -8,6 +8,7 @@ import {
 } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { ResourceSample } from '../../../core/models/container.model';
+import { ThemeService } from '../../../core/services/theme.service';
 import { formatBytes, formatRate } from '../../utils/format';
 
 Chart.register(LineController, LineElement, PointElement, LinearScale, TimeScale, Filler, Tooltip, Legend);
@@ -15,20 +16,18 @@ Chart.register(LineController, LineElement, PointElement, LinearScale, TimeScale
 type Point = { x: number; y: number };
 type TimeUnit = 'minute' | 'hour' | 'day';
 
-/** Mirrors the --color-kymo-* tokens in styles.css (canvas can't read Tailwind classes). */
-const C = {
-  grid:    '#24282C',
-  rule:    '#2C3034',
-  panel:   '#1D2023',
-  ink:     '#F2E8D5',
-  muted:   '#8A8577',
-  amber:   '#FFB000',
-  green:   '#9BD27A',
-  blue:    '#7FB7D9',
-} as const;
+type Palette = Record<'grid' | 'rule' | 'panel' | 'ink' | 'muted' | 'amber' | 'green' | 'blue', string>;
+
+/** Reads the --color-kymo-* tokens (canvas can't use CSS vars); call again after a theme change. */
+function readPalette(): Palette {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (n: string) => cs.getPropertyValue(`--color-kymo-${n}`).trim();
+  return {
+    grid: v('grid'), rule: v('rule'), panel: v('panel'), ink: v('ink'), muted: v('muted'),
+    amber: v('amber'), green: v('running'), blue: v('paused'),
+  };
+}
 const FONT_FAMILY = '"IBM Plex Mono", ui-monospace, monospace';
-const GRID_COLOR = C.grid;
-const TICK_COLOR = C.muted;
 const TICK_FONT  = { size: 10, family: FONT_FAMILY };
 const HOUR = 3_600_000;
 
@@ -83,7 +82,7 @@ function dataset(label: string, data: Point[], color: string, fill = true) {
 }
 
 function options(
-  unit: TimeUnit, min: number | undefined, max: number | undefined,
+  C: Palette, unit: TimeUnit, min: number | undefined, max: number | undefined,
   yTick: (v: number) => string, yValue: (v: number) => string, legend = false,
 ): ChartOptions<'line'> {
   return {
@@ -100,17 +99,17 @@ function options(
           tooltipFormat: 'MMM d, HH:mm:ss',
           displayFormats: { minute: 'HH:mm', hour: 'HH:mm', day: 'MMM d' },
         },
-        grid: { color: GRID_COLOR, tickColor: GRID_COLOR },
+        grid: { color: C.grid, tickColor: C.grid },
         border: { color: C.rule },
-        ticks: { color: TICK_COLOR, font: TICK_FONT, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
+        ticks: { color: C.muted, font: TICK_FONT, maxRotation: 0, autoSkip: true, maxTicksLimit: 8 },
       },
       y: {
         // No hard max: multi-core containers legitimately exceed 100% CPU.
         beginAtZero: true,
         grace: '10%',
-        grid: { color: GRID_COLOR, tickColor: GRID_COLOR },
+        grid: { color: C.grid, tickColor: C.grid },
         border: { color: C.rule },
-        ticks: { color: TICK_COLOR, font: TICK_FONT, maxTicksLimit: 6, callback: v => yTick(+v) },
+        ticks: { color: C.muted, font: TICK_FONT, maxTicksLimit: 6, callback: v => yTick(+v) },
       },
     },
     plugins: {
@@ -153,6 +152,7 @@ export class ResourceChartsComponent {
   /** Hide the network panel entirely (e.g. aggregated series without network counters). */
   hideNetwork = input(false);
 
+  private theme = inject(ThemeService);
   private cpuCanvas = viewChild<ElementRef<HTMLCanvasElement>>('cpuCanvas');
   private memCanvas = viewChild<ElementRef<HTMLCanvasElement>>('memCanvas');
   private netCanvas = viewChild<ElementRef<HTMLCanvasElement>>('netCanvas');
@@ -178,6 +178,7 @@ export class ResourceChartsComponent {
 
   constructor() {
     effect(() => {
+      this.theme.theme(); // re-render with fresh palette on theme change
       const s = this.sorted();
       const rx = this.rx();
       const tx = this.tx();
@@ -194,15 +195,16 @@ export class ResourceChartsComponent {
       const unit = unitFor(from !== undefined && to !== undefined ? to - from : HOUR);
 
       untracked(() => {
+        const C = readPalette();
         this.render('cpu', canvases.cpu,
           [dataset('CPU', s.map(r => ({ x: ts(r), y: r.cpu_percent })), C.amber)],
-          options(unit, from, to, v => cpuTick(+v), v => `${v.toFixed(2)}%`));
+          options(C, unit, from, to, v => cpuTick(+v), v => `${v.toFixed(2)}%`));
         this.render('mem', canvases.mem,
           [dataset('Memory', s.map(r => ({ x: ts(r), y: r.mem_bytes })), C.green)],
-          options(unit, from, to, v => formatBytes(v, 0), v => formatBytes(v, 1)));
+          options(C, unit, from, to, v => formatBytes(v, 0), v => formatBytes(v, 1)));
         this.render('net', canvases.net,
           [dataset('RX', rx, C.blue, false), dataset('TX', tx, C.green, false)],
-          options(unit, from, to, v => formatRate(v), v => formatRate(v), true));
+          options(C, unit, from, to, v => formatRate(v), v => formatRate(v), true));
       });
     });
 

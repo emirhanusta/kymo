@@ -24,7 +24,7 @@
           @for (t of channelTypes; track t.type) {
             <button type="button"
               class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule last:border-r-0 disabled:cursor-not-allowed"
-              [class]="type() === t.type ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised disabled:opacity-40'"
+              [class]="type() === t.type ? 'bg-kymo-amber text-kymo-on-accent font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised disabled:opacity-40'"
               [attr.aria-pressed]="type() === t.type" [disabled]="isEdit()"
               [attr.data-autofocus]="!isEdit() && type() === t.type ? '' : null"
               (click)="type.set(t.type)">{{ t.label }}</button>

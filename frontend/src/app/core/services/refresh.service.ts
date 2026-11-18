@@ -33,7 +33,16 @@ export class RefreshService {
       }, AUTO_REFRESH_MS);
       onCleanup(() => clearInterval(id));
     });
-    inject(DestroyRef).onDestroy(() => this.subject.complete());
+    // Keep every open tab on the same Live/Paused state.
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== AUTO_KEY || e.newValue == null) return;
+      try { this.autoRefresh.set(JSON.parse(e.newValue) === true); } catch { /* ignore */ }
+    };
+    if (typeof window !== 'undefined') window.addEventListener('storage', onStorage);
+    inject(DestroyRef).onDestroy(() => {
+      if (typeof window !== 'undefined') window.removeEventListener('storage', onStorage);
+      this.subject.complete();
+    });
   }
 
   trigger(): void { this.subject.next('manual'); }
