@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 
 import { AuthService } from '../../../core/services/auth.service';
 import { ToastService } from '../../../core/services/toast.service';
-import { ApiToken, ROLES, Role } from '../../../core/models/auth.model';
+import { ApiToken } from '../../../core/models/auth.model';
 import { PageHeaderComponent } from '../../../shared/components/page-header/page-header.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
 import { SkeletonComponent } from '../../../shared/components/skeleton/skeleton.component';
@@ -12,80 +12,71 @@ import { ConfirmDialogComponent } from '../../../shared/components/confirm-dialo
 import { CopyDialogComponent } from '../../../shared/components/copy-dialog/copy-dialog.component';
 import { RoleChipComponent } from '../../../shared/components/role-chip/role-chip.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
-import { SettingsNavComponent } from '../settings-nav.component';
+import { CreateTokenDialogComponent } from './create-token-dialog.component';
 
 @Component({
   selector: 'app-tokens',
   standalone: true,
   imports: [
     FormsModule, TimeagoPipe, PageHeaderComponent, ErrorStateComponent, SkeletonComponent, EmptyStateComponent,
-    ConfirmDialogComponent, CopyDialogComponent, RoleChipComponent, SettingsNavComponent,
+    ConfirmDialogComponent, CopyDialogComponent, RoleChipComponent, CreateTokenDialogComponent,
   ],
   template: `
 <div class="space-y-4">
-  <app-settings-nav />
   <app-page-header title="API tokens">
-    <ng-container subtitle>Bearer tokens for scripts and CI: <span class="font-mono">Authorization: Bearer kymo_…</span></ng-container>
+    <ng-container subtitle>
+      @if (!loaded()) { Loading… }
+      @else { Bearer tokens for scripts and CI{{ tokens().length ? ' · ' + activeCount() + ' active' : '' }} }
+    </ng-container>
     @if (isAdmin()) {
       <label class="inline-flex items-center gap-2 text-xs text-kymo-muted cursor-pointer">
         <input type="checkbox" [ngModel]="all()" (ngModelChange)="setAll($event)" /> All users
       </label>
     }
+    <button type="button" class="k-btn k-btn-primary" (click)="creating.set(true)">
+      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M12 5v14M5 12h14" /></svg>
+      Create token
+    </button>
   </app-page-header>
-
-  <form class="k-panel p-4 flex items-end gap-3 flex-wrap" (ngSubmit)="create()" aria-label="Create API token">
-    <label class="flex flex-col gap-1">
-      <span class="k-label">Name</span>
-      <input class="k-input w-56" name="name" required autocomplete="off" placeholder="e.g. ci-deploy" [ngModel]="name()" (ngModelChange)="name.set($event)" />
-    </label>
-    <label class="flex flex-col gap-1">
-      <span class="k-label">Role</span>
-      <select class="k-input" name="role" [ngModel]="role()" (ngModelChange)="role.set($event)">
-        @for (r of roles(); track r) { <option [value]="r">{{ r }}</option> }
-      </select>
-    </label>
-    <label class="flex flex-col gap-1">
-      <span class="k-label">Expires</span>
-      <select class="k-input" name="exp" [ngModel]="expiry()" (ngModelChange)="expiry.set($event)">
-        <option value="30">in 30 days</option><option value="90">in 90 days</option>
-        <option value="365">in 365 days</option><option value="never">never</option>
-      </select>
-    </label>
-    <button type="submit" class="k-btn k-btn-primary" [disabled]="!name().trim() || creating()">{{ creating() ? 'Creating…' : 'Create token' }}</button>
-  </form>
 
   @if (error()) { <app-error-state message="Failed to load tokens" (retry)="load()" /> }
 
   @if (!loaded()) {
     <app-skeleton [rows]="3" />
   } @else if (tokens().length === 0 && !error()) {
-    <div class="k-panel"><app-empty-state icon="events" [compact]="true" message="No API tokens" hint="Create a token above to call the KYMO API from scripts." /></div>
+    <div class="k-panel">
+      <app-empty-state icon="events" message="No API tokens" hint="Create a token to call the KYMO API from scripts and CI.">
+        <button type="button" class="k-btn k-btn-primary k-btn-sm mt-4" (click)="creating.set(true)">Create token</button>
+      </app-empty-state>
+    </div>
   } @else if (tokens().length) {
     <div class="k-panel overflow-x-auto scrollbar-thin">
       <table class="k-table">
         <thead>
           <tr>
-            <th>Name</th><th>Prefix</th><th>Role</th>
+            <th>Name</th><th class="hidden sm:table-cell">Prefix</th><th>Role</th>
             @if (all()) { <th>Owner</th> }
             <th class="hidden md:table-cell">Created</th><th class="hidden md:table-cell">Expires</th>
-            <th class="hidden lg:table-cell">Last used</th><th>Status</th><th><span class="sr-only">Actions</span></th>
+            <th class="hidden lg:table-cell">Last used</th><th class="w-10"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           @for (t of tokens(); track t.id) {
             <tr [class.opacity-60]="!!t.revoked_at">
-              <td class="px-4 py-2.5 text-xs text-kymo-ink">{{ t.name }}</td>
-              <td class="px-4 py-2.5 text-xs font-mono text-kymo-muted">{{ t.prefix }}</td>
+              <td class="px-4 py-2.5 text-xs max-w-[16rem]">
+                <span class="inline-flex items-center gap-2 min-w-0 max-w-full">
+                  <span class="text-kymo-ink truncate" [class.line-through]="!!t.revoked_at" [title]="t.name">{{ t.name }}</span>
+                  @if (t.revoked_at) { <span class="inline-flex items-center h-4 px-1 text-[10px] border border-kymo-danger/50 text-kymo-danger flex-none" [title]="t.revoked_at">revoked</span> }
+                </span>
+              </td>
+              <td class="px-4 py-2.5 text-xs font-mono text-kymo-muted hidden sm:table-cell whitespace-nowrap">{{ t.prefix }}…</td>
               <td class="px-4 py-2.5"><app-role-chip [role]="t.role" /></td>
               @if (all()) { <td class="px-4 py-2.5 text-xs text-kymo-muted">{{ t.user_username || t.user_email || '—' }}</td> }
-              <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell">{{ t.created_at | timeago }}</td>
-              <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell">{{ t.expires_at ? (t.expires_at | timeago) : 'never' }}</td>
+              <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell" [title]="t.created_at">{{ t.created_at | timeago }}</td>
+              <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden md:table-cell" [title]="t.expires_at || ''">{{ t.expires_at ? (t.expires_at | timeago) : 'never' }}</td>
               <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden lg:table-cell">{{ t.last_used_at ? (t.last_used_at | timeago) : 'never' }}</td>
-              <td class="px-4 py-2.5 text-xs" [class]="t.revoked_at ? 'text-kymo-danger' : 'text-kymo-running'">{{ t.revoked_at ? 'revoked' : 'active' }}</td>
-              <td class="px-4 py-2.5">
-                <div class="flex justify-end">
-                  @if (!t.revoked_at) { <button type="button" class="k-btn k-btn-sm" (click)="revokeTarget.set(t)">Revoke</button> }
-                </div>
+              <td class="px-2 py-1.5 text-right">
+                @if (!t.revoked_at) { <button type="button" class="k-btn k-btn-sm" (click)="revokeTarget.set(t)" [attr.aria-label]="'Revoke ' + t.name">Revoke</button> }
               </td>
             </tr>
           }
@@ -95,6 +86,9 @@ import { SettingsNavComponent } from '../settings-nav.component';
   }
 </div>
 
+@if (creating()) {
+  <app-create-token-dialog (closed)="creating.set(false)" (created)="onCreated($event)" />
+}
 @if (secret(); as s) {
   <app-copy-dialog title="Token created" message="Use this as a Bearer token in the Authorization header." [value]="s"
     warning="Copy it now. This secret is shown only once and cannot be retrieved later." (closed)="secret.set(null)" />
@@ -115,18 +109,11 @@ export class TokensComponent {
   loaded = signal(false);
   error = signal(false);
   all = signal(false);
-  name = signal('');
-  role = signal<Role>('viewer');
-  expiry = signal('90');
   creating = signal(false);
   secret = signal<string | null>(null);
   revokeTarget = signal<ApiToken | null>(null);
 
-  /** Roles up to the user's own. */
-  roles = computed(() => {
-    const me = this.auth.role();
-    return me ? ROLES.slice(0, ROLES.indexOf(me) + 1) : [];
-  });
+  activeCount = computed(() => this.tokens().filter(t => !t.revoked_at).length);
 
   constructor() { this.load(); }
 
@@ -139,15 +126,10 @@ export class TokensComponent {
     });
   }
 
-  create(): void {
-    const name = this.name().trim();
-    if (!name || this.creating()) return;
-    this.creating.set(true);
-    const days = this.expiry() === 'never' ? null : +this.expiry();
-    this.auth.createToken(name, this.role(), days).subscribe({
-      next: r => { this.creating.set(false); this.name.set(''); this.secret.set(r.secret); this.load(); },
-      error: err => { this.creating.set(false); this.toast.apiError(err, 'Could not create token'); },
-    });
+  onCreated(secret: string): void {
+    this.creating.set(false);
+    this.secret.set(secret);
+    this.load();
   }
 
   confirmRevoke(): void {

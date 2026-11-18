@@ -13,7 +13,7 @@ import { CopyDialogComponent } from '../../../shared/components/copy-dialog/copy
 import { RoleChipComponent } from '../../../shared/components/role-chip/role-chip.component';
 import { TimeagoPipe } from '../../../shared/pipes/timeago.pipe';
 import { AddUserDialogComponent } from './add-user-dialog.component';
-import { SettingsNavComponent } from '../settings-nav.component';
+import { ActionsMenuComponent } from '../actions-menu.component';
 
 interface LinkShown { title: string; message: string; value: string; expires: string; warning: string; note: string; }
 const LINK_WARNING = 'Anyone with this link can use it. It is shown only once.';
@@ -23,14 +23,19 @@ const LINK_WARNING = 'Anyone with this link can use it. It is shown only once.';
   standalone: true,
   imports: [
     FormsModule, TimeagoPipe, PageHeaderComponent, ErrorStateComponent, SkeletonComponent,
-    ConfirmDialogComponent, CopyDialogComponent, AddUserDialogComponent, RoleChipComponent, SettingsNavComponent,
+    ConfirmDialogComponent, CopyDialogComponent, AddUserDialogComponent, RoleChipComponent, ActionsMenuComponent,
   ],
   template: `
 <div class="space-y-4">
-  <app-settings-nav />
   <app-page-header title="Users">
-    <ng-container subtitle>{{ loaded() ? users().length + ' user' + (users().length === 1 ? '' : 's') : 'Loading…' }}</ng-container>
-    <button type="button" class="k-btn k-btn-primary" (click)="adding.set(true)">Add user</button>
+    <ng-container subtitle>
+      @if (!loaded()) { Loading… }
+      @else { Who can sign in and what they can do · {{ users().length }} user{{ users().length === 1 ? '' : 's' }} }
+    </ng-container>
+    <button type="button" class="k-btn k-btn-primary" (click)="adding.set(true)">
+      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M12 5v14M5 12h14" /></svg>
+      Add user
+    </button>
   </app-page-header>
 
   @if (error()) { <app-error-state message="Failed to load users" (retry)="load()" /> }
@@ -42,53 +47,57 @@ const LINK_WARNING = 'Anyone with this link can use it. It is shown only once.';
       <table class="k-table">
         <thead>
           <tr>
-            <th>Username</th><th>Name</th><th>Email</th><th>Role</th><th>Status</th>
-            <th class="hidden md:table-cell">Login</th><th class="hidden lg:table-cell">Last login</th>
-            <th><span class="sr-only">Actions</span></th>
+            <th>User</th><th class="hidden md:table-cell">Email</th><th>Role</th>
+            <th class="hidden lg:table-cell">Login</th><th class="hidden lg:table-cell">Last login</th>
+            <th class="w-10"><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
         <tbody>
           @for (u of users(); track u.id) {
             <tr [class.opacity-60]="busyId() === u.id || u.status === 'disabled'">
-              <td class="px-4 py-2.5 text-xs text-kymo-ink">{{ u.username }}@if (u.id === me()?.id) { <span class="text-kymo-faint"> (you)</span> }@if (u.must_change_password) { <span class="text-kymo-faint ml-1.5" title="Must change the password at next sign-in">temp password</span> }</td>
-              <td class="px-4 py-2.5 text-xs text-kymo-muted">{{ u.name || '—' }}</td>
-              <td class="px-4 py-2.5 text-xs text-kymo-muted">
+              <td class="px-4 py-2.5 text-xs max-w-[18rem]">
+                <div class="flex items-center gap-2 min-w-0">
+                  <span class="k-led" [class]="u.status === 'active' ? 'bg-kymo-running' : 'bg-kymo-unknown'" [title]="u.status" aria-hidden="true"></span>
+                  <span class="text-kymo-ink truncate" [title]="u.name ? u.username + ' · ' + u.name : u.username">{{ u.username }}</span>
+                  @if (u.name) { <span class="text-kymo-muted truncate hidden sm:inline">{{ u.name }}</span> }
+                  @if (u.id === me()?.id) { <span class="text-kymo-faint flex-none">you</span> }
+                  @if (u.status === 'disabled') { <span class="inline-flex items-center h-4 px-1 text-[10px] border border-kymo-rule text-kymo-muted flex-none">disabled</span> }
+                  @if (u.must_change_password) { <span class="inline-flex items-center h-4 px-1 text-[10px] border border-kymo-amber/50 text-kymo-amber flex-none" title="Must change the password at next sign-in">temp password</span> }
+                </div>
                 @if (editEmailId() === u.id) {
-                  <form class="flex items-center gap-1" (ngSubmit)="saveEmail(u)" aria-label="Edit email">
-                    <input class="k-input !h-7 w-48" type="email" name="email" autocomplete="off" [attr.aria-label]="'Email of ' + u.username" [ngModel]="emailDraft()" (ngModelChange)="emailDraft.set($event)" />
+                  <form class="flex items-center gap-1 mt-1.5" (ngSubmit)="saveEmail(u)" aria-label="Edit email">
+                    <input class="k-input !h-7 w-44 min-w-0" type="email" name="email" autocomplete="off" data-autofocus [attr.aria-label]="'Email of ' + u.username" [ngModel]="emailDraft()" (ngModelChange)="emailDraft.set($event)" />
                     <button type="submit" class="k-btn k-btn-sm k-btn-primary" [disabled]="busyId() === u.id">Save</button>
                     <button type="button" class="k-btn k-btn-sm" (click)="editEmailId.set(null)">Cancel</button>
                   </form>
-                } @else {
-                  <span>{{ u.email || '—' }}</span>
-                  @if (manageable(u)) {
-                    <button type="button" class="k-btn k-btn-sm ml-2" [attr.aria-label]="'Edit email of ' + u.username" (click)="startEmail(u)">Edit</button>
-                  }
                 }
               </td>
-              <td class="px-4 py-2.5 text-xs">
-                @if (roleOptions(u).length) {
-                  <select class="k-input !h-7" [attr.aria-label]="'Role of ' + u.username" [ngModel]="u.role" (ngModelChange)="changeRole(u, $event)" [disabled]="busyId() === u.id">
-                    <option [value]="u.role" disabled>{{ u.role }}</option>
-                    @for (r of roleOptions(u); track r) { <option [value]="r">{{ r }}</option> }
-                  </select>
-                } @else { <app-role-chip [role]="u.role" /> }
+              <td class="px-4 py-2.5 text-xs text-kymo-muted hidden md:table-cell">
+                <span class="block truncate max-w-[16rem]" [title]="u.email">{{ u.email || '—' }}</span>
               </td>
-              <td class="px-4 py-2.5 text-xs" [class]="u.status === 'active' ? 'text-kymo-running' : 'text-kymo-muted'">{{ u.status }}</td>
-              <td class="px-4 py-2.5 text-xs text-kymo-muted hidden md:table-cell">{{ method(u) }}</td>
+              <td class="px-4 py-2.5"><app-role-chip [role]="u.role" /></td>
+              <td class="px-4 py-2.5 text-xs text-kymo-muted hidden lg:table-cell whitespace-nowrap">{{ method(u) }}</td>
               <td class="px-4 py-2.5 text-xs text-kymo-muted whitespace-nowrap hidden lg:table-cell">{{ u.last_login_at ? (u.last_login_at | timeago) : 'never' }}</td>
-              <td class="px-4 py-2.5">
-                <div class="flex justify-end gap-1.5 flex-wrap">
-                  @if (canResetLink(u)) {
-                    <button type="button" class="k-btn k-btn-sm" [disabled]="busyId() === u.id" (click)="resetLink(u)">Reset link</button>
-                  }
-                  @if (canToggle(u)) {
-                    <button type="button" class="k-btn k-btn-sm" [disabled]="busyId() === u.id" (click)="toggleStatus(u)">{{ u.status === 'active' ? 'Disable' : 'Enable' }}</button>
-                  }
-                  @if (canTransfer(u)) {
-                    <button type="button" class="k-btn k-btn-sm k-btn-danger" [disabled]="busyId() === u.id" (click)="transferTarget.set(u)">Make owner</button>
-                  }
-                </div>
+              <td class="px-2 py-1.5 text-right">
+                @if (hasActions(u)) {
+                  <app-actions-menu [label]="'Actions for ' + u.username" [disabled]="busyId() === u.id">
+                    @for (r of roleOptions(u); track r) {
+                      <button type="button" role="menuitem" [class]="menuItem" (click)="changeRole(u, r)">Change role to {{ r }}</button>
+                    }
+                    @if (manageable(u)) {
+                      <button type="button" role="menuitem" [class]="menuItem" (click)="startEmail(u)">Edit email</button>
+                    }
+                    @if (canResetLink(u)) {
+                      <button type="button" role="menuitem" [class]="menuItem" (click)="resetLink(u)">Reset password link</button>
+                    }
+                    @if (canToggle(u)) {
+                      <button type="button" role="menuitem" [class]="menuItem" (click)="toggleStatus(u)">{{ u.status === 'active' ? 'Disable' : 'Enable' }}</button>
+                    }
+                    @if (canTransfer(u)) {
+                      <button type="button" role="menuitem" [class]="menuItem + ' text-kymo-danger'" (click)="transferTarget.set(u)">Make owner…</button>
+                    }
+                  </app-actions-menu>
+                }
               </td>
             </tr>
           }
@@ -97,23 +106,18 @@ const LINK_WARNING = 'Anyone with this link can use it. It is shown only once.';
     </div>
 
     @if (invites().length) {
-      <section class="space-y-2" aria-labelledby="pending-title">
-        <h2 id="pending-title" class="k-label !text-kymo-ink">Pending setup links</h2>
-        <div class="k-panel overflow-x-auto scrollbar-thin">
-          <table class="k-table">
-            <thead><tr><th>Username</th><th>Role</th><th>Expires</th><th><span class="sr-only">Actions</span></th></tr></thead>
-            <tbody>
-              @for (i of invites(); track i.id) {
-                <tr>
-                  <td class="px-4 py-2.5 text-xs text-kymo-ink">{{ i.username }}@if (i.email) { <span class="text-kymo-muted"> ({{ i.email }})</span> }</td>
-                  <td class="px-4 py-2.5"><app-role-chip [role]="i.role" /></td>
-                  <td class="px-4 py-2.5 text-xs text-kymo-muted" [title]="i.expires_at">{{ i.expires_at | timeago }}</td>
-                  <td class="px-4 py-2.5"><div class="flex justify-end"><button type="button" class="k-btn k-btn-sm" (click)="revokeTarget.set(i)">Revoke</button></div></td>
-                </tr>
-              }
-            </tbody>
-          </table>
-        </div>
+      <section class="k-panel" aria-labelledby="pending-title">
+        <h2 id="pending-title" class="k-label !text-kymo-ink px-4 py-2 border-b border-kymo-rule">Pending setup links</h2>
+        <ul class="divide-y divide-kymo-rule">
+          @for (i of invites(); track i.id) {
+            <li class="flex items-center gap-3 px-4 py-1.5 text-xs min-w-0">
+              <span class="text-kymo-ink truncate" [title]="i.email">{{ i.username }}</span>
+              <app-role-chip [role]="i.role" />
+              <span class="text-kymo-muted ml-auto whitespace-nowrap" [title]="i.expires_at">expires {{ i.expires_at | timeago }}</span>
+              <button type="button" class="k-btn k-btn-sm flex-none" (click)="revokeTarget.set(i)" [attr.aria-label]="'Revoke setup link for ' + i.username">Revoke</button>
+            </li>
+          }
+        </ul>
       </section>
     }
   }
@@ -152,6 +156,7 @@ export class UsersComponent {
   editEmailId = signal<number | null>(null);
   emailDraft = signal('');
   label = userLabel;
+  readonly menuItem = 'w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised disabled:opacity-40 disabled:cursor-not-allowed';
   shown = signal<LinkShown | null>(null);
   transferTarget = signal<User | null>(null);
   revokeTarget = signal<Invite | null>(null);
@@ -181,6 +186,7 @@ export class UsersComponent {
   roleOptions(u: User): Role[] { return this.manageable(u) ? this.assignable().filter(r => r !== u.role) : []; }
   canToggle(u: User): boolean { return this.manageable(u); }
   canResetLink(u: User): boolean { return u.has_password && u.status === 'active' && (u.id === this.me()?.id || this.manageable(u)); }
+  hasActions(u: User): boolean { return this.manageable(u) || this.canResetLink(u) || this.canTransfer(u); }
   canTransfer(u: User): boolean { return this.isOwner() && u.role === 'admin' && u.status === 'active'; }
 
   private patch(u: User, body: { role?: Role; status?: 'active' | 'disabled'; email?: string }, ok: string): void {

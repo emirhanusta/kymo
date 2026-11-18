@@ -87,6 +87,8 @@ export const routes: Routes = [
       },
       {
         path: 'settings',
+        loadComponent: () =>
+          import('./features/settings/settings-layout.component').then(m => m.SettingsLayoutComponent),
         children: [
           { path: '', pathMatch: 'full', redirectTo: 'notifications' },
           {
