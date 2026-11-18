@@ -63,6 +63,11 @@ export class IssuesService {
     return this.http.get<Issue[] | null>(`${API_BASE}/issues`, { params }).pipe(orEmpty);
   }
 
+  /** One issue by id (deep links to the details drawer); null when it does not exist. */
+  get(id: number): Observable<Issue | null> {
+    return this.http.get<Issue>(`${API_BASE}/issues/${id}`).pipe(catchError(() => of(null)));
+  }
+
   forWorkload(workloadId: string, status: IssueStatus | 'all' = 'open'): Observable<Issue[]> {
     const params = new HttpParams().set('status', status);
     return this.http.get<Issue[] | null>(`${API_BASE}/workloads/${encodeURIComponent(workloadId)}/issues`, { params }).pipe(orEmpty);
