@@ -8,6 +8,7 @@ import { RefreshService } from '../../../core/services/refresh.service';
 import { ToastService } from '../../../core/services/toast.service';
 import { K8sEvent, LifecycleEvent, Revision } from '../../../core/models/container.model';
 import { CrashLogInlineComponent } from '../../../shared/components/crash-log-inline/crash-log-inline.component';
+import { ExitTagComponent } from '../../../shared/components/exit-tag/exit-tag.component';
 import { EmptyStateComponent } from '../../../shared/components/empty-state/empty-state.component';
 import { ErrorStateComponent } from '../../../shared/components/error-state/error-state.component';
 import {
@@ -32,7 +33,7 @@ const K8S_LIMIT = 500;
 @Component({
   selector: 'app-workload-timeline',
   standalone: true,
-  imports: [RouterLink, DatePipe, CrashLogInlineComponent, EmptyStateComponent, ErrorStateComponent],
+  imports: [RouterLink, DatePipe, ExitTagComponent, CrashLogInlineComponent, EmptyStateComponent, ErrorStateComponent],
   template: `
     <div class="flex items-center justify-between gap-3 flex-wrap mb-3">
       <div class="flex border border-kymo-rule h-[1.875rem]" role="group" aria-label="Filter activity">
@@ -123,7 +124,7 @@ const K8S_LIMIT = 500;
                           {{ replaced ? 'Stopped (pod replaced)' : label(ev) }}@if (r.count > 1) { <span class="tabular-nums"> ×{{ r.count }}</span> }
                         </span>
                         @if (showsExit(ev)) {
-                          <span class="text-[11px] border px-1.5 tabular-nums" [class]="ev.exit_code === 0 ? 'text-kymo-muted border-kymo-rule' : 'text-kymo-danger border-kymo-danger/40'">exit {{ ev.exit_code }}</span>
+                          <app-exit-tag [code]="ev.exit_code!" />
                         }
                       </p>
                       <p class="text-[11px] text-kymo-muted truncate">

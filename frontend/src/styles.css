@@ -276,3 +276,12 @@
     display: none;
   }
 }
+
+/* A row that just arrived via refresh: brief amber wash that fades out. */
+@keyframes k-fresh {
+  from { background-color: color-mix(in srgb, var(--color-kymo-amber) 14%, transparent); }
+  to   { background-color: transparent; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .k-fresh { animation: k-fresh 3.5s ease-out 1; }
+}

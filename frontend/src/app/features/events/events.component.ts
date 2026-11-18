@@ -1,199 +1,151 @@
-import { Component, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { Component, ChangeDetectionStrategy, signal, computed, inject, DestroyRef } from '@angular/core';
+import { ActivatedRoute, Router } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { DatePipe } from '@angular/common';
-import { Subscription } from 'rxjs';
-import { map } from 'rxjs/operators';
+import { Subscription, forkJoin } from 'rxjs';
+import { catchError, map } from 'rxjs/operators';
+import { of } from 'rxjs';
 
 import { ContainerService } from '../../core/services/container.service';
-import { RefreshService } from '../../core/services/refresh.service';
 import { SourceStateService } from '../../core/services/source-state.service';
-import { LoadReason, reloadOnSourceAndRefresh } from '../../core/utils/page-reload';
-import { LifecycleEvent, LifecycleEventType } from '../../core/models/container.model';
-import { PageHeaderComponent } from '../../shared/components/page-header/page-header.component';
-import { EmptyStateComponent } from '../../shared/components/empty-state/empty-state.component';
-import { ErrorStateComponent } from '../../shared/components/error-state/error-state.component';
-import { SkeletonComponent } from '../../shared/components/skeleton/skeleton.component';
+import { reloadOnSourceAndRefresh } from '../../core/utils/page-reload';
+import { LifecycleEvent, K8sEvent } from '../../core/models/container.model';
+import { LifecycleEventsComponent } from './lifecycle-events.component';
 import { K8sEventsComponent } from './k8s-events.component';
-import { TimeagoPipe } from '../../shared/pipes/timeago.pipe';
-import { containerRoute, shortId } from '../../shared/utils/format';
-import { podNameFromId } from '../../shared/utils/source';
-import { eventChipClass, eventIcon, eventLabel, eventReason, showsExitCode } from '../../shared/utils/events';
-
-const PAGE_SIZE = 100;
 
 export type EventsView = 'lifecycle' | 'k8s';
 
-export const EVENT_TYPE_OPTIONS: { value: LifecycleEventType | ''; label: string }[] = [
-  { value: '',       label: 'All events' },
-  { value: 'start',  label: 'Start' },
-  { value: 'stop',   label: 'Stop' },
-  { value: 'die',    label: 'Die / exit' },
-  { value: 'crash',  label: 'Crash' },
-  { value: 'oom',    label: 'OOM kill' },
-  { value: 'pause',  label: 'Pause' },
-  { value: 'resume', label: 'Resume' },
-];
+const DAY = 86_400_000;
+const SUMMARY_LIMIT = 200;
+const K8S_SUMMARY_LIMIT = 500;
 
-const byNewest = (a: LifecycleEvent, b: LifecycleEvent) =>
-  new Date(b.occurred_at).getTime() - new Date(a.occurred_at).getTime() || b.id - a.id;
+/** Count of one problem kind in the last 24h; `more` when the fetched page was full and still inside the window. */
+interface Tally { n: number; more: boolean; }
+const EMPTY: Tally = { n: 0, more: false };
 
-/** Full lifecycle event log with type/source filters and "load older" cursor paging. */
+/**
+ * Events page shell: title, a summary of the last 24h whose problem chips jump to the filtered lists, and the
+ * Lifecycle | Kubernetes switch. Query params: `?view=k8s` (anything else = Lifecycle); the lists own the rest.
+ */
 @Component({
   selector: 'app-events',
   standalone: true,
-  imports: [
-    RouterLink, DatePipe, TimeagoPipe, PageHeaderComponent, EmptyStateComponent, ErrorStateComponent, SkeletonComponent,
-    K8sEventsComponent,
-  ],
-  templateUrl: './events.component.html',
+  imports: [LifecycleEventsComponent, K8sEventsComponent],
+  template: `
+    <div class="flex flex-col gap-4">
+      <header class="border-b border-kymo-rule pb-3 flex items-end justify-between gap-4 flex-wrap">
+        <div class="min-w-0">
+          <h1 class="text-lg font-semibold text-kymo-ink tracking-tight">Events</h1>
+          <p class="mt-1.5 text-xs text-kymo-muted flex items-center gap-x-2 flex-wrap min-h-4" role="status">
+            @if (!summaryLoaded()) {
+              Loading…
+            } @else {
+              <span>Last 24h</span>
+              <span class="text-kymo-faint" aria-hidden="true">·</span>
+              <button type="button" class="tabular-nums hover:underline underline-offset-4 disabled:no-underline disabled:cursor-default"
+                      [class]="crashes().n > 0 ? 'text-kymo-danger' : 'text-kymo-muted'" [disabled]="crashes().n === 0"
+                      (click)="showProblems()">{{ count(crashes()) }} {{ crashes().n === 1 && !crashes().more ? 'crash' : 'crashes' }}</button>
+              <span class="text-kymo-faint" aria-hidden="true">·</span>
+              <button type="button" class="tabular-nums hover:underline underline-offset-4 disabled:no-underline disabled:cursor-default"
+                      [class]="ooms().n > 0 ? 'text-kymo-amber' : 'text-kymo-muted'" [disabled]="ooms().n === 0"
+                      (click)="showProblems()">{{ count(ooms()) }} OOM {{ ooms().n === 1 && !ooms().more ? 'kill' : 'kills' }}</button>
+              <span class="text-kymo-faint" aria-hidden="true">·</span>
+              <button type="button" class="tabular-nums hover:underline underline-offset-4 disabled:no-underline disabled:cursor-default"
+                      [class]="warnings().n > 0 ? 'text-kymo-amber' : 'text-kymo-muted'" [disabled]="warnings().n === 0"
+                      (click)="showWarnings()">{{ count(warnings()) }} {{ warnings().n === 1 && !warnings().more ? 'warning' : 'warnings' }}</button>
+            }
+          </p>
+        </div>
+
+        <div class="flex border border-kymo-rule h-[1.875rem]" role="group" aria-label="Event source">
+          @for (v of views; track v.key) {
+            <button type="button"
+              class="px-3 text-xs whitespace-nowrap transition-colors border-r border-kymo-rule last:border-r-0"
+              [class]="view() === v.key ? 'bg-kymo-raised text-kymo-ink' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+              [attr.aria-pressed]="view() === v.key" (click)="setView(v.key)">{{ v.label }}</button>
+          }
+        </div>
+      </header>
+
+      @if (view() === 'k8s') {
+        <app-k8s-events />
+      } @else {
+        <app-lifecycle-events />
+      }
+    </div>
+  `,
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class EventsComponent {
-  private svc        = inject(ContainerService);
-  private refreshSvc = inject(RefreshService);
-  protected sourceSvc = inject(SourceStateService);
-  private activeRoute = inject(ActivatedRoute);
-  private router     = inject(Router);
+  private svc      = inject(ContainerService);
+  private sources  = inject(SourceStateService);
+  private route    = inject(ActivatedRoute);
+  private router   = inject(Router);
 
   /** `?view=k8s` selects the Kubernetes events view; anything else is the lifecycle log. */
   readonly view = toSignal(
-    this.activeRoute.queryParamMap.pipe(map((p): EventsView => (p.get('view') === 'k8s' ? 'k8s' : 'lifecycle'))),
+    this.route.queryParamMap.pipe(map((p): EventsView => (p.get('view') === 'k8s' ? 'k8s' : 'lifecycle'))),
     { initialValue: 'lifecycle' as EventsView },
   );
-
   readonly views: { key: EventsView; label: string }[] = [
     { key: 'lifecycle', label: 'Lifecycle' },
     { key: 'k8s', label: 'Kubernetes' },
   ];
-  readonly typeOptions = EVENT_TYPE_OPTIONS;
-  readonly eventLabel  = eventLabel;
-  readonly eventReason = eventReason;
-  readonly eventChip   = eventChipClass;
-  readonly eventIcon   = eventIcon;
-  readonly showsExit   = showsExitCode;
-  readonly shortId     = shortId;
 
-  loading     = signal(true);
-  error       = signal(false);
-  private loaded  = signal<LifecycleEvent[]>([]);
-  /** Without a cluster filter, events of removed clusters stay out of the list. */
-  events      = computed(() => this.source() ? this.loaded() : this.sourceSvc.connectedOnly(this.loaded(), e => e.source_name));
-  type        = signal<LifecycleEventType | ''>('');
-  /** The cluster scope is global (scope bar); this page has no filter of its own. */
-  source      = this.sourceSvc.selectedSource;
-  loadingMore = signal(false);
-  moreError   = signal(false);
-  /** False once a page came back shorter than PAGE_SIZE. */
-  hasMore     = signal(true);
-
-  hasFilters = computed(() => !!this.type());
-  showSourceColumn = computed(() => !this.source());
+  summaryLoaded = signal(false);
+  crashes  = signal<Tally>(EMPTY);
+  ooms     = signal<Tally>(EMPTY);
+  warnings = signal<Tally>(EMPTY);
 
   private sub?: Subscription;
-  private moreSub?: Subscription;
 
   constructor() {
-    reloadOnSourceAndRefresh({
-      load: reason => this.load(reason),
+    reloadOnSourceAndRefresh({ load: () => this.loadSummary() });
+    inject(DestroyRef).onDestroy(() => this.sub?.unsubscribe());
+  }
+
+  count(t: Tally): string { return t.n + (t.more ? '+' : ''); }
+
+  /** Crashes, OOM kills and Kubernetes warnings of the last 24h (own light queries, independent of list paging/filters). */
+  private loadSummary(): void {
+    const since = Date.now() - DAY;
+    const source = this.sources.selectedSource() || undefined;
+    this.sub?.unsubscribe();
+    this.sub = forkJoin({
+      crash: this.svc.queryRecentEvents({ limit: SUMMARY_LIMIT, source, type: 'crash' }).pipe(catchError(() => of(null))),
+      oom:   this.svc.queryRecentEvents({ limit: SUMMARY_LIMIT, source, type: 'oom' }).pipe(catchError(() => of(null))),
+      warn:  this.svc.queryK8sEvents({ limit: K8S_SUMMARY_LIMIT, source, type: 'Warning', since: new Date(since).toISOString() }).pipe(catchError(() => of(null))),
+    }).subscribe(({ crash, oom, warn }) => {
+      const life = (list: LifecycleEvent[] | null): Tally => {
+        const rows = this.sources.inScope(list ?? [], e => e.source_name).filter(e => new Date(e.occurred_at).getTime() >= since);
+        const raw = list ?? [];
+        return { n: rows.length, more: raw.length >= SUMMARY_LIMIT && new Date(raw[raw.length - 1].occurred_at).getTime() >= since };
+      };
+      const k8s = (list: K8sEvent[] | null): Tally => {
+        const raw = list ?? [];
+        return { n: this.sources.inScope(raw, e => e.source_name).length, more: raw.length >= K8S_SUMMARY_LIMIT };
+      };
+      this.crashes.set(life(crash));
+      this.ooms.set(life(oom));
+      this.warnings.set(k8s(warn));
+      this.summaryLoaded.set(true);
     });
+  }
+
+  private go(queryParams: Record<string, string | null>): void {
+    this.router.navigate([], { relativeTo: this.route, queryParams, queryParamsHandling: 'merge', replaceUrl: true });
   }
 
   setView(v: EventsView): void {
     if (v === this.view()) return;
-    // The lifecycle list is not refreshed while hidden: reload it once the URL says we are back.
-    this.router.navigate([], { relativeTo: this.activeRoute, queryParams: { view: v === 'k8s' ? 'k8s' : null }, queryParamsHandling: 'merge' })
-      .then(() => { if (v === 'lifecycle') this.reset(); });
+    // Each view has its own filters: leaving one drops them.
+    this.go({ view: v === 'k8s' ? 'k8s' : null, q: null, type: null, reason: null, jobs: null });
   }
 
-  setType(t: LifecycleEventType | ''): void {
-    this.type.set(t);
-    this.reset();
+  showProblems(): void {
+    this.go({ view: null, q: null, type: 'problems', reason: null, jobs: null });
   }
 
-  clearFilters(): void {
-    this.type.set('');
-    this.reset();
-  }
-
-  reset(): void {
-    this.loading.set(true);
-    this.loaded.set([]);
-    this.load('init');
-  }
-
-  /**
-   * Initial / filter loads replace the list. Refresh ticks fetch the newest page and merge it in,
-   * so pages loaded with "Load older" survive auto-refresh.
-   */
-  load(reason: LoadReason): void {
-    if (this.view() !== 'lifecycle') return;
-    const merge = (reason === 'auto' || reason === 'manual') && this.loaded().length > 0;
-    this.sub?.unsubscribe();
-    if (!merge) this.moreSub?.unsubscribe();
-    this.sub = this.svc.queryRecentEvents({
-      limit: PAGE_SIZE,
-      source: this.source() || undefined,
-      type: this.type(),
-    }).subscribe({
-      next: list => {
-        const page = list ?? [];
-        if (merge) {
-          const seen = new Set(this.loaded().map(e => e.id));
-          const fresh = page.filter(e => !seen.has(e.id));
-          if (fresh.length) this.loaded.set([...fresh, ...this.loaded()].sort(byNewest));
-        } else {
-          this.loaded.set([...page].sort(byNewest));
-          this.hasMore.set(page.length >= PAGE_SIZE);
-          this.moreError.set(false);
-        }
-        this.error.set(false);
-        this.loading.set(false);
-        this.refreshSvc.markUpdated();
-      },
-      error: () => {
-        this.loading.set(false);
-        if (!merge) this.error.set(true);
-      },
-    });
-  }
-
-  loadOlder(): void {
-    const list = this.loaded();
-    if (!list.length || this.loadingMore()) return;
-    const oldest = list[list.length - 1];
-    this.loadingMore.set(true);
-    this.moreError.set(false);
-    this.moreSub = this.svc.queryRecentEvents({
-      limit: PAGE_SIZE,
-      source: this.source() || undefined,
-      type: this.type(),
-      before: oldest.occurred_at,
-    }).subscribe({
-      next: older => {
-        const page = older ?? [];
-        const seen = new Set(this.loaded().map(e => e.id));
-        this.loaded.set([...this.loaded(), ...page.filter(e => !seen.has(e.id))].sort(byNewest));
-        this.hasMore.set(page.length >= PAGE_SIZE);
-        this.loadingMore.set(false);
-      },
-      error: () => {
-        this.loadingMore.set(false);
-        this.moreError.set(true);
-      },
-    });
-  }
-
-  route(ev: LifecycleEvent): string[] {
-    return containerRoute(ev.container_id, ev.runtime);
-  }
-
-  /** Kubernetes events belong to a pod (id is `namespace/pod/container`). */
-  pod(ev: LifecycleEvent): string {
-    return podNameFromId(ev.container_id);
-  }
-
-  name(ev: LifecycleEvent): string {
-    return ev.container_name || shortId(ev.container_id);
+  showWarnings(): void {
+    this.go({ view: 'k8s', q: null, type: 'warnings', reason: null, jobs: null });
   }
 }
