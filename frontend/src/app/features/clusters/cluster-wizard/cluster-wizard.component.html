@@ -78,99 +78,102 @@
               }
             </div>
 
-              <!-- Kubeconfig -->
-              <fieldset>
-                <legend class="k-label mb-1.5">Kubeconfig</legend>
-                <div class="flex border border-kymo-rule w-fit" role="group" aria-label="Kubeconfig source">
-                  <button
-                    type="button"
-                    class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule"
-                    [class]="kubeMode() === 'path' ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
-                    [attr.aria-pressed]="kubeMode() === 'path'"
-                    [attr.data-step-focus]="nameLocked() && kubeMode() === 'path' ? '' : null"
-                    [attr.data-autofocus]="nameLocked() && kubeMode() === 'path' ? '' : null"
-                    (click)="setKubeMode('path')"
-                  >Path on server</button>
-                  <button
-                    type="button"
-                    class="px-3 h-7 text-xs transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                    [class]="kubeMode() === 'paste' ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
-                    [attr.aria-pressed]="kubeMode() === 'paste'"
-                    [disabled]="pasteDisabled() && !storedUpload()"
-                    [attr.aria-describedby]="pasteDisabled() ? 'wiz-paste-disabled' : null"
-                    [attr.data-step-focus]="nameLocked() && kubeMode() === 'paste' ? '' : null"
-                    [attr.data-autofocus]="nameLocked() && kubeMode() === 'paste' ? '' : null"
-                    (click)="setKubeMode('paste')"
-                  >Paste / upload</button>
-                </div>
-                @if (pasteDisabled()) {
-                  <p id="wiz-paste-disabled" class="text-xs text-kymo-muted mt-1.5">
-                    Paste / upload is disabled: uploaded kubeconfigs are stored encrypted and the server has no secret key.
-                    Set <code class="text-kymo-amber">KYMO_SECRET_KEY</code> on the KYMO server and restart it to enable this.
-                  </p>
-                }
-
-                @if (kubeMode() === 'path') {
-                  <div class="mt-3">
-                    <label for="wiz-path" class="sr-only">Kubeconfig path on the server</label>
+            <!-- Connection mode -->
+            <fieldset>
+              <legend class="k-label mb-1.5">How should KYMO connect?</legend>
+              <div class="grid gap-2" role="radiogroup" aria-label="Connection method">
+                @for (m of modes; track m.value) {
+                  <label
+                    class="flex items-start gap-3 border px-3 py-2.5 cursor-pointer transition-colors"
+                    [class]="kubeMode() === m.value ? 'border-kymo-amber bg-kymo-raised' : 'border-kymo-rule hover:border-kymo-faint'"
+                    [class.opacity-40]="m.value === 'upload' && pasteDisabled() && !storedUpload()"
+                    [class.cursor-not-allowed]="m.value === 'upload' && pasteDisabled() && !storedUpload()"
+                  >
                     <input
-                      id="wiz-path"
-                      type="text"
-                      class="k-input w-full"
-                      [value]="kubeconfigPath()"
-                      placeholder="/etc/kymo/kubeconfig.yaml"
-                      autocomplete="off"
-                      spellcheck="false"
-                      aria-describedby="wiz-path-help"
-                      (input)="onPath($any($event.target).value)"
+                      type="radio" name="wiz-mode" class="mt-0.5"
+                      [value]="m.value"
+                      [checked]="kubeMode() === m.value"
+                      [disabled]="m.value === 'upload' && pasteDisabled() && !storedUpload()"
+                      [attr.data-step-focus]="nameLocked() && kubeMode() === m.value ? '' : null"
+                      [attr.data-autofocus]="nameLocked() && kubeMode() === m.value ? '' : null"
+                      (change)="setKubeMode(m.value)"
                     />
-                    <p id="wiz-path-help" class="text-xs text-kymo-faint mt-1.5">A path readable by the KYMO server process. Empty = in-cluster config or the server's default kubeconfig.</p>
-                  </div>
-                } @else {
-                  <div class="mt-3">
-                    <label for="wiz-kubeconfig" class="sr-only">Kubeconfig YAML</label>
-                    <textarea
-                      id="wiz-kubeconfig"
-                      rows="8"
-                      class="k-input w-full !h-auto py-2 font-mono text-[11px] leading-relaxed resize-y scrollbar-thin"
-                      [class.!border-kymo-danger]="attempted() && !!kubeError()"
-                      [value]="kubeconfigText()"
-                      [disabled]="pasteDisabled()"
-                      [placeholder]="isEdit() && storedUpload() ? 'Leave empty to keep the stored kubeconfig' : 'apiVersion: v1\nkind: Config\nclusters: …'"
-                      spellcheck="false"
-                      [attr.aria-invalid]="attempted() && !!kubeError()"
-                      aria-describedby="wiz-kubeconfig-help"
-                      (input)="onKubeconfigText($any($event.target).value)"
-                    ></textarea>
-                    <div class="flex items-center gap-3 mt-1.5 flex-wrap">
-                      <label class="k-btn k-btn-sm cursor-pointer" [class.opacity-40]="pasteDisabled()" [class.pointer-events-none]="pasteDisabled()">
-                        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>
-                        Upload file
-                        <input type="file" class="sr-only" accept=".yaml,.yml,.conf,.config,text/yaml,application/yaml,text/plain" [disabled]="pasteDisabled()" (change)="onFile($event)" />
-                      </label>
-                      @if (fileLabel()) {
-                        <span class="text-xs text-kymo-muted truncate">loaded {{ fileLabel() }}</span>
-                      }
-                    </div>
-                    @if (fileError()) {
-                      <p class="text-xs text-kymo-danger mt-1.5" role="alert">{{ fileError() }}</p>
-                    }
-                    @if (attempted() && kubeError()) {
-                      <p id="wiz-kubeconfig-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ kubeError() }}</p>
-                    } @else {
-                      <p id="wiz-kubeconfig-help" class="text-xs text-kymo-faint mt-1.5">
-                        @if (isEdit() && storedUpload()) {
-                          An uploaded kubeconfig is stored. Leave this empty to keep it, or paste a new one to replace it.
-                        } @else {
-                          Stored encrypted on the server. Prefer a dedicated, least-privilege service account.
-                        }
-                      </p>
-                    }
-                  </div>
+                    <span class="min-w-0">
+                      <span class="block text-xs text-kymo-ink font-medium">{{ m.label }}</span>
+                      <span class="block text-xs text-kymo-faint mt-0.5">{{ m.hint }}</span>
+                    </span>
+                  </label>
                 }
-              </fieldset>
+              </div>
+              @if (pasteDisabled()) {
+                <p id="wiz-paste-disabled" class="text-xs text-kymo-muted mt-1.5">
+                  Upload is disabled: uploaded kubeconfigs are stored encrypted and the server has no secret key.
+                  Set <code class="text-kymo-amber">KYMO_SECRET_KEY</code> on the KYMO server and restart it to enable this.
+                </p>
+              }
+
+              @if (kubeMode() === 'path') {
+                <div class="mt-3">
+                  <label for="wiz-path" class="sr-only">Kubeconfig path on the server</label>
+                  <input
+                    id="wiz-path"
+                    type="text"
+                    class="k-input w-full"
+                    [value]="kubeconfigPath()"
+                    placeholder="/etc/kymo/kubeconfig.yaml"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-describedby="wiz-path-help"
+                    (input)="onPath($any($event.target).value)"
+                  />
+                  <p id="wiz-path-help" class="text-xs text-kymo-faint mt-1.5">A path readable by the KYMO server process, not by your browser.</p>
+                </div>
+              } @else if (kubeMode() === 'upload') {
+                <div class="mt-3">
+                  <label for="wiz-kubeconfig" class="sr-only">Kubeconfig YAML</label>
+                  <textarea
+                    id="wiz-kubeconfig"
+                    rows="6"
+                    class="k-input w-full !h-auto py-2 font-mono text-[11px] leading-relaxed resize-y scrollbar-thin"
+                    [class.!border-kymo-danger]="attempted() && !!kubeError()"
+                    [value]="kubeconfigText()"
+                    [disabled]="pasteDisabled() && !storedUpload()"
+                    [placeholder]="isEdit() && storedUpload() ? 'Stored kubeconfig kept. Paste a new one to replace it.' : 'Paste a kubeconfig, or upload a file…'"
+                    spellcheck="false"
+                    [attr.aria-invalid]="attempted() && !!kubeError()"
+                    aria-describedby="wiz-kubeconfig-help"
+                    (input)="onKubeconfigText($any($event.target).value)"
+                  ></textarea>
+                  <div class="flex items-center gap-3 mt-1.5 flex-wrap">
+                    <label class="k-btn k-btn-sm cursor-pointer" [class.opacity-40]="pasteDisabled() && !storedUpload()" [class.pointer-events-none]="pasteDisabled() && !storedUpload()">
+                      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" /></svg>
+                      Upload file
+                      <input type="file" class="sr-only" accept=".yaml,.yml,.conf,.config,text/yaml,application/yaml,text/plain" [disabled]="pasteDisabled() && !storedUpload()" (change)="onFile($event)" />
+                    </label>
+                    @if (fileLabel()) {
+                      <span class="text-xs text-kymo-muted truncate">loaded {{ fileLabel() }}</span>
+                    }
+                  </div>
+                  @if (fileError()) {
+                    <p class="text-xs text-kymo-danger mt-1.5" role="alert">{{ fileError() }}</p>
+                  }
+                  @if (attempted() && kubeError()) {
+                    <p id="wiz-kubeconfig-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ kubeError() }}</p>
+                  } @else {
+                    <p id="wiz-kubeconfig-help" class="text-xs text-kymo-faint mt-1.5">
+                      @if (isEdit() && storedUpload()) {
+                        An uploaded kubeconfig is stored and never shown again. Leave this empty to keep it.
+                      } @else {
+                        Stored encrypted on the server. Prefer a dedicated, least-privilege service account.
+                      }
+                    </p>
+                  }
+                </div>
+              }
+            </fieldset>
 
               <!-- Context -->
+              @if (kubeMode() !== 'incluster') {
               <div>
                 <label for="wiz-context" class="k-label flex items-center gap-2 mb-1.5">
                   Context
@@ -222,6 +225,7 @@
                   </p>
                 }
               </div>
+              }
 
               @if (isProd()) {
                 <div class="flex items-start gap-2 px-3 py-2.5 border border-kymo-amber/50 border-l-2 border-l-kymo-amber text-xs text-kymo-amber" role="status">
@@ -230,39 +234,45 @@
                 </div>
               }
 
-            <!-- Common -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label for="wiz-poll" class="k-label block mb-1.5">Poll interval <span class="normal-case tracking-normal text-kymo-faint">(seconds, optional)</span></label>
-                <input
-                  id="wiz-poll"
-                  type="number"
-                  min="1"
-                  step="1"
-                  inputmode="numeric"
-                  class="k-input w-full"
-                  [class.!border-kymo-danger]="!!pollError()"
-                  [value]="pollInterval()"
-                  placeholder="server default"
-                  [attr.aria-invalid]="!!pollError()"
-                  aria-describedby="wiz-poll-help"
-                  (input)="pollInterval.set($any($event.target).value)"
-                />
-                @if (pollError()) {
-                  <p id="wiz-poll-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ pollError() }}</p>
-                } @else {
-                  <p id="wiz-poll-help" class="text-xs text-kymo-faint mt-1.5">How often resource usage is sampled.</p>
-                }
-              </div>
-              <div class="sm:pt-6">
-                <label class="flex items-start gap-2 text-xs text-kymo-ink cursor-pointer">
-                  <input type="checkbox" class="mt-0.5" [checked]="readOnly()" (change)="readOnly.set($any($event.target).checked)" />
-                  <span>
-                    Read-only (disable management actions)
-                    <span class="block text-kymo-faint mt-0.5">Pod restart, scale and rollout restart are refused. Logs and history stay available.</span>
-                  </span>
-                </label>
-              </div>
+            <!-- Advanced -->
+            <div class="border-t border-kymo-rule pt-3">
+              <button type="button" class="flex items-center gap-1.5 k-label hover:text-kymo-ink" [attr.aria-expanded]="advancedOpen()" aria-controls="wiz-advanced" (click)="advancedOpen.set(!advancedOpen())">
+                <svg class="w-2.5 h-2.5 transition-transform" [class.rotate-90]="advancedOpen()" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="square" d="M9 5l7 7-7 7" /></svg>
+                Advanced
+              </button>
+              @if (advancedOpen()) {
+                <div id="wiz-advanced" class="mt-3 space-y-4">
+                  <div>
+                    <label for="wiz-poll" class="k-label block mb-1.5">Poll interval <span class="normal-case tracking-normal text-kymo-faint">(seconds, optional)</span></label>
+                    <input
+                      id="wiz-poll"
+                      type="number"
+                      min="1"
+                      step="1"
+                      inputmode="numeric"
+                      class="k-input w-full sm:w-48"
+                      [class.!border-kymo-danger]="!!pollError()"
+                      [value]="pollInterval()"
+                      placeholder="server default"
+                      [attr.aria-invalid]="!!pollError()"
+                      aria-describedby="wiz-poll-help"
+                      (input)="pollInterval.set($any($event.target).value)"
+                    />
+                    @if (pollError()) {
+                      <p id="wiz-poll-help" class="text-xs text-kymo-danger mt-1.5" role="alert">{{ pollError() }}</p>
+                    } @else {
+                      <p id="wiz-poll-help" class="text-xs text-kymo-faint mt-1.5">How often resource usage is sampled.</p>
+                    }
+                  </div>
+                  <label class="flex items-start gap-2 text-xs text-kymo-ink cursor-pointer">
+                    <input type="checkbox" class="mt-0.5" [checked]="readOnly()" (change)="readOnly.set($any($event.target).checked)" />
+                    <span>
+                      Read-only
+                      <span class="block text-kymo-faint mt-0.5">Disables restart, scale and rollout restart; logs and history still work.</span>
+                    </span>
+                  </label>
+                </div>
+              }
             </div>
           </div>
         }
@@ -290,6 +300,15 @@
                   <span class="text-kymo-ink">{{ testError() }}</span>
                 </div>
               } @else if (testResult(); as r) {
+                <div class="border border-l-2 px-3 py-2.5 mb-3 text-xs" [class]="r.ok ? 'border-kymo-running/40 border-l-kymo-running' : 'border-kymo-danger/50 border-l-kymo-danger'" role="status">
+                  @if (r.ok) {
+                    <p class="text-kymo-running font-medium">✓ Connected<span class="text-kymo-ink font-normal">@if (serverVersion()) { · Kubernetes {{ serverVersion() }} }</span></p>
+                    @if (visibleNamespaces()) { <p class="text-kymo-muted mt-0.5">{{ visibleNamespaces() }}</p> }
+                  } @else {
+                    <p class="text-kymo-danger font-medium">✕ Could not connect</p>
+                    @if (failedChecks()[0]?.detail; as d) { <p class="text-kymo-ink mt-0.5 break-words">{{ d }}</p> }
+                  }
+                </div>
                 <ul class="border border-kymo-rule divide-y divide-kymo-rule">
                   @for (c of r.checks; track $index) {
                     <li class="flex items-start gap-3 px-3 py-2">
@@ -308,11 +327,11 @@
                     <li class="px-3 py-2 text-xs text-kymo-faint">No checks reported.</li>
                   }
                 </ul>
-                <p class="text-xs mt-3" [class]="r.ok ? 'text-kymo-running' : 'text-kymo-danger'">
+                <p class="text-xs mt-3 text-kymo-muted">
                   @if (r.ok) {
-                    Connection OK. {{ isEdit() ? 'Save to apply the changes.' : presetName() ? 'Save to start recording and reconnect the recorded history.' : 'Save to start recording.' }}
+                    {{ isEdit() ? 'Save to apply the changes.' : presetName() ? 'Save to start recording and reconnect the recorded history.' : 'Save to start recording.' }}
                   } @else {
-                    The test failed. You can fix the connection, or save anyway — the cluster keeps retrying in the background.
+                    Fix the connection and re-test, or save anyway: the cluster keeps retrying in the background.
                   }
                 </p>
               }
@@ -320,15 +339,17 @@
 
             <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs border-t border-kymo-rule pt-3">
               <dt class="k-label">name</dt><dd class="text-kymo-ink">{{ buildInput().name }}</dd>
-              <dt class="k-label">kubeconfig</dt>
-                <dd class="text-kymo-ink break-all">
-                  @if (kubeMode() === 'path') {
-                    {{ kubeconfigPath() || 'server default' }}
-                  } @else {
-                    {{ kubeconfigText().trim() ? 'uploaded (' + (fileLabel() || 'pasted') + ')' : 'stored upload (unchanged)' }}
-                  }
-                </dd>
+              <dt class="k-label">connection</dt>
+              <dd class="text-kymo-ink break-all">
+                @switch (kubeMode()) {
+                  @case ('path') { kubeconfig on server: {{ kubeconfigPath() || 'default' }} }
+                  @case ('upload') { {{ kubeconfigText().trim() ? 'uploaded kubeconfig (' + (fileLabel() || 'pasted') + ')' : 'stored upload (unchanged)' }} }
+                  @default { in-cluster service account }
+                }
+              </dd>
+              @if (kubeMode() !== 'incluster') {
                 <dt class="k-label">context</dt><dd class="text-kymo-ink">{{ context() || 'current' }}</dd>
+              }
               <dt class="k-label">read-only</dt><dd [class]="readOnly() ? 'text-kymo-amber' : 'text-kymo-ink'">{{ readOnly() ? 'yes' : 'no' }}</dd>
             </dl>
 
@@ -362,7 +383,7 @@
             @if (saving()) {
               <span class="w-3 h-3 border border-kymo-rule border-t-kymo-amber rounded-full animate-spin" aria-hidden="true"></span>
             }
-            {{ isEdit() ? 'Save' : 'Save and start' }}
+            {{ isEdit() ? 'Save changes' : 'Save cluster' }}
           </button>
         }
       }

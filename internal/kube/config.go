@@ -21,13 +21,28 @@ type Context struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
-// RestConfig resolves a *rest.Config. Precedence:
+// InClusterPath is the kubeconfig_path value that selects strict in-cluster
+// mode: only the pod's service account credentials are used.
+const InClusterPath = "in-cluster"
+
+// RestConfig resolves a *rest.Config. Precedence (path == InClusterPath is
+// strict in-cluster mode and skips all of this):
 //  1. data (raw kubeconfig content), if non-empty;
 //  2. path, if non-empty;
 //  3. in-cluster credentials, then the default loading rules (KUBECONFIG / ~/.kube/config).
 //
 // kubeContext selects a named context; empty means the kubeconfig's current-context.
 func RestConfig(path string, data []byte, kubeContext string) (*rest.Config, error) {
+	if path == InClusterPath {
+		// Explicit in-cluster mode never falls back to a local kubeconfig:
+		// on a workstation that could silently point KYMO at another
+		// (e.g. production) cluster.
+		cfg, err := rest.InClusterConfig()
+		if errors.Is(err, rest.ErrNotInCluster) {
+			return nil, fmt.Errorf("in-cluster mode: KYMO is not running inside Kubernetes (no service account credentials)")
+		}
+		return cfg, err
+	}
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: kubeContext}
 
 	if len(data) > 0 {

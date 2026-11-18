@@ -117,7 +117,7 @@ collector:
   # sources:
   #   - name: "dev-cluster"
   #     type: "kubernetes"
-  #     kubeconfig_path: "/path/to/kubeconfig"   # placeholder; default: in-cluster, then ~/.kube/config
+  #     kubeconfig_path: "/path/to/kubeconfig"   # placeholder; "in-cluster" = strict service-account mode; empty = in-cluster, then ~/.kube/config
   #     kube_context: "dev"                      # default: current-context
   #     poll_interval: "30s"                     # needs metrics-server for CPU/memory
   #     read_only: true                          # recommended for production clusters

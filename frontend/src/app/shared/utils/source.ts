@@ -25,12 +25,24 @@ export const READ_ONLY_HINT = 'Read-only cluster: management actions (restart po
 export const REMOVED_HINT = 'Removed cluster: recorded history only. Management actions and live logs are unavailable.';
 export const CONFIG_ORIGIN_HINT = 'Managed in config.yaml — edit the file; changes apply automatically';
 
-/** One-line connection summary for lists. */
+/** Concise connection label for lists: "kubeconfig · ctx", "uploaded · ctx" or "in-cluster". Never a file path. */
 export function sourceConnectionSummary(src: SourceStatus): string {
   const s = src.settings;
   if (!s) return '—';
-  const where = s.kubeconfig_uploaded ? 'uploaded kubeconfig' : (s.kubeconfig_path || 'default kubeconfig');
-  return s.kube_context ? `${where} · ${s.kube_context}` : where;
+  const kind = s.kubeconfig_uploaded ? 'uploaded' : s.kubeconfig_path && s.kubeconfig_path !== 'in-cluster' ? 'kubeconfig' : 'in-cluster';
+  return s.kube_context && kind !== 'in-cluster' ? `${kind} · ${s.kube_context}` : kind;
+}
+
+/** Full detail for the connection tooltip (may include the server-side path). */
+export function sourceConnectionTitle(src: SourceStatus): string {
+  const s = src.settings;
+  if (!s) return '';
+  const parts = [
+    s.kubeconfig_uploaded ? 'Uploaded kubeconfig' : s.kubeconfig_path === 'in-cluster' ? 'In-cluster (service account)' : s.kubeconfig_path ? `Kubeconfig: ${s.kubeconfig_path}` : 'In-cluster / default credentials',
+    s.kube_context ? `Context: ${s.kube_context}` : '',
+    s.poll_interval_seconds ? `Poll every ${s.poll_interval_seconds}s` : '',
+  ];
+  return parts.filter(Boolean).join('\n');
 }
 
 /** Kubernetes container IDs are `namespace/pod/container`. */
