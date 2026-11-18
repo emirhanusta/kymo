@@ -14,9 +14,10 @@ const TEXT: Record<ScoreTone, string> = {
 const BG: Record<ScoreTone, string> = {
   good: 'bg-kymo-running', warn: 'bg-kymo-amber', bad: 'bg-kymo-danger', none: 'bg-kymo-rule',
 };
-/** Hex values mirror the --color-kymo-* tokens in styles.css (for SVG / canvas). */
+/** CSS variable references (theme-aware) for SVG presentation attributes. Not valid for canvas. */
 const HEX: Record<ScoreTone, string> = {
-  good: '#9BD27A', warn: '#FFB000', bad: '#FF5F45', none: '#5E5A52',
+  good: 'var(--color-kymo-running)', warn: 'var(--color-kymo-amber)',
+  bad: 'var(--color-kymo-danger)', none: 'var(--color-kymo-faint)',
 };
 
 export const scoreTextClass = (s: number | null | undefined) => TEXT[scoreTone(s)];

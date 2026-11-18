@@ -40,7 +40,7 @@ import { normalizeStatus } from '../../utils/status';
   template: `
     <div class="fixed inset-0 bg-kymo-deep/70 z-[39] lg:hidden" (click)="closed.emit()" aria-hidden="true"></div>
     <aside appDialog [modal]="false" (dismiss)="onDismiss()" aria-labelledby="peek-title"
-           class="fixed top-0 right-0 bottom-0 sm:bottom-[34px] w-full sm:w-[26.25rem] z-40 bg-kymo-bg border-l border-kymo-rule border-t-2 border-t-kymo-amber flex flex-col shadow-[-8px_0_24px_rgba(0,0,0,0.35)]">
+           class="fixed top-0 right-0 bottom-0 sm:bottom-[34px] w-full sm:w-[26.25rem] z-40 bg-kymo-bg border-l border-kymo-rule border-t-2 border-t-kymo-amber flex flex-col shadow-[-8px_0_24px_var(--kymo-shadow)]">
       <div class="flex items-start gap-3 px-4 py-3 border-b border-kymo-rule flex-none">
         <div class="min-w-0 flex-1">
           <p class="k-label mb-0.5">Workload</p>

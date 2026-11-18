@@ -148,7 +148,7 @@
     } @else {
       <div class="px-4 py-3 text-xs leading-relaxed">
         @for (row of view().rows; track row.idx) {
-          <div [class]="row.cls" [class.whitespace-pre-wrap]="wrap()" [class.break-all]="wrap()" [class.whitespace-pre]="!wrap()">@for (p of row.parts; track $index) {@if (p.match) {<mark class="bg-kymo-amber text-kymo-deep">{{ p.text }}</mark>} @else {<span>{{ p.text }}</span>}}</div>
+          <div [class]="row.cls" [class.whitespace-pre-wrap]="wrap()" [class.break-all]="wrap()" [class.whitespace-pre]="!wrap()">@for (p of row.parts; track $index) {@if (p.match) {<mark class="bg-kymo-amber text-kymo-on-accent">{{ p.text }}</mark>} @else {<span>{{ p.text }}</span>}}</div>
         }
       </div>
     }

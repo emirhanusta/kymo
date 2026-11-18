@@ -8,6 +8,7 @@ import { filter, map } from 'rxjs/operators';
 
 import { AuthService } from '../../core/services/auth.service';
 import { RefreshService } from '../../core/services/refresh.service';
+import { ThemeService } from '../../core/services/theme.service';
 import { IssuesService } from '../../core/services/issues.service';
 import { PageContextService } from '../../core/services/page-context.service';
 import { LogoComponent } from '../../shared/components/logo/logo.component';
@@ -65,6 +66,7 @@ export class TopbarComponent {
   private title   = inject(Title);
   refreshSvc      = inject(RefreshService);
   issues          = inject(IssuesService);
+  themeSvc        = inject(ThemeService);
 
   paletteOpen    = signal(false);
   spinning       = signal(false);

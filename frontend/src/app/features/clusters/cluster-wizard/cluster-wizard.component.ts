@@ -20,7 +20,7 @@ const PROD_RE = /prod/i;
 
 /** Internal step ids: 2 = connection, 3 = test & save (shown as 1 and 2). */
 type Step = 2 | 3;
-type KubeMode = 'upload' | 'path' | 'incluster';
+type KubeMode = 'path' | 'paste';
 type ContextsResult = { ok: true; list: KubeContextList } | { ok: false; error: string } | null;
 
 /**
@@ -28,9 +28,6 @@ type ContextsResult = { ok: true; list: KubeContextList } | { ok: false; error: 
  *   1. connection  2. test & save.
  * In edit mode the name is locked and an empty kubeconfig textarea keeps the stored kubeconfig.
  */
-
-/** kubeconfig_path value for strict in-cluster mode (see internal/kube.InClusterPath). */
-const IN_CLUSTER_PATH = 'in-cluster';
 @Component({
   selector: 'app-cluster-wizard',
   standalone: true,
@@ -56,12 +53,6 @@ export class ClusterWizardComponent implements OnInit {
     { n: 3, label: 'Test & save' },
   ];
 
-  readonly modes: { value: KubeMode; label: string; hint: string }[] = [
-    { value: 'upload', label: 'Upload kubeconfig', hint: 'Paste or upload a kubeconfig file. It is stored encrypted on the server.' },
-    { value: 'path', label: 'Kubeconfig path on the server', hint: 'Use a kubeconfig file that already exists on the machine running KYMO.' },
-    { value: 'incluster', label: 'This cluster (in-cluster)', hint: "No kubeconfig: KYMO uses its own service account when it runs inside Kubernetes." },
-  ];
-
   isEdit = computed(() => !!this.source());
   nameLocked = computed(() => this.isEdit() || !!this.presetName());
   step   = signal<Step>(2);
@@ -70,8 +61,7 @@ export class ClusterWizardComponent implements OnInit {
   name           = signal('');
   nameTouched    = signal(false);
   nameTaken      = signal('');           // set from a 409
-  kubeMode       = signal<KubeMode>('upload');
-  advancedOpen   = signal(false);
+  kubeMode       = signal<KubeMode>('path');
   kubeconfigPath = signal('');
   kubeconfigText = signal('');
   fileLabel      = signal('');
@@ -128,7 +118,7 @@ export class ClusterWizardComponent implements OnInit {
   });
 
   kubeError = computed(() => {
-    if (this.kubeMode() === 'upload') {
+    if (this.kubeMode() === 'paste') {
       if (this.pasteDisabled() && !this.storedUpload()) return 'Paste / upload is unavailable on this server.';
       if (!this.kubeconfigText().trim() && !(this.isEdit() && this.storedUpload())) return 'Paste or upload a kubeconfig.';
     }
@@ -161,7 +151,7 @@ export class ClusterWizardComponent implements OnInit {
     this.api.getMeta().subscribe({
       next: m => {
         this.meta.set(m);
-        if (m?.secret_key_configured === false && this.kubeMode() === 'upload' && !this.storedUpload()) {
+        if (m?.secret_key_configured === false && this.kubeMode() === 'paste' && !this.storedUpload()) {
           this.kubeMode.set('path');
         }
       },
@@ -173,14 +163,12 @@ export class ClusterWizardComponent implements OnInit {
     if (!src) return;
     const s = src.settings ?? { kubeconfig_uploaded: false };
     this.name.set(src.name);
-    const inCluster = !s.kubeconfig_uploaded && (!s.kubeconfig_path || s.kubeconfig_path === IN_CLUSTER_PATH);
-    this.kubeMode.set(s.kubeconfig_uploaded ? 'upload' : inCluster ? 'incluster' : 'path');
-    this.kubeconfigPath.set(inCluster ? '' : (s.kubeconfig_path ?? ''));
+    this.kubeMode.set(s.kubeconfig_uploaded ? 'paste' : 'path');
+    this.kubeconfigPath.set(s.kubeconfig_path ?? '');
     this.context.set(s.kube_context ?? '');
     this.prodTickedFor = s.kube_context ?? '';
     this.pollInterval.set(s.poll_interval_seconds ? String(s.poll_interval_seconds) : '');
     this.readOnly.set(src.read_only);
-    this.advancedOpen.set(!!s.poll_interval_seconds || src.read_only);
     this.requestContexts();
   }
 
@@ -191,7 +179,6 @@ export class ClusterWizardComponent implements OnInit {
       this.attempted.set(true);
       this.nameTouched.set(true);
       if (!this.step2Valid()) {
-        if (this.pollError()) this.advancedOpen.set(true);
         this.focusFirstInvalid();
         return;
       }
@@ -226,7 +213,7 @@ export class ClusterWizardComponent implements OnInit {
   }
 
   setKubeMode(m: KubeMode): void {
-    if (m === 'upload' && this.pasteDisabled() && !this.storedUpload()) return;
+    if (m === 'paste' && this.pasteDisabled() && !this.storedUpload()) return;
     this.kubeMode.set(m);
     this.requestContexts();
   }
@@ -267,9 +254,7 @@ export class ClusterWizardComponent implements OnInit {
   }
 
   private requestContexts(): void {
-    if (this.kubeMode() === 'incluster') {
-      this.contexts$.next(null);
-    } else if (this.kubeMode() === 'path') {
+    if (this.kubeMode() === 'path') {
       const p = this.kubeconfigPath().trim();
       this.contexts$.next(p ? { kubeconfig_path: p } : null);
     } else {
@@ -327,14 +312,11 @@ export class ClusterWizardComponent implements OnInit {
     if (this.kubeMode() === 'path') {
       const p = this.kubeconfigPath().trim();
       if (p) input.kubeconfig_path = p;
-    } else if (this.kubeMode() === 'incluster') {
-      // Strict in-cluster mode: the backend never falls back to a local kubeconfig.
-      input.kubeconfig_path = IN_CLUSTER_PATH;
-    } else if (this.kubeMode() === 'upload' && this.kubeconfigText().trim()) {
+    } else if (this.kubeconfigText().trim()) {
       input.kubeconfig = this.kubeconfigText();
     }
     const ctx = this.context().trim();
-    if (ctx && this.kubeMode() !== 'incluster') input.kube_context = ctx;
+    if (ctx) input.kube_context = ctx;
     const poll = this.pollInterval().trim();
     if (poll) input.poll_interval_seconds = +poll;
     return input;
@@ -384,18 +366,6 @@ export class ClusterWizardComponent implements OnInit {
       },
     });
   }
-
-  /** Kubernetes version from the "API server" check ("Kubernetes v1.30.2"). */
-  serverVersion = computed(() => {
-    const d = this.testResult()?.checks.find(c => c.name === 'API server' && c.ok)?.detail ?? '';
-    return d.replace(/^Kubernetes\s+/, '');
-  });
-  /** "12 namespaces visible" from the Permissions check. */
-  visibleNamespaces = computed(() => {
-    const d = this.testResult()?.checks.find(c => c.name === 'Permissions' && c.ok)?.detail ?? '';
-    return /^\d+/.test(d) ? d : '';
-  });
-  failedChecks = computed(() => (this.testResult()?.checks ?? []).filter(c => !c.ok));
 
   /** Warnings are amber regardless of `ok`; otherwise ✓ green / ✕ red. */
   checkTone(c: { ok: boolean; warning?: boolean }): 'ok' | 'warn' | 'fail' {

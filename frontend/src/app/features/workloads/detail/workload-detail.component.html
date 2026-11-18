@@ -322,7 +322,7 @@
           @for (r of ranges; track r.key) {
             <button type="button"
               class="px-3 h-7 text-xs transition-colors border-r border-kymo-rule last:border-r-0"
-              [class]="range() === r.key ? 'bg-kymo-amber text-kymo-deep font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
+              [class]="range() === r.key ? 'bg-kymo-amber text-kymo-on-accent font-medium' : 'text-kymo-muted hover:text-kymo-ink hover:bg-kymo-raised'"
               [attr.aria-pressed]="range() === r.key" (click)="setRange(r.key)">{{ r.key }}</button>
           }
         </div>
