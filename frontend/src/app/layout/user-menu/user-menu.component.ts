@@ -13,8 +13,19 @@ import { RoleChipComponent } from '../../shared/components/role-chip/role-chip.c
   imports: [RouterLink, RoleChipComponent, ChangePasswordDialogComponent, ProfileDialogComponent],
   template: `
     @if (!auth.authEnabled()) {
-      <span class="inline-flex items-center h-[1.875rem] px-2 text-[10px] tracking-[0.06em] border border-kymo-amber/60 text-kymo-amber"
-            title="Authentication is disabled (auth.enabled: false). Everyone has full access.">auth disabled</span>
+      <div class="relative flex items-center gap-1.5">
+        <span class="inline-flex items-center h-[1.875rem] px-2 text-[10px] tracking-[0.06em] border border-kymo-amber/60 text-kymo-amber"
+              title="Authentication is disabled (auth.enabled: false). Everyone has full access.">auth disabled</span>
+        <button type="button" class="k-btn k-btn-icon" (click)="open.update(v => !v)" aria-haspopup="menu" [attr.aria-expanded]="open()" aria-label="Menu">
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="square" d="M4 7h16M4 12h16M4 17h16" /></svg>
+        </button>
+        @if (open()) {
+          <div class="absolute right-0 top-full mt-1 bg-kymo-deep border border-kymo-rule z-50 min-w-[180px] py-1" role="menu">
+            <a role="menuitem" routerLink="/settings" class="block px-3 py-2 text-xs hover:bg-kymo-raised" (click)="open.set(false)">Settings</a>
+            <a role="menuitem" routerLink="/settings/tokens" class="block px-3 py-2 text-xs hover:bg-kymo-raised" (click)="open.set(false)">API tokens</a>
+          </div>
+        }
+      </div>
     } @else if (auth.user(); as u) {
       <div class="relative">
         <button type="button" class="k-btn gap-2 px-2" (click)="open.update(v => !v)" aria-haspopup="menu" [attr.aria-expanded]="open()" aria-label="User menu">
@@ -32,6 +43,7 @@ import { RoleChipComponent } from '../../shared/components/role-chip/role-chip.c
             @if (u.has_password) {
               <button type="button" role="menuitem" class="w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised" (click)="open.set(false); changePw.set(true)">Change password</button>
             }
+            <a role="menuitem" routerLink="/settings" class="block px-3 py-2 text-xs hover:bg-kymo-raised" (click)="open.set(false)">Settings</a>
             <a role="menuitem" routerLink="/settings/tokens" class="block px-3 py-2 text-xs hover:bg-kymo-raised" (click)="open.set(false)">API tokens</a>
             <button type="button" role="menuitem" class="w-full px-3 py-2 text-xs text-left hover:bg-kymo-raised text-kymo-danger" (click)="signOut()">Sign out</button>
           </div>

@@ -189,9 +189,11 @@ echo 'new-long-password' | kymo admin reset-password --username admin --password
 kubectl exec -it deploy/kymo -- /kymo admin reset-password --username admin
 ```
 
-**Users.** Admins invite people by username, with an optional email
-(`Settings -> Users`): the invite link is valid 7 days and is shared by hand
-(no email is sent); the invitee picks a name and password. Everyone can edit
+**Users.** Admins add people by username, with an optional email
+(`Settings -> Users -> Add user`). KYMO sends no email, so you pass the result on
+by hand: either a **setup link** (default; valid 7 days, the user picks their own
+password) or a **temporary password** (typed or generated, shown once; the user
+must change it at first sign-in). Everyone can edit
 their name and email under the user menu -> Profile; admins can set a user's email. Admins can also create 1-hour
 password-reset links, disable users (history is kept) and change roles. API
 tokens (`Authorization: Bearer kymo_<prefix>_<secret>`, shown once, never above

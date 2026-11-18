@@ -39,6 +39,7 @@ var routeRoles = map[string]string{
 
 	// admin / owner
 	"GET /api/v1/users/invites":                 "admin",
+	"POST /api/v1/users":                        "admin",
 	"POST /api/v1/users/invites":                "admin",
 	"DELETE /api/v1/users/invites/:id":          "admin",
 	"PATCH /api/v1/users/:id":                   "admin",
@@ -102,6 +103,8 @@ var routeRoles = map[string]string{
 	"GET /api/v1/k8s-events":                  "viewer",
 	"GET /api/v1/k8s-events/reasons":          "viewer",
 	"GET /api/v1/events/recent":               "viewer",
+	"GET /api/v1/overview/activity":           "viewer",
+	"GET /api/v1/overview/changes":            "viewer",
 
 	// issues & notifications
 	"GET /api/v1/issues":                           "viewer",

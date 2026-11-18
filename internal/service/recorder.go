@@ -130,6 +130,12 @@ type RecorderService interface {
 	// GetWorkloadRevisions returns the workload's revisions, newest first.
 	GetWorkloadRevisions(ctx context.Context, workloadID string) ([]model.Revision, error)
 
+	// GetOverviewActivity returns the hourly start/crash/OOM histogram for the Overview.
+	GetOverviewActivity(ctx context.Context, q repository.ActivityQuery) (*model.Activity, error)
+
+	// GetOverviewChanges returns the latest rollouts of new workload revisions, newest first.
+	GetOverviewChanges(ctx context.Context, q repository.ChangesQuery) ([]*model.Change, error)
+
 	// --- Kubernetes events ---
 
 	// ListK8sEvents returns persisted Kubernetes Events matching q, newest
@@ -227,6 +233,7 @@ type recorderService struct {
 	workloads  repository.WorkloadRepository
 	crashLogs  repository.CrashLogRepository
 	k8sEvents  repository.K8sEventRepository
+	overview   repository.OverviewRepository
 	scorer     stability.StabilityScorer
 	scoring    ScoringConfig
 	log        *zap.Logger
@@ -278,6 +285,14 @@ func (e *sourceEntry) getHealth() sourceHealth {
 
 // NewRecorderService constructs a RecorderService. Sources are registered with
 // AttachSource. Zero values in scoring fall back to a 60s interval and a 24h window.
+// Option customises a recorder service.
+type Option func(*recorderService)
+
+// WithOverview enables the Overview aggregates.
+func WithOverview(r repository.OverviewRepository) Option {
+	return func(s *recorderService) { s.overview = r }
+}
+
 func NewRecorderService(
 	containers repository.ContainerRepository,
 	events repository.EventRepository,
@@ -289,6 +304,7 @@ func NewRecorderService(
 	k8sEvents repository.K8sEventRepository,
 	scoring ScoringConfig,
 	log *zap.Logger,
+	opts ...Option,
 ) RecorderService {
 	if scoring.Interval <= 0 {
 		scoring.Interval = 60 * time.Second
@@ -296,7 +312,7 @@ func NewRecorderService(
 	if scoring.Window <= 0 {
 		scoring.Window = 24 * time.Hour
 	}
-	return &recorderService{
+	svc := &recorderService{
 		containers: containers,
 		events:     events,
 		resources:  resources,
@@ -311,6 +327,10 @@ func NewRecorderService(
 		merged:     make(chan collector.CollectorEvent, 512),
 		entries:    make(map[string]*sourceEntry),
 	}
+	for _, o := range opts {
+		o(svc)
+	}
+	return svc
 }
 
 // Run starts every registered source, then dispatches collector events until
@@ -1057,6 +1077,24 @@ func (s *recorderService) GetWorkloadRevisions(ctx context.Context, workloadID s
 		return nil, err
 	}
 	return model.BuildRevisions(members), nil
+}
+
+func (s *recorderService) GetOverviewActivity(ctx context.Context, q repository.ActivityQuery) (*model.Activity, error) {
+	if s.overview == nil {
+		return &model.Activity{Buckets: []model.ActivityBucket{}}, nil
+	}
+	if q.Hours < 1 || q.Hours > 168 {
+		q.Hours = 24
+	}
+	return s.overview.Activity(ctx, q)
+}
+
+func (s *recorderService) GetOverviewChanges(ctx context.Context, q repository.ChangesQuery) ([]*model.Change, error) {
+	if s.overview == nil {
+		return nil, nil
+	}
+	q.Limit = clampLimit(q.Limit, 6, 50)
+	return s.overview.Changes(ctx, q)
 }
 
 func (s *recorderService) ListK8sEvents(ctx context.Context, q repository.K8sEventQuery) ([]*model.K8sEvent, error) {

@@ -53,9 +53,27 @@ export interface Invite {
 
 export interface LoginRequest { login: string; password: string; }
 export interface InviteRequest { username: string; role: Role; email?: string; }
+export type AddUserMethod = 'link' | 'password';
+export interface AddUserRequest {
+  username: string;
+  role: Role;
+  method: AddUserMethod;
+  name?: string;
+  email?: string;
+  /** method=password only; omitted = KYMO generates one. */
+  password?: string;
+}
 export interface ProfilePatch { name?: string; email?: string; }
 
 export interface CreatedInvite { id: number; username: string; email: string; role: Role; url: string; expires_at: string; }
+export interface CreatedLinkUser extends CreatedInvite { method: 'link'; }
+export interface CreatedPasswordUser {
+  method: 'password';
+  user: User;
+  /** Present only when KYMO generated the password. */
+  password?: string;
+}
+export type AddUserResult = CreatedLinkUser | CreatedPasswordUser;
 export interface ResetLink { url: string; expires_at: string; }
 
 export interface ApiToken {

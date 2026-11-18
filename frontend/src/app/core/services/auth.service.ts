@@ -5,7 +5,7 @@ import { catchError, map, tap } from 'rxjs/operators';
 
 import { API_BASE } from './container.service';
 import {
-  ApiToken, AuditEvent, AuditQuery, AuthConfig, CreatedInvite, CreatedToken, Invite, InviteRequest, LinkInfo, LoginRequest, MeResponse, ProfilePatch,
+  AddUserRequest, AddUserResult, ApiToken, AuditEvent, AuditQuery, AuthConfig, CreatedInvite, CreatedToken, Invite, InviteRequest, LinkInfo, LoginRequest, MeResponse, ProfilePatch,
   PERMISSION_ROLE, Permission, ROLES, ResetLink, Role, User,
 } from '../models/auth.model';
 
@@ -129,6 +129,10 @@ export class AuthService {
 
   invites(): Observable<Invite[]> {
     return this.http.get<Invite[] | null>(`${this.base}/users/invites`).pipe(orEmpty<Invite>());
+  }
+
+  createUser(body: AddUserRequest): Observable<AddUserResult> {
+    return this.http.post<AddUserResult>(`${this.base}/users`, body);
   }
 
   createInvite(body: InviteRequest): Observable<CreatedInvite> {
