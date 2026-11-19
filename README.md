@@ -1,6 +1,6 @@
 # KYMO
 
-**A flight recorder for Kubernetes workloads.** KYMO keeps the lifecycle history that Kubernetes throws away: starts, stops, crashes, OOM kills, resource usage and error logs, per workload, across rollouts and pod replacements.
+**A black box recorder for Kubernetes workloads.** KYMO keeps the lifecycle history that Kubernetes throws away: starts, stops, crashes, OOM kills, resource usage and error logs, per workload, across rollouts and pod replacements.
 
 [![CI](https://github.com/emirhanusta/kymo/actions/workflows/ci.yml/badge.svg)](https://github.com/emirhanusta/kymo/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
